@@ -103,9 +103,7 @@
 	     (lambda (var (value))
 	       (if (bound? value)
 		   (and (not (equal? value aws/role))
-			(begin (if (ec2/role! value) (set! aws/role value) 
-				   (begin (logwarn |RoleFailed| "Couldn't set EC2 role to " value)
-				     (ec2/role! #f)))
+			(begin (when (ec2/role! value) (set! aws/role value))
 			  #t))
 		   aws/role)))
 
