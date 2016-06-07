@@ -89,6 +89,7 @@
 		  #f))))))
 
 (define (ec2/getrole)
-  (try (basename (get (jsonparse (ec2/data "meta-data/iam/info")) 'instanceprofilearn))
-       #f))
-
+  (let* ((data (ec2/data "meta-data/iam/info"))
+	 (parsed (if (string? data) (jsonparse data) data)))
+    (try (basename (get parsed 'instanceprofilearn))
+	 #f)))
