@@ -248,6 +248,7 @@
 	       content ctype date urlparams)))
 
 (define (headerlist->headers headerlist)
+  (if (string? headerlist) (set! headerlist (list headerlist)))
   (let ((headers (frame-create #f)))
     (dolist (header headerlist)
       (if (and (string? header) (position #\: header))
