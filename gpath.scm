@@ -794,21 +794,24 @@
    #((bol) (spaces* )"@charset " (label charset (not (eol))))})
 
 (define (gp/copy! from (to #f) (opts #f))
-  (let* ((fetched (gp/fetch+ from))
-	 (dest (if to
-		   (if (gp/location? to)
-		       (gp/mkpath to (gp/basename from))
-		       (->gpath to))
-		   (gp/mkpath (getcwd) (gp/basename from))))
-	 (ctype (getopt opts 'ctype (get fetched 'ctype)))
-	 (charset (getopt opts 'charset
-			  (and (exists? ctype) ctype (has-prefix ctype "text/")
-			       (or (get-charset ctype)
-				   (content->charset (get fetched 'content)))))))
-    (gp/save! dest (get fetched 'content) ctype
-	      (if charset
-		  (cons `#[charset ,charset] opts)
-		  opts))))
+  (let ((fetched (gp/fetch+ from)))
+    (if fetched
+	(let* ((dest (if to
+			 (if (gp/location? to)
+			     (gp/mkpath to (gp/basename from))
+			     (->gpath to))
+			 (gp/mkpath (getcwd) (gp/basename from))))
+	       (ctype (getopt opts 'ctype (get fetched 'ctype)))
+	       (charset (getopt opts 'charset
+				(and (exists? ctype) ctype (has-prefix ctype "text/")
+				     (or (get-charset ctype)
+					 (content->charset (get fetched 'content)))))))
+	  (gp/save! dest (get fetched 'content) ctype
+		    (if charset
+			(cons `#[charset ,charset] opts)
+			opts)))
+	(irritant from |GPATH/Not Found| gp/copy!
+		  "The location " (gp/string from) " couldn't be fetched"))))
 
 (define (content->charset content)
   (and (string? content) guess-encoding
