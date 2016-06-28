@@ -56,13 +56,16 @@
 
 (define (ec2/data (prop #f) (version "latest") (error #f))
   (if (not version) (set! version "latest"))
-  (let* ((propinfo (try (get prop-info prop)
-			(if (string? prop) prop
-			    (irritant prop |UnknownProperty| ec2/data))))
+  (let* ((propinfo
+	  (try (get prop-info prop)
+	       (if (string? prop) prop
+		   (tryif prop
+		     (irritant prop |UnknownProperty| ec2/data)))))
 	 (path (tryif (exists? propinfo)
 		 (if (string? propinfo) propinfo
 		     (if (pair? propinfo) (car propinfo)
-			 (get propinfo 'path)))))
+			 (get propinfo 'path)))
+		 ec2-data-endpoints))
 	 (handler (if (pair? propinfo) (cdr propinfo)
 		      (tryif (table? propinfo) (get propinfo 'handler))))
 	 (url (glom ec2-instance-data-root version "/" path))
