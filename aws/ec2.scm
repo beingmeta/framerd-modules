@@ -53,12 +53,13 @@
   (downcase '{customer-gateway dhcp-options image instance internet-gateway network-acl 
 	      network-interface reserved-instances route-table security-group snapshot 
 	      spot-instances-request subnet volume vpc vpn-connection vpn-gateway}))
+
 (define resource-id-prefixes
   (glom (downcase '{i eipalloc sg eni ami vol snap 
 		    subnet vpc rtb igw dopt vpce acl})
     "-"))
 
-(defambda (ec2/filtered action (filters '()) (args #[]) (i 1))
+(defambda (ec2/filtered action resource-typemap (filters '()) (args #[]) (i 1))
   (when (and (odd? (length filters))
 	     (table? (car filters)))
     (let ((init (car filters)))
@@ -85,6 +86,13 @@
 	      (store! args (glom "Filter." i ".Value." (1+ j)) v))
 	    (set! filters (cdr filters))
 	    (set! i (+ i 1)))
+	   ((and typemap (test typemap (gather #((bos) (isalpha+)) (car filters))))
+	    (store! args (glom "Filter." i ".Name") 
+		    (get typemap (gather #((bos) (isalpha+)) (car filters))))
+	    (do-choices (v (car filters) j)
+	      (store! args (glom "Filter." i ".Value." (1+ j)) v))
+	    (set! filters (cdr filters))
+	    (set! i (+ i 1)))
 	   ((position #\. (car filters))
 	    (store! args (car filters) (cadr filters))
 	    (set! filters (cddr filters)))
@@ -100,18 +108,18 @@
   (ec2/op action args))
 
 (define (ec2/instances . filters)
-  (let ((response (ec2/filtered "DescribeInstances" filters)))
+  (let ((response (ec2/filtered "DescribeInstances" #["i" "instance-id"] filters)))
     (deitemize (get (get (get (get response 'reservationset)
 			      'item) 
 			 'instancesset)
 		    'item))))
 
 (define (ec2/images . filters)
-  (let ((response (ec2/filtered "DescribeImages" filters)))
+  (let ((response (ec2/filtered "DescribeImages" #["ami" "image-id"] filters)))
     (deitemize (get (get response 'imagesset) 'item))))
 
 (define (ec2/tags . filters)
-  (let ((response (ec2/filtered "DescribeTags" filters)))
+  (let ((response (ec2/filtered "DescribeTags" #f filters)))
     (deitemize (get (get response 'tagset) 'item))))
 
 (defambda (ec2/tag! ids keyvals)
