@@ -56,40 +56,52 @@
 
 (define (ec2/data (prop #f) (version "latest") (error #f))
   (if (not version) (set! version "latest"))
-  (let* ((propinfo
-	  (try (get prop-info prop)
-	       (if (string? prop) prop
-		   (tryif prop
-		     (irritant prop |UnknownProperty| ec2/data)))))
-	 (path (tryif (exists? propinfo)
-		 (if (string? propinfo) propinfo
-		     (if (pair? propinfo) (car propinfo)
-			 (get propinfo 'path)))
-		 ec2-data-endpoints))
-	 (handler (if (pair? propinfo) (cdr propinfo)
-		      (tryif (table? propinfo) (get propinfo 'handler))))
-	 (url (glom ec2-instance-data-root version "/" path))
-	 (response (urlget url))
-	 (status (get response 'response))
-	 (content (get response '%content))
-	 (type (get response 'content-type)))
-    (debug%watch "EC2/DATA" prop propinfo path handler url type status)
-    (detail%watch "EC2/DATA" response)
-    (if (fail? url) #f
-	(if (= status 200)
-	    (cond ((and (exists? handler) handler) (handler response))
-		  ((equal? type "text/plain")
-		   (if (has-suffix path "/")
-		       (parse-newline-list response)
-		       (if (has-prefix content {"{" "["})
-			   (jsonparse content)
-			   content)))
-		  ((has-prefix content {"{" "["}) (jsonparse content))
-		  (else response))
-	    (if error
-		(irritant response |BadEC2DataResponse| ec2/data)
-		(begin (logwarn |Instance data failed| url " status " status)
-		  #f))))))
+  (if (not prop)
+      (let ((data (frame-create #f)))
+	(for-choices (endpoint ec2-data-endpoints)
+	  (store! data 
+		  (string->symbol
+		   (upcase
+		    (basename
+		     (if (has-suffix endpoint "/") 
+			 (slice endpoint 0 -1)
+			 endpoint))))
+		  (ec2/data endpoint version #f)))
+	data)
+      (let* ((propinfo
+	      (try (get prop-info prop)
+		   (if (string? prop) prop
+		       (tryif prop
+			 (irritant prop |UnknownProperty| ec2/data)))))
+	     (path (tryif (exists? propinfo)
+		     (if (string? propinfo) propinfo
+			 (if (pair? propinfo) (car propinfo)
+			     (get propinfo 'path)))))
+	     (handler (if (pair? propinfo) (cdr propinfo)
+			  (tryif (table? propinfo) (get propinfo 'handler))))
+	     (url (glom ec2-instance-data-root version "/" path))
+	     (response (urlget url))
+	     (status (get response 'response))
+	     (content (get response '%content))
+	     (type (get response 'content-type)))
+	(debug%watch "EC2/DATA" prop propinfo path handler url type status)
+	(detail%watch "EC2/DATA" response)
+	(if (fail? url) #f
+	    (if (= status 200)
+		(cond ((and (exists? handler) handler) (handler response))
+		      ((equal? type "text/plain")
+		       (if (has-suffix path "/")
+			   (parse-newline-list response)
+			   (if (has-prefix content {"{" "["})
+			       (jsonparse content)
+			       content)))
+		      ((not (string? content)) content)
+		      ((has-prefix content {"{" "["}) (jsonparse content))
+		      (else response))
+		(if error
+		    (irritant response |BadEC2DataResponse| ec2/data)
+		    (begin (logwarn |Instance data failed| url " status " status)
+		      #f)))))))
 
 (define (ec2/getrole)
   (let* ((data (ec2/data "meta-data/iam/info"))
