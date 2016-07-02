@@ -2,7 +2,8 @@
 
 (in-module 'fakezip)
 
-;;; Provides access to the Open Library API
+;;; Provides a shim for a libzip C module, especially with support for
+;;; writing uncompressed values (needed for ePub generation)
 
 (use-module '{fdweb texttools ezrecords logger fileio})
 
