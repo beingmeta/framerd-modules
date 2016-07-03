@@ -274,8 +274,8 @@
 	    (else (set! scan (cdr scan)))))
     params))
 
-(define (s3/op op bucket path (opts #f)
-	       (content "") (ctype) (headers '()) . args)
+(defambda (s3/op op bucket path (opts #f)
+		 (content "") (ctype) (headers '()) . args)
   (default! ctype
     (path->mimetype path (if (packet? content) "application" "text")
 		    (getopt opts 'mimetable #f)))
