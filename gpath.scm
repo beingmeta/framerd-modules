@@ -78,12 +78,17 @@
   (when (has-prefix dirpath "file:") (mkdirs (subseq dirpath 5)))
   dirpath)
 
+(defambda (merge-headers . args)
+  (apply append (choice->list (pickstrings (elts args)))
+	 (choice->list (pick (elts args) pair?))))
+
 (define charset-pat #("charset=" (label charset (not> ";"))))
 
 (define (get-charset ctype (opts #f))
   (try (tryif opts (getopt opts 'charset))
        (tryif ctype
-	 (get (text->frames charset-pat ctype) 'charset))))
+	 (get (text->frames charset-pat ctype) 'charset))
+       #f))
 
 (define *default-dirmode* 0x775) ;; rwxrwxr_x
 (varconfig! gpath:dirmode *default-dirmode*)
@@ -129,8 +134,8 @@
     (do-choices dest
       (let ((ctype (or ctype (guess-mimetype content opts)))
 	    (charset (try (or charset (get-charset ctype opts)) #f))
-	    (headers (choice (tryif encoding (glom "Encoding: " encoding))
-			     (getopt opts 'headers {}))))
+	    (headers (merge-headers (tryif encoding (glom "Encoding: " encoding))
+				    (getopt opts 'headers))))
 	(when (and (string? dest) (has-prefix dest {"http:" "https:"}))
 	  (set! dest (try (->s3loc dest) (uri->gpath dest) dest)))
 	(loginfo GP/SAVE! "Saving " (length content)
@@ -152,7 +157,7 @@
 			   (error "Couldn't save to URL" dest req)))
 		       (error "Couldn't save to URL" dest req)))))
 	      ((string? dest) (write-file dest content))
-	      ((s3loc? dest) (s3/write! dest content ctype (qc headers)))
+	      ((s3loc? dest) (s3/write! dest content ctype headers))
 	      ((and (pair? dest) (hashfs? (car dest)))
 	       (hashfs/save! (car dest) (cdr dest) content ctype))
 	      ((and (pair? dest) (hashtable? (car dest)))
