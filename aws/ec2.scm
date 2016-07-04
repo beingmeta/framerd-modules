@@ -59,7 +59,7 @@
 		    subnet vpc rtb igw dopt vpce acl})
     "-"))
 
-(defambda (ec2/filtered action resource-typemap (filters '()) (args #[]) (i 1))
+(defambda (ec2/filtered action idtypemap (filters '()) (args #[]) (i 1))
   (when (and (odd? (length filters))
 	     (table? (car filters)))
     (let ((init (car filters)))
@@ -86,9 +86,10 @@
 	      (store! args (glom "Filter." i ".Value." (1+ j)) v))
 	    (set! filters (cdr filters))
 	    (set! i (+ i 1)))
-	   ((and typemap (test typemap (gather #((bos) (isalpha+)) (car filters))))
+	   ((and idtypemap 
+		 (test idtypemap (gather #((bos) (isalpha+)) (car filters))))
 	    (store! args (glom "Filter." i ".Name") 
-		    (get typemap (gather #((bos) (isalpha+)) (car filters))))
+		    (get idtypemap (gather #((bos) (isalpha+)) (car filters))))
 	    (do-choices (v (car filters) j)
 	      (store! args (glom "Filter." i ".Value." (1+ j)) v))
 	    (set! filters (cdr filters))
