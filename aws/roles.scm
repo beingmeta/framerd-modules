@@ -103,7 +103,7 @@
 (config-def! 'aws:role
 	     (lambda (var (value))
 	       (if (bound? value)
-		   (and (not (overlaps? (segment value "|") (segment aws/role "|")))
+		   (and (not (overlaps? (and value (segment value "|")) (and aws/role (segment aws/role "|"))))
 			(begin (unless (ec2/role! value) 
 				 (logwarn |RoleFailed| "Couldn't set role to " value))
 			  #t))
