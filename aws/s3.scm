@@ -248,6 +248,7 @@
 	       content ctype date urlparams)))
 
 (define (headerlist->headers headerlist)
+  (if (string? headerlist) (set! headerlist (list headerlist)))
   (let ((headers (frame-create #f)))
     (dolist (header headerlist)
       (if (and (string? header) (position #\: header))
@@ -273,8 +274,8 @@
 	    (else (set! scan (cdr scan)))))
     params))
 
-(define (s3/op op bucket path (opts #f)
-	       (content "") (ctype) (headers '()) . args)
+(defambda (s3/op op bucket path (opts #f)
+		 (content "") (ctype) (headers '()) . args)
   (default! ctype
     (path->mimetype path (if (packet? content) "application" "text")
 		    (getopt opts 'mimetable #f)))

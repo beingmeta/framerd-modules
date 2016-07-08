@@ -78,12 +78,17 @@
   (when (has-prefix dirpath "file:") (mkdirs (subseq dirpath 5)))
   dirpath)
 
+(defambda (merge-headers . args)
+  (apply append (choice->list (pickstrings (elts args)))
+	 (choice->list (pick (elts args) pair?))))
+
 (define charset-pat #("charset=" (label charset (not> ";"))))
 
 (define (get-charset ctype (opts #f))
   (try (tryif opts (getopt opts 'charset))
        (tryif ctype
-	 (get (text->frames charset-pat ctype) 'charset))))
+	 (get (text->frames charset-pat ctype) 'charset))
+       #f))
 
 (define *default-dirmode* 0x775) ;; rwxrwxr_x
 (varconfig! gpath:dirmode *default-dirmode*)
@@ -95,16 +100,18 @@
 
 ;;; Writing to a gpath
 
-(defambda (gp/write! saveto name content (ctype #f) (charset #f) (opts #f))
+(defambda (gp/write! saveto name content (ctype #f) (charset #f) (opts #f) (encoding #f))
   (when (and ctype (table? ctype) (not opts))
     (set! opts ctype) (set! ctype #f))
   (when (and charset (table? charset) (not opts))
     (set! opts charset) (set! charset #f))
+  (unless encoding 
+    (set! encoding (getopt opts 'encoding (path->encoding name))))
   (do-choices name
     (let ((ctype (or ctype (guess-mimetype (get-namestring name) content opts)))
 	  (charset (or charset (get-charset ctype opts))))
       ;; Do any charset conversion required by the CTYPE
-      (when (and charset
+      (when (and charset (not encoding)
 		 (string? content)
 		 (not (overlaps? (downcase charset) {"utf8" "utf-8"})))
 	(set! content (packet->string (string->packet content) charset)))
@@ -116,15 +123,19 @@
 	  (if (pair? gpath) (cdr gpath)
 	      ""))))
 
-(defambda (gp/save! dest content (ctype #f) (charset #f) (opts #f))
+(defambda (gp/save! dest content (ctype #f) (charset #f) (opts #f) (encoding #f))
   (when (and ctype (table? ctype) (not opts))
     (set! opts ctype) (set! ctype #f))
   (when (and charset (table? charset) (not opts))
     (set! opts charset) (set! charset #f))
+  (unless encoding 
+    (set! encoding (getopt opts 'encoding (path->encoding  (get-namestring dest)))))
   (if (exists? content)
     (do-choices dest
-      (let ((ctype (or ctype (guess-mimetype (get-namestring dest) content opts)))
-	    (charset (try (or charset (get-charset ctype opts)) #f)))
+      (let ((ctype (or ctype (guess-mimetype content opts)))
+	    (charset (try (or charset (get-charset ctype opts)) #f))
+	    (headers (merge-headers (tryif encoding (glom "Encoding: " encoding))
+				    (getopt opts 'headers))))
 	(when (and (string? dest) (has-prefix dest {"http:" "https:"}))
 	  (set! dest (try (->s3loc dest) (uri->gpath dest) dest)))
 	(loginfo GP/SAVE! "Saving " (length content)
@@ -138,15 +149,15 @@
 		   (not (overlaps? (downcase charset) {"utf8" "utf-8"})))
 	  (set! content (packet->string (string->packet content) charset)))
 	(cond ((and (string? dest) (string-starts-with? dest {"http:" "https:"}))
-	       (let ((req (urlput dest content ctype `#[METHOD PUT])))
+	       (let ((req (urlput dest content ctype `#[METHOD PUT HEADERS ,headers])))
 		 (unless (response/ok? req)
 		   (if (response/badmethod? req)
-		       (let ((req (urlput dest content ctype `#[METHOD POST])))
+		       (let ((req (urlput dest content ctype `#[METHOD POST HEADERS ,headers])))
 			 (unless (response/ok? req)
 			   (error "Couldn't save to URL" dest req)))
 		       (error "Couldn't save to URL" dest req)))))
 	      ((string? dest) (write-file dest content))
-	      ((s3loc? dest) (s3/write! dest content ctype))
+	      ((s3loc? dest) (s3/write! dest content ctype headers))
 	      ((and (pair? dest) (hashfs? (car dest)))
 	       (hashfs/save! (car dest) (cdr dest) content ctype))
 	      ((and (pair? dest) (hashtable? (car dest)))
@@ -158,7 +169,7 @@
 	      ((and (pair? dest)
 		    (s3loc? (car dest))
 		    (string? (cdr dest)))
-	       (s3/write! (s3/mkpath (car dest) (cdr dest)) content ctype))
+	       (s3/write! (s3/mkpath (car dest) (cdr dest)) content ctype (qc headers)))
 	      ((and havezip (pair? dest)
 		    (zipfile? (car dest))
 		    (string? (cdr dest)))
@@ -358,11 +369,13 @@
 		(apply gp/subpath result (cdr more)))
 	    (apply gp/subpath result (car more) (cdr more))))))
 
-(define (gp/fetch ref (ctype #f) (opts #f))
+(define (gp/fetch ref (ctype #f) (opts #f) (encoding #f))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
   (unless ctype (set! ctype (guess-mimetype (get-namestring ref) #f opts)))
+  (unless encoding 
+    (set! encoding (getopt opts 'encoding (path->encoding (get-namestring ref)))))
   (loginfo |GP/FETCH| ref " expecting " ctype " given " (pprint opts))
   (cond ((s3loc? ref) (s3/get ref))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
@@ -388,8 +401,8 @@
 	 (irritant ref |Bad gpath scheme|))
 	((and (string? ref) (not (file-exists? (abspath ref)))) #f)
 	((string? ref)
-	 (if  (and ctype
-		   (or (has-prefix ctype "text")
+	 (if  (and ctype (not encoding)
+		   (or (mimetype/text? ctype)
 		       (textsearch #{"xml" "json"} ctype)))
 	      (filestring (abspath ref)
 			  (or (and ctype (ctype->charset ctype)) "auto"))
@@ -441,11 +454,13 @@
 				    (cons url err)))))
 	    response))))
 
-(define (gp/fetch+ ref (ctype #f) (opts #f))
+(define (gp/fetch+ ref (ctype #f) (opts #f) (encoding #f))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
   (unless ctype (set! ctype (guess-mimetype (get-namestring ref) #f opts)))
+  (unless encoding 
+    (set! encoding (getopt opts 'encoding (path->encoding (get-namestring ref)))))
   (loginfo |GP/FETCH+| ref " expecting " ctype " given " (pprint opts))
   (cond ((s3loc? ref) (s3/get+ ref))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
@@ -492,7 +507,7 @@
 	((and (string? ref) (not (file-exists? (abspath ref)))) #f)
 	((string? ref)
 	 (let* ((ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
-		(istext (and ctype (has-prefix ctype "text")))
+		(istext (and ctype (has-prefix ctype "text") (not encoding)))
 		(charset (and istext (ctype->charset ctype)))
 		(content (if istext (filestring (abspath ref) charset)
 			     (filedata (abspath ref)))))
@@ -503,11 +518,13 @@
 	      modified ,(file-modtime ref)]))
 	(else (error "Weird GPATH ref" ref))))
 
-(define (gp/info ref (etag #t) (ctype #f) (opts #f))
+(define (gp/info ref (etag #t) (ctype #f) (opts #f) (encoding #f))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
   (unless ctype (set! ctype (guess-mimetype (get-namestring ref) #f opts)))
+  (unless encoding 
+    (set! encoding (getopt opts 'encoding (path->encoding (get-namestring ref)))))
   (loginfo |GP/INFO| ref " expecting " ctype " given " (pprint opts))
   (cond ((s3loc? ref) (s3/info ref))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
@@ -551,7 +568,7 @@
 	((string? ref)
 	 (let* ((ref (abspath ref))
 		(ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
-		(istext (and ctype (has-prefix ctype "text")))
+		(istext (and ctype (mimetype/text? ctype) (not encoding)))
 		(charset (and istext (ctype->charset ctype))))
 	   (frame-create #f
 	     'path (gpath->string ref) 'ctype (or ctype {})
@@ -782,21 +799,24 @@
    #((bol) (spaces* )"@charset " (label charset (not (eol))))})
 
 (define (gp/copy! from (to #f) (opts #f))
-  (let* ((fetched (gp/fetch+ from))
-	 (dest (if to
-		   (if (gp/location? to)
-		       (gp/mkpath to (gp/basename from))
-		       (->gpath to))
-		   (gp/mkpath (getcwd) (gp/basename from))))
-	 (ctype (getopt opts 'ctype (get fetched 'ctype)))
-	 (charset (getopt opts 'charset
-			  (and (exists? ctype) ctype (has-prefix ctype "text/")
-			       (or (get-charset ctype)
-				   (content->charset (get fetched 'content)))))))
-    (gp/save! dest (get fetched 'content) ctype
-	      (if charset
-		  (cons `#[charset ,charset] opts)
-		  opts))))
+  (let ((fetched (gp/fetch+ from)))
+    (if fetched
+	(let* ((dest (if to
+			 (if (gp/location? to)
+			     (gp/mkpath to (gp/basename from))
+			     (->gpath to))
+			 (gp/mkpath (getcwd) (gp/basename from))))
+	       (ctype (getopt opts 'ctype (get fetched 'ctype)))
+	       (charset (getopt opts 'charset
+				(and (exists? ctype) ctype (has-prefix ctype "text/")
+				     (or (get-charset ctype)
+					 (content->charset (get fetched 'content)))))))
+	  (gp/save! dest (get fetched 'content) ctype
+		    (if charset
+			(cons `#[charset ,charset] opts)
+			opts)))
+	(irritant from |GPATH/Not Found| gp/copy!
+		  "The location " (gp/string from) " couldn't be fetched"))))
 
 (define (content->charset content)
   (and (string? content) guess-encoding
