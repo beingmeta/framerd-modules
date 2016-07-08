@@ -71,14 +71,15 @@
       (let ((success #f))
 	(loginfo |EC2SearchRoles| "Searching roles " role)
 	(dolist (role (segment role "|"))
-	  (unless success (set! success (ec2/role! role))))
+	  (unless success (if (ec2/role! role) (set! success role))))
+	(when success (set! aws/role success))
 	success)
       (if (and aws:secret (not aws:token))
 	  (begin
 	    (logwarn |EC2KeepingCredentials|
 	      "Keeping existing AWS credentials with key " aws:key)
 	    (set! aws/role role)
-	    #t)
+	    role)
 	  (let* ((creds (try (ec2/credentials role error) #f)))
 	    (unless creds
 	      (loginfo |AWS/ROLE| "Couldn't get credentials for " role))
@@ -97,14 +98,15 @@
 			      (get creds 'aws:token)
 			      (get creds 'aws:expires)
 			      (lambda args (ec2/role! role))))
-	    (and creds aws:key)))))
+	    (and creds aws:key role)))))
 
 (config-def! 'aws:role
 	     (lambda (var (value))
 	       (if (bound? value)
-		   (and (not (equal? value aws/role))
-			(begin (if (ec2/role! value) (set! aws/role value)
-				   (logwarn |RoleFailed| "Couldn't set role to " value))
+		   (and (not (overlaps? (segment value "|") (segment aws/role "|")))
+			(begin (unless (ec2/role! value) 
+				 (logwarn |RoleFailed| "Couldn't set role to " value))
 			  #t))
 		   aws/role)))
+
 
