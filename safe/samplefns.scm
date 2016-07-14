@@ -8,6 +8,7 @@
 (module-export! '{fibr fibi fibix fibflt factr facti slowfib})
 (module-export! '{ack tak takflt})
 (module-export! 'spectral-norm)
+(module-export! 'square)
 
 ;;; Fibonacci
 
@@ -103,3 +104,6 @@
   (sleep (or wait n))
   (fibi n))
 
+;;; Real simple
+
+(define (square n) (* n n))
