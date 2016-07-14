@@ -147,6 +147,10 @@ table.backtrace > tbody > tr.irritant > th {
     font-size: 90%; color: red;}
 table.backtrace > tbody > tr > td {
     text-align: left; padding-top: 2px;}
+table.backtrace > tbody > tr > td .module {
+    float: right; font-size: 75%;
+    margin-right: 0.5ex; margin-left: 1em;
+    color: blue;}
 table.backtrace > tbody.eval td.expr {
     background-color: white; color: black;}
 table.backtrace > tbody.eval td.expr .focus { color: blue; }
@@ -169,7 +173,8 @@ table.backtrace.expandall > tbody.eval td.expr span.focus {
 tbody.bindings span.var {
     font-weight: bold;
     font-family: sans-serif;
-    text-decoration: underline;}
+    text-decoration: underline;
+    padding-left: 1ex;}
 table.backtrace > tbody.bindings > tr { display: none; }
 table.backtrace > tbody.bindings.expanded > tr,
 table.backtrace.expandall > tbody.bindings.expanded > tr,
