@@ -9,7 +9,8 @@
 (module-export!
  '{olib
    olib/ref olib/import olib/fetch olib/parse olib? olib-key
-   olib/query olib/q olib/q+ olib/bibref olib/id olib/key
+   olib/query olib/q olib/q+  olib/id olib/key
+   olib/bibref olib/bibinfo
    olib/image olib/imageurl olib/refurl
    olib/getauthor
    olib/get olib/string})
@@ -214,17 +215,31 @@
       
 ;;; Getting REFS from bibliographic information
 
+(define olid-pat
+  #("http" {"s" ""} "://openlibrary.org/books/"
+    (label OLID #("OL" (not> "/"))) "/" (rest)))
+
 (define (olib/bibref type (val #f))
-  (let* ((bibkey (if val (stringout type ":" val) type))
+  (let* ((bibkey (if val (stringout (upcase type) ":" val) type))
 	 (uri (stringout "http://openlibrary.org/api/books?bibkeys="
-			 bibkey "&details=true&callback=callback"))
+		bibkey "&details=true&format=json"))
 	 (req (urlget uri)))
     (if (test req 'response 200)
-	(let* ((content (get req '%content))
-	       (cbstart (search "callback(" content))
-	       (parsed (and cbstart (jsonparse (subseq content (+ cbstart 9))))))
-	  (tryif parsed
-	    (olib/ref (get (get (get parsed bibkey) "details") "key"))))
+	(olib/ref
+	 (get (text->frame 
+	       olid-pat
+	       (get (get (jsonparse (get req '%content) #f) bibkey)
+		    "info_url"))
+	      'olid))
+	(error "Bad server response to " (write uri) ":\n\t" req))))
+
+(define (olib/bibinfo type (val #f))
+  (let* ((bibkey (if val (stringout type ":" val) type))
+	 (uri (stringout "http://openlibrary.org/api/books?bibkeys="
+		bibkey "&format=json&jscmd=data"))
+	 (req (urlget uri)))
+    (if (test req 'response 200)
+	(jsonparse (get req '%content))
 	(error "Bad server response to " (write uri) ":\n\t" req))))
 
 
