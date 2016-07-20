@@ -2,11 +2,11 @@
 
 (in-module 'librarything)
 
-;;; Provides access to the Open Library API
+;;; Provides access to the LibraryThing API
 
 (use-module '{fdweb varconfig texttools ezrecords parsetime logger})
 
-(module-export! '{lt/call lt/minimize lt/nohistory})
+(module-export! '{lt/call lt/minimize lt/nohistory lt/getwork})
 
 (define-init %loglevel %notice%)
 
@@ -35,6 +35,9 @@
 	  (store! item (string->lisp (get field 'name)) (get field 'value))))
       (drop! item 'commonknowledge))
     items))
+(define (lt/getwork . args)
+  (apply lt/get "getwork" args))
+
 (define (lt/minimize item)
   (drop! item 'fields)
   item)
