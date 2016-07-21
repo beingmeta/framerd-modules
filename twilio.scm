@@ -13,11 +13,38 @@
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567")
 (varconfig! twilio:sid default-sid)
 
+(define-init api-key
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567")
+(varconfig! twilio:apikey api-key)
+
+(define-init api-secret
+  #"ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567")
+(varconfig! twilio:apisecret api-secret)
+
 (define-init default-from "+16175551212")
 (varconfig! twilio:from default-from)
 
 (define-init default-auth "abcdefghijklmnopqrstuvwxyz012345")
 (varconfig! twilio:auth default-auth)
+
+(define (get-basic-auth opts)
+  (let ((username #f) (password #f))
+    (cond ((getopt opts 'apikey)
+	   (set! username (getopt opts 'apikey))
+	   (set! password (getopt opts 'apisecret)))
+	  ((getopt opts 'sid)
+	   (set! username (getopt opts 'sid))
+	   (set! password (getopt opts 'auth)))
+	  (api-key
+	   (set! username api-key)
+	   (set! password api-secret))
+	  (default-sid
+	    (set! username default-sid)
+	    (set! password default-auth)))
+    (if (and username password)
+	(glom username ":" password)
+	(error |No Credentials| get-basic-auth
+	       "Couldn't get TWILIO auth credentials"))))
 
 (define (twilio/send string opts)
   (loginfo "Sending " (write string) " to " opts)
@@ -27,9 +54,7 @@
 		     "/Messages"))
 	 (to (getopt opts 'to))
 	 (from (getopt opts 'from default-from))
-	 (req (urlpost endpoint 
-		       `#[basicauth ,(glom (getopt opts 'sid default-sid) ":"
-				       (getopt opts 'auth default-auth))]
+	 (req (urlpost endpoint `#[basicauth ,(get-basic-auth opts)]
 		       "From" from
 		       "To" to
 		       "Body" string))
