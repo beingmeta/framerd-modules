@@ -13,12 +13,10 @@
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567")
 (varconfig! twilio:sid default-sid)
 
-(define-init api-key
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567")
+(define-init api-key #f)
 (varconfig! twilio:apikey api-key)
 
-(define-init api-secret
-  #"ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567")
+(define-init api-secret #f)
 (varconfig! twilio:apisecret api-secret)
 
 (define-init default-from "+16175551212")
