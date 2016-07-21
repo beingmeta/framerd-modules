@@ -7,7 +7,9 @@
 
 (use-module 'logger)
 
-(module-export! '{logctl! set-loglevel!})
+(module-export! '{logctl! set-loglevel!
+		  logdebug! loginfo! logdetail! lognotice!
+		  logreset!})
 
 (define-init saved-levels {})
 (define-init levels {})
@@ -51,6 +53,13 @@
   (unless level
     (store! mod '%loglevel (get saved-levels id))
     (record-loglevel! id (get saved-levels id))))
+
+(define (logdeluge! id) (logctl! id %deluge%))
+(define (logdetail! id) (logctl! id %detail%))
+(define (logdebug! id) (logctl! id %debug%))
+(define (loginfo! id) (logctl! id %info%))
+(define (lognotice! id) (logctl! id %notice%))
+(define (logreset! id) (logctl! id #f))
 
 (define (logctl-config var (val))
   (if (not (bound? val)) levels
