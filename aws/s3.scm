@@ -456,6 +456,7 @@
 		s3scheme)))
   (unless (has-suffix scheme "://") (set! scheme (fix-scheme scheme)))
   (info%watch "SIGNEDURI" op bucket path scheme expires headers usepath)
+  (aws/checkok opts)
   (let* ((endpoint (if usepath
 		       (glom scheme s3root "/" bucket path)
 		       (glom scheme bucket "." s3root path)))
