@@ -3,7 +3,7 @@
 
 (in-module 'aws/roles)
 
-(use-module '{fdweb texttools mimetable regex logctl
+(use-module '{fdweb texttools mimetable regex logctl opts
 	      ezrecords rulesets logger varconfig})
 (use-module '{aws aws/v4 aws/ec2data})
 (define %used_modules '{aws varconfig ezrecords rulesets})
@@ -63,6 +63,50 @@
 	result)))
 
 (define (ec2/rolecreds (role aws/role)) (get-credentials role))
+
+(define (ec2/use-role! (role #f) (opts #f) (version "latest") (error #f))
+  (if (not version) (set! version "latest"))
+  (when (not role) (set! role (ec2/getrole)))
+  (if (position #\| role)
+      (let ((success #f))
+	(loginfo |EC2SearchRoles| "Searching roles " role)
+	(dolist (role (segment role "|"))
+	  (unless success 
+	    (if (ec2/use-role! role opts)
+		(set! success role))))
+	(when success 
+	  (if (and opts (exists? (opt/find opts 'aws:key)))
+	      (store! (opt/find opts 'aws:key) 'aws:role success)
+	      (set! aws/role success)))
+	success)
+      (if (and aws:secret (not aws:token))
+	  (begin
+	    (logwarn |EC2KeepingCredentials|
+	      "Keeping existing AWS credentials with key " aws:key)
+	    (if (and opts (exists? (opt/find opts 'aws:key)))
+		(store! (opt/find opts 'aws:key) 'aws:role role)
+		(set! aws/role role))
+	    role)
+	  (let* ((creds (try (ec2/credentials role error) #f)))
+	    (unless creds
+	      (loginfo |AWS/ROLE| "Couldn't get credentials for " role))
+	    (when creds
+	      (if (test creds 'aws:expires)
+		  (lognotice |AWS/ROLE|
+		    "==" role "== with key " (get creds 'aws:key) " and "
+		    "token expiring in "
+		    (secs->string (difftime (get creds 'aws:expires)))
+		    " @"  (get creds 'aws:expires))
+		  (lognotice |AWS/ROLE|
+		    role " with key=" (get creds 'aws:key) ", no expiration"))
+	      (set! aws/role role)
+	      (aws/update-creds! opts
+				 (get creds 'aws:key)
+				 (->secret (get creds 'aws:secret))
+				 (try (get creds 'aws:token) #f)
+				 (try (get creds 'aws:expires) #f)
+				 (lambda args (ec2/role! role))))
+	    (and creds aws:key role)))))
 
 (define (ec2/role! (role #f) (version "latest") (error #f))
   (if (not version) (set! version "latest"))

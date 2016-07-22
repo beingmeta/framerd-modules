@@ -4,7 +4,7 @@
 ;;; Core file for accessing Amazon Web Services
 (in-module 'aws)
 
-(use-module '{logger texttools fdweb})
+(use-module '{logger opts texttools fdweb})
 
 (define-init %loglevel %notice%)
 
@@ -15,7 +15,8 @@
 (module-export! 
  '{aws:account aws:key aws:secret aws:token aws:expires 
    aws/ok? aws/checkok aws/set-creds! aws/creds!
-   aws/datesig aws/datesig/head})
+   aws/datesig aws/datesig/head
+   aws/update-creds!})
 
 ;; Default (non-working) values from the environment
 (define-init aws:secret
@@ -89,6 +90,16 @@
   (set! aws:token token)
   (set! aws:expires expires)
   (set! aws/refresh refresh))
+
+(define (aws/update-creds! opts key secret (token #f) (expires #f) (refresh #f))
+  (if (or (not opts) (not (getopt opts 'aws:key)))
+      (aws/set-creds! key secret token expires refresh)
+      (let ((found (opt/find opts 'aws:key)))
+	(store! found 'aws:key key)
+	(store! found 'aws:secret secret)
+	(when token (store! found 'aws:token token))
+	(when expires (store! found 'aws:expires expires))
+	(when refresh (store! found 'aws/refresh refresh)))))
 
 (define (aws/creds! arg)
   (if (not arg)
