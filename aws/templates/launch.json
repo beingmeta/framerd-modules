@@ -1,0 +1,23 @@
+{
+    "KeyName": "{{keyname|May2016}}",
+    "ImageId": "{{ami|ami-cf68e0d8}}",
+    "UserData": "{{userdata|}}",
+    "MinCount": 1, 
+    "SecurityGroupIds": [
+        "{{security-id|sg-e2775586}}"
+    ], 
+    "InstanceType": "{{type|t2.micro}}", 
+    "Placement": {
+        "AvailabilityZone": "{{zone|us-east-1e}}"
+    }, 
+    "Monitoring": {
+        "Enabled": false
+    }, 
+    "SubnetId": "{{subnet-id|subnet-1f1cde34}}", 
+    "DisableApiTermination": false, 
+    "IamInstanceProfile": {
+        "Arn":
+	"{{role|arn:aws:iam::206027209718:instance-profile/beingmeta}}"}, 
+    "EbsOptimized": false
+
+}

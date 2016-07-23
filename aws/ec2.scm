@@ -50,9 +50,12 @@
 	(irritant (cons response req) |EC2 Error|))))
 
 (define resource-types
-  (downcase '{customer-gateway dhcp-options image instance internet-gateway network-acl 
-	      network-interface reserved-instances route-table security-group snapshot 
-	      spot-instances-request subnet volume vpc vpn-connection vpn-gateway}))
+  (downcase
+   '{customer-gateway dhcp-options image instance
+     internet-gateway network-acl network-interface
+     reserved-instances route-table security-group snapshot 
+     spot-instances-request subnet volume vpc 
+     vpn-connection vpn-gateway}))
 
 (define resource-id-prefixes
   (glom (downcase '{i eipalloc sg eni ami vol snap 

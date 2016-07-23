@@ -4,7 +4,7 @@
 ;;; Core file for accessing Amazon Web Services
 (in-module 'aws)
 
-(use-module '{logger opts texttools fdweb})
+(use-module '{logger opts texttools fdweb gpath varconfig})
 
 (define-init %loglevel %notice%)
 
@@ -15,8 +15,13 @@
 (module-export! 
  '{aws:account aws:key aws:secret aws:token aws:expires 
    aws/ok? aws/checkok aws/set-creds! aws/creds!
-   aws/datesig aws/datesig/head
+   aws/datesig aws/datesig/head aws/template
    aws/update-creds!})
+
+;;; Templates source
+(define template-sources
+  (list (dirname (get-component "templates/template.json"))))
+(varconfig! aws:templates template-sources #f cons)
 
 ;; Default (non-working) values from the environment
 (define-init aws:secret
@@ -127,6 +132,26 @@
 			#f)
 	creds)))
 
+;;;; Getting JSON templates for AWS APIs
 
-
-
+(define (aws/template arg)
+  (if (table? arg) arg
+      (if (symbol? arg)
+	  (if (string? (config arg))
+	      (jsonparse (config arg))
+	      (let ((found #f)
+		    (name (glom (downcase arg) ".json")))
+		(dolist (root template-sources)
+		  (unless found
+		    (when (gp/exists? (gp/mkpath root name))
+		      (set! found (gp/mkpath root name)))))
+		(if found
+		    (jsonparse (gp/fetch found))
+		    (irritant ARG |TemplateReference| aws/template
+			      "Couldn't resolve template"))))
+	  (if (string? arg)
+	      (if (textsearch #{"{" "[" "\n"} arg)
+		  (jsonparse arg))
+	      (if (gp/exists? arg)
+		  (jsonparse (gp/fetch arg))
+		  (irritant ARG |Template| aws/template))))))
