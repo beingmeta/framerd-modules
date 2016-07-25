@@ -80,9 +80,7 @@
   (unless (position #\% endpoint)
     (set! endpoint (encode-uri endpoint)))
   (debug%watch req endpoint args headers date)
-  (do-choices (key (getkeys args))
-    (add! req key (get args key))
-    (add! req '%params key))
+  (process-args args req)
   (do-choices (key (getkeys headers))
     (unless (hashset-get hdrset (downcase key))
       (hashset-add! hdrset (downcase key))
@@ -140,9 +138,19 @@
   (add! args "AWSAccessKeyId"
 	(getopt req 'aws:key (getopt opts 'aws:key aws:key)))
   (add! args "Timestamp" (get date 'isobasic))
-  (do-choices (key (getkeys args))
-    (add! req key (get args key))
-    (add! req '%params key))
+  (process-args args req)
+  (when (getopt opts 'accept)
+    (let ((curslot (intersection (getkeys headers)
+				 '{accept "Accept" "accept"})))
+      (if (exists? curslot)
+	  (store! headers curslot
+		  (stringout (get headers curslot)  
+		    (do-choices (type (getopt opts 'accept))
+		      (printout "," type))))
+	  (store! headers 'accept
+		  (stringout (get headers curslot)  
+		    (do-choices (type (getopt opts 'accept))
+		      (printout "," type)))))))
   (do-choices (key (getkeys headers))
     (unless (hashset-get hdrset (downcase key))
       (hashset-add! hdrset (downcase key))
@@ -204,6 +212,26 @@
 		    "\nop=" op "\nendpoint=" endpoint ", "
 		    "\nurl=" url "\ncurl=" curl)
 	  (cons result req)))))
+
+(define (process-args args req)
+  (do-choices (key (getkeys args))
+    (if (and (string? key) (has-suffix key "*"))
+	(let ((values (get args key))
+	      (base (glom (slice key 0 -1) ".")))
+	  (cond ((ambiguous? values)
+		 (do-choices (val values i)
+		   (add! req (glom base (1+ i)) val)
+		   (add! req '%params (glom base (1+ i)))))
+		((or (vector? values) (list? values))
+		 (doseq (val values i)
+		   (add! req (glom base (1+ i)) val)
+		   (add! req '%params (glom base (1+ i)))))
+		(else (add! req (glom base 1) val)
+		      (add! req '%params (glom base 1)))))
+	(begin
+	  (add! req key (get args key))
+	  (add! req '%params key))))
+  req)
 
 ;;; GENERATING KEYS, ETC
 
