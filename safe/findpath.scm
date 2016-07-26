@@ -3,7 +3,9 @@
 
 (in-module 'findpath)
 
-(module-export '{find-path find-paths})
+(module-export! '{find-path find-paths
+		  ;; Have aliases which agree with the module name
+		  findpath findpaths })
 
 (defambda (find-path obj . path)
   (if (null? path) obj
@@ -40,3 +42,5 @@
 		      (apply find-paths elt path))))))))))))
 
 
+(defambda (findpath . args) (apply find-path args))
+(defambda (findpaths . args) (apply find-paths args))
