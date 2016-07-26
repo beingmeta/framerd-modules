@@ -3,13 +3,20 @@
 
 (in-module 'aws/ec2)
 
-(use-module '{aws aws/v4 fdweb texttools mimetable regex logctl
-	      ezrecords rulesets logger findpath varconfig})
-(define %used_modules '{aws varconfig ezrecords rulesets})
+(use-module '{logger logctl})
+(define %loglevel %notify%)
+
+(use-module '{fdweb texttools mimetable regex 
+	      findpath gpath varconfig})
+(use-module '{aws aws/v4})
+
+;; Don't issue warnings for these packages when being persnickety
+(define %used_modules '{aws varconfig})
 
 (module-export! '{ec2/op ec2/filtered
-		  ec2/instances ec2/images ec2/tags
-		  ec2/run ec2/tag!})
+		  ec2/instances ec2/images 
+		  ec2/run! ec2/stop! ec2/terminate!
+		  ec2/tags ec2/tag!})
 
 (define action-methods
   #["DescribeInstances" "GET"])
@@ -36,18 +43,22 @@
     (drop! into '{%xmltag %qname}))
   into)
 
-(define (ec2/op action (args #[]) (req #[]))
+(define (ec2/op action (args #[]) (opts #f) (req #[]))
   (store! args "Action" action)
   (store! args "Version" "2015-10-01")
   (let* ((method (getopt req 'method
 			 (try (get action-methods action)
 			      "GET")))
 	 (response
-	  (aws/v4/op req method "https://ec2.amazonaws.com/" #f
+	  (aws/v4/op req method "https://ec2.amazonaws.com/" opts
 		     args)))
     (if (>= 299 (getopt response 'response) 200)
 	(reject (elts (xmlparse (getopt response '%content) 'data)) string?)
-	(irritant (cons response req) |EC2 Error|))))
+	(irritant (cons (if (and (pair? response) (null? (cdr response)))
+			    (car response)
+			    response)
+			req)
+		  |EC2 Error|))))
 
 (define resource-types
   (downcase
@@ -62,7 +73,7 @@
 		    subnet vpc rtb igw dopt vpce acl})
     "-"))
 
-(defambda (ec2/filtered action idtypemap (filters '()) (args #[]) (i 1))
+(defambda (ec2/filtered action idtypemap (filters '()) (args #[]) (opts #f) (i 1))
   (when (and (odd? (length filters))
 	     (table? (car filters)))
     (let ((init (car filters)))
@@ -109,7 +120,7 @@
 	      (store! args (glom "Filter." i ".Value." (1+ j)) v))
 	    (set! i (+ i 1))
 	    (set! filters (cddr filters)))))
-  (ec2/op action args))
+  (ec2/op action args opts))
 
 (define (ec2/instances . filters)
   (let ((response (ec2/filtered 
@@ -131,18 +142,18 @@
   (let ((response (ec2/filtered "DescribeTags" #f filters)))
     (deitemize (get (get response 'tagset) 'item))))
 
-(defambda (ec2/tag! ids keyvals)
+(defambda (ec2/tag! ids keyvals (opts #f))
   (let ((args #[]) (j 1))
     (do-choices (id ids i)
-      (if (string? id)
-	  (store! args (glom "ResourceId." (1+ i)) id)
-	  (store! args (glom "ResourceId." (1+ i)) id)))
+      ;; Are non-string keys okay here?
+      (store! args (glom "ResourceId." (1+ i)) id))
     (do-choices (keyval keyvals)
       (do-choices (key (getkeys keyval))
 	(do-choices (value (get keyval key))
 	  (store! args (glom "Tag." j ".Key") key)
-	  (store! args (glom "Tag." j ".Value") value))))
-    (ec2/op "CreateTags" args)))
+	  (store! args (glom "Tag." j ".Value") value)
+	  (set! j (1+ j)))))
+    (ec2/op "CreateTags" args opts)))
 
 ;;;; EC2/RUN
 
@@ -161,8 +172,8 @@
 (define default-profile {})
 (varconfig! ec2:profile default-profile)
 
-(define (ec2/run args (req #[]))
-  (let* ((spec 
+(define (ec2/run! args (req #[]) (opts #f))
+  (let* ((call
 	  (frame-create #f
 	    "DryRun" (getopt args 'dryrun {})
 	    "EbsOptimized" (getopt args 'ebsopt #f)
@@ -170,13 +181,13 @@
 	    "IamInstanceProfile" (lookup-profile (getopt args 'profile "*"))
 	    "ImageId" (try (pick (getopt args 'ami {}) has-prefix "ami-")
 			   (lookup-image (getopt args 'ami #f)))
-	    "InstanceType" (geotpt args 'type default-instance-type)
-	    "KeyName" (geotpt args 'keyname {})
+	    "InstanceType" (getopt args 'type default-instance-type)
+	    "KeyName" (getopt args 'keyname {})
 	    "Monitoring" (getopt args 'monitoring {})
 	    "SecurityGroupId*" (pick (getopt args 'security {}) has-prefix "sg-")
 	    "SecurityGroup*" (reject (getopt args 'security {}) has-prefix "sg-")
 	    "MinCount" (getopt args 'count 1)
-	    "MaxCount" (getopt args 'maxcount {})
+	    "MaxCount" (getopt args 'maxcount (getopt args 'count 1))
 	    "ClientToken" (getopt args 'requestid {})
 	    "Placement"
 	    (join-commas
@@ -185,15 +196,43 @@
 	      (glom "Affinity=" (getopt args 'affinity {}))
 	      (glom "HostId=" (getopt args 'hostid {}))
 	      (glom "Tenancy=" (getopt args 'tenancy {}))})
-	    "SubnetId" (getopt args 'subnetid default-subnet-id)
-	    "UserData" (getopt args 'userdata {})))
-	 (instance (ec2/op "RunInstances" spec req)))
+	    "SubnetId" (getopt args 'subnet default-subnet-id)
+	    "UserData" (encode-user-data (getopt args 'userdata {}))))
+	 (instance (ec2/op "RunInstances" call opts)) ;; (or opts #[accept "application/json"])
+	 (ids (find-paths instance 'instanceid)))
+    (loginfo |GotInstances| ids)
+    (when (testopt args 'tags) 
+      (ec2/tag! ids (fix-tags (getopt args 'tags))))
     instance))
 
 (defambda (join-commas clauses)
   (stringout (do-choices (clause clauses i)
 	       (if (> i 0) (printout ","))
 	       (if (string? clause) (printout clause)))))
+
+(define (fix-tags tags)
+  (let ((result (frame-create #f)))
+    (do-choices (key (getkeys tags))
+      (add! result 
+	    ;; Handle the name field especially since it has
+	    ;;  special interpretation by the AWS console
+	    (if (equal? (downcase key) "name") "Name"
+		(if (string? key) key
+		    (if (symbol? key)
+			(if (uppercase? (symbol->string key))
+			    (downcase key)
+			    (symbol->string key))
+			key)))
+	    (get tags key)))
+    result))
+
+(define (encode-user-data s)
+  (if (string? s)
+      (if (has-prefix s "@")
+	  (->base64 (gp/fetch (slice s 1)))
+	  (->base64 s))
+      (if (packet? s) (->base64 s)
+	  (irritant s |BadUserData| "Not yet supported"))))
 
 (define (lookup-profile name)
   (if (equal? name "*") default-profile
@@ -220,12 +259,36 @@
 			   (jsonparse (get response '%content))
 			 (lambda (ex)
 			   #f))))
-	  (result (and parsed 
-		       (try (find-path parsed 'instanceprofile 'arn)
-			    #f))))
-    (or result
+	  (arn (and parsed 
+		    (try (find-path parsed 'instanceprofile 'arn)
+			 #f))))
+    (or arn
 	(irritant name |CannotResolveInstanceProfile|
 		  iam-lookup-profile))))
+
+
+;;;; Stop instances
+
+(define (ec2/stop! instances (args #f))
+  (let* ((call
+	  (frame-create #f
+	    "DryRun" (getopt args 'dryrun {})
+	    "Force" (getopt args 'force {})
+	    "InstanceId*" (choice (pickstrings instances)
+				  (find-paths (pick instances table?) 'instanceid))))
+	 (result (ec2/op "StopInstances" call)))
+    result))
+
+(define (ec2/terminate! instances (args #f))
+  (let* ((call
+	  (frame-create #f
+	    "DryRun" (getopt args 'dryrun {})
+	    "Force" (getopt args 'force {})
+	    "InstanceId*" (choice (pickstrings instances)
+				  (find-paths (pick instances table?) 'instanceid))))
+	 (result (ec2/op "TerminateInstances" call)))
+    result))
+
 
 
 
