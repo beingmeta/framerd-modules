@@ -196,7 +196,7 @@
 	      (glom "Affinity=" (getopt args 'affinity {}))
 	      (glom "HostId=" (getopt args 'hostid {}))
 	      (glom "Tenancy=" (getopt args 'tenancy {}))})
-	    "SubnetId" (getopt args 'subnet default-subnet-id)
+	    "SubnetId" (get-subnet-id args)
 	    "UserData" (encode-user-data (getopt args 'userdata {}))))
 	 (instance (ec2/op "RunInstances" call opts)) ;; (or opts #[accept "application/json"])
 	 (ids (find-paths instance 'instanceid)))
@@ -226,6 +226,9 @@
 	    (get tags key)))
     result))
 
+(define (get-subnet-id args)
+  (getopt args 'subnet default-subnet-id))
+
 (define (encode-user-data s)
   (if (string? s)
       (if (has-prefix s "@")
@@ -236,8 +239,8 @@
 
 (define (lookup-profile name)
   (if (equal? name "*") default-profile
-      (if (and (has-prefix role "arn:aws:iam:")
-	       (search ":instance-profile/" role))
+      (if (and (has-prefix name "arn:aws:iam:")
+	       (search ":instance-profile/" name))
 	  name
 	  (try (iam-lookup-profile name)
 	       (irritant name |UnknownRole| lookup-role)))))
