@@ -163,6 +163,9 @@
 (define default-subnet-id {})
 (varconfig! ec2:subnet default-subnet-id)
 
+(define default-vpc #f)
+(varconfig! ec2:vpc default-vpc)
+
 (define default-zone "us-east-1e")
 (varconfig! ec2:zone default-zone)
 
@@ -226,11 +229,23 @@
 	    (get tags key)))
     result))
 
+(define (get-default-vpc args)
+  (let ((vpcs (pick (get (find-path (ec2/op "DescribeVpcs") 'vpcset) 'items)
+		    'state "available")))
+    (if (singleton? vpcs)
+	(get vpcs 'vpcid)
+	(try (get (pick vpcs 'isdefault "true") 'vpcid)
+	     (get (pick-one vpcs) 'vpcid)
+	     default-vpc))))
+
 (define (get-subnet-id args)
   (getopt args 'subnet 
 	  (let ((subnets (find-path (ec2/op "DescribeSubnets") 'subnetset))
-		(zone (getopt args 'zone default-zone)))
+		(zone (getopt args 'zone default-zone))
+		(vpc (getopt args 'vpc (get-default-vpc args))))
 	    (try
+	     (tryif vpc
+	       (get (pick (get subnets 'item) 'availabilityzone zone 'vpcid vpc) 'subnetid))
 	     (get (pick (get subnets 'item) 'availabilityzone zone) 'subnetid)
 	     default-subnet-id))))
 
@@ -252,8 +267,10 @@
 (define (lookup-image image)
   (if (equal? image "*") 
       (or default-image (error |NoDefaultImage| "For EC2"))
-      (try (ec2/images "Name" image)
-	   (error |UnknownImage| image))))
+      (get (try (ec2/images "name" image)
+		(ec2/images "tag:Name" image)
+		(error |UnknownImage| image))
+	   'imageid)))
 
 (define (iam-lookup-profile name)
   (let*  ((result (aws/v4/op `#[] "GET" "https://iam.amazonaws.com/"
