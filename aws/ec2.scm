@@ -9,8 +9,7 @@
 
 (module-export! '{ec2/op ec2/filtered
 		  ec2/instances ec2/images ec2/tags
-		  ec2/launch
-		  ec2/tag!})
+		  ec2/run ec2/tag!})
 
 (define action-methods
   #["DescribeInstances" "GET"])
@@ -145,7 +144,7 @@
 	  (store! args (glom "Tag." j ".Value") value))))
     (ec2/op "CreateTags" args)))
 
-;;;; EC2/LAUNCH
+;;;; EC2/RUN
 
 (define default-image #f)
 (varconfig! ec2:image default-image)
@@ -162,12 +161,12 @@
 (define default-profile {})
 (varconfig! ec2:profile default-profile)
 
-(define (ec2/launch args (req #[]))
-  (ec2/op "RunInstances"
+(define (ec2/run args (req #[]))
+  (let* ((spec 
 	  (frame-create #f
 	    "DryRun" (getopt args 'dryrun {})
-	    "EbsOptimized" (getopt args 'ebs #f)
-	    "DisableApiTermination" (getopt args 'keepalive {})
+	    "EbsOptimized" (getopt args 'ebsopt #f)
+	    "DisableApiTermination" (getopt args 'highlander {})
 	    "IamInstanceProfile" (lookup-profile (getopt args 'profile "*"))
 	    "ImageId" (try (pick (getopt args 'ami {}) has-prefix "ami-")
 			   (lookup-image (getopt args 'ami #f)))
@@ -176,6 +175,9 @@
 	    "Monitoring" (getopt args 'monitoring {})
 	    "SecurityGroupId*" (pick (getopt args 'security {}) has-prefix "sg-")
 	    "SecurityGroup*" (reject (getopt args 'security {}) has-prefix "sg-")
+	    "MinCount" (getopt args 'count 1)
+	    "MaxCount" (getopt args 'maxcount {})
+	    "ClientToken" (getopt args 'requestid {})
 	    "Placement"
 	    (join-commas
 	     {(glom "AvailabilityZone=" (getopt args 'zone default-zone))
@@ -184,8 +186,9 @@
 	      (glom "HostId=" (getopt args 'hostid {}))
 	      (glom "Tenancy=" (getopt args 'tenancy {}))})
 	    "SubnetId" (getopt args 'subnetid default-subnet-id)
-	    "UserData" (getopt args 'userdata {}))
-	  req))
+	    "UserData" (getopt args 'userdata {})))
+	 (instance (ec2/op "RunInstances" spec req)))
+    instance))
 
 (defambda (join-commas clauses)
   (stringout (do-choices (clause clauses i)
