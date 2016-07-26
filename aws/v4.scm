@@ -70,8 +70,10 @@
   (default! token
     (getopt req 'aws:token (getopt opts 'aws:token aws:token)))
   (add! req '%date date)
-  (add! headers 'date (get date 'isobasic))
-  (add! headers 'host (urihost endpoint))
+  (unless (test headers 'date)
+    (add! headers 'date (get date 'isobasic)))
+  (unless (test headers 'host)
+    (add! headers 'host (urihost endpoint)))
   (when token
     (add! headers "X-Amz-Security-Token" token))
   (add! args "AWSAccessKeyId"
@@ -129,10 +131,10 @@
   (default! token
     (getopt req 'aws:token (getopt opts 'aws:token aws:token)))
   (add! req '%date date)
-  (add! headers 'date (get date 'isobasic))
-  (add! headers 'host (urihost endpoint))
-  (add! headers 'date (get date 'isobasic))
-  (add! headers 'host (urihost endpoint))
+  (unless (test headers 'date)
+    (add! headers 'date (get date 'isobasic)))
+  (unless (test headers 'host)
+    (add! headers 'host (urihost endpoint)))
   (when token
     (add! headers "X-Amz-Security-Token" token))
   (add! args "AWSAccessKeyId"
@@ -153,10 +155,11 @@
   (do-choices (key (getkeys headers))
     (unless (hashset-get hdrset (downcase key))
       (hashset-add! hdrset (downcase key))
-      (let ((v (get headers key)))
+      (let ((v (get headers key))
+	    (capkey (capitalize (downcase key))))
 	(if (curl-handle? curl)
-	    (curlsetopt! curl 'header (glom key ": " v))
-	    (add! curl 'header (cons key (qc v))))
+	    (curlsetopt! curl 'header (glom capkey ": " v))
+	    (add! curl 'header (cons capkey (qc v))))
 	(add! req key
 	      (if (and (singleton? v) (string? v)) v
 		  (stringout (do-choices v
@@ -301,7 +304,6 @@
       (store! req 'service service)
       (store! req 'date date)
       (store! req 'credential credential)
-      (store! req 'date date)
       (store! req 'host host)
       (when debug 
 	(store! req 'creq creq)
