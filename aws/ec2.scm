@@ -4,11 +4,12 @@
 (in-module 'aws/ec2)
 
 (use-module '{aws aws/v4 fdweb texttools mimetable regex logctl
-	      ezrecords rulesets logger varconfig})
+	      ezrecords rulesets logger findpath varconfig})
 (define %used_modules '{aws varconfig ezrecords rulesets})
 
 (module-export! '{ec2/op ec2/filtered
 		  ec2/instances ec2/images ec2/tags
+		  ec2/launch
 		  ec2/tag!})
 
 (define action-methods
@@ -112,7 +113,9 @@
   (ec2/op action args))
 
 (define (ec2/instances . filters)
-  (let ((response (ec2/filtered "DescribeInstances" #["i" "instance-id"] filters)))
+  (let ((response (ec2/filtered 
+		   "DescribeInstances"
+		   #["i" "instance-id"] filters)))
     (deitemize (get (get (get (get response 'reservationset)
 			      'item) 
 			 'instancesset)
@@ -122,6 +125,9 @@
   (let ((response (ec2/filtered "DescribeImages" #["ami" "image-id"] filters)))
     (deitemize (get (get response 'imagesset) 'item))))
 
+;; When searching for a particular tag, use key filter and a value
+;; filter, e.g.
+;;   (ec2/tags "key" "Name" "value" "worker-1612" )
 (define (ec2/tags . filters)
   (let ((response (ec2/filtered "DescribeTags" #f filters)))
     (deitemize (get (get response 'tagset) 'item))))
@@ -139,7 +145,84 @@
 	  (store! args (glom "Tag." j ".Value") value))))
     (ec2/op "CreateTags" args)))
 
+;;;; EC2/LAUNCH
 
+(define default-image #f)
+(varconfig! ec2:image default-image)
+
+(define default-subnet-id {})
+(varconfig! ec2:subnet default-subnet-id)
+
+(define default-zone "us-east-1e")
+(varconfig! ec2:zone default-zone)
+
+(define default-instance-type "t2.micro")
+(varconfig! ec2:type default-instance-type)
+
+(define default-profile {})
+(varconfig! ec2:profile default-profile)
+
+(define (ec2/launch args (req #[]))
+  (ec2/op "RunInstances"
+	  (frame-create #f
+	    "DryRun" (getopt args 'dryrun {})
+	    "EbsOptimized" (getopt args 'ebs #f)
+	    "DisableApiTermination" (getopt args 'keepalive {})
+	    "IamInstanceProfile" (lookup-profile (getopt args 'profile "*"))
+	    "ImageId" (try (pick (getopt args 'ami {}) has-prefix "ami-")
+			   (lookup-image (getopt args 'ami #f)))
+	    "InstanceType" (geotpt args 'type default-instance-type)
+	    "KeyName" (geotpt args 'keyname {})
+	    "Monitoring" (getopt args 'monitoring {})
+	    "SecurityGroupId*" (pick (getopt args 'security {}) has-prefix "sg-")
+	    "SecurityGroup*" (reject (getopt args 'security {}) has-prefix "sg-")
+	    "Placement"
+	    (join-commas
+	     {(glom "AvailabilityZone=" (getopt args 'zone default-zone))
+	      (glom "GroupName=" (getopt args 'group {}))
+	      (glom "Affinity=" (getopt args 'affinity {}))
+	      (glom "HostId=" (getopt args 'hostid {}))
+	      (glom "Tenancy=" (getopt args 'tenancy {}))})
+	    "SubnetId" (getopt args 'subnetid default-subnet-id)
+	    "UserData" (getopt args 'userdata {}))
+	  req))
+
+(defambda (join-commas clauses)
+  (stringout (do-choices (clause clauses i)
+	       (if (> i 0) (printout ","))
+	       (if (string? clause) (printout clause)))))
+
+(define (lookup-profile name)
+  (if (equal? name "*") default-profile
+      (if (and (has-prefix role "arn:aws:iam:")
+	       (search ":instance-profile/" role))
+	  name
+	  (try (iam-lookup-profile name)
+	       (irritant name |UnknownRole| lookup-role)))))
+(define (lookup-image image)
+  (if (equal? image "*") 
+      (or default-image (error |NoDefaultImage| "For EC2"))
+      (try (ec2/images "Name" image)
+	   (error |UnknownImage| image))))
+
+(define (iam-lookup-profile name)
+  (let*  ((result (aws/v4/op #[] "GET" "https://iam.amazonaws.com/"
+			     #[accept "application/json"]
+			     `#["Action" "GetInstanceProfile"
+				"Version" "2010-05-08"
+				"InstanceProfileName" ,name]))
+	  (response (car result))
+	  (parsed (and (response/ok? response)
+		       (onerror
+			   (jsonparse (get response '%content))
+			 (lambda (ex)
+			   #f))))
+	  (result (and parsed 
+		       (try (find-path parsed 'instanceprofile 'arn)
+			    #f))))
+    (or result
+	(irritant name |CannotResolveInstanceProfile|
+		  iam-lookup-profile))))
 
 
 
