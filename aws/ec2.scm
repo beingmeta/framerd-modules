@@ -198,7 +198,7 @@
 	      (glom "Tenancy=" (getopt args 'tenancy {}))})
 	    "SubnetId" (get-subnet-id args)
 	    "UserData" (encode-user-data (getopt args 'userdata {}))))
-	 (instance (ec2/op "RunInstances" call opts)) ;; (or opts #[accept "application/json"])
+	 (instance (ec2/op "RunInstances" call opts))
 	 (ids (find-paths instance 'instanceid)))
     (loginfo |GotInstances| ids)
     (when (testopt args 'tags) 
@@ -227,7 +227,12 @@
     result))
 
 (define (get-subnet-id args)
-  (getopt args 'subnet default-subnet-id))
+  (getopt args 'subnet 
+	  (let ((subnets (find-path (ec2/op "DescribeSubnets") 'subnetset))
+		(zone (getopt args 'zone default-zone)))
+	    (try
+	     (get (pick (get subnets 'item) 'availabilityzone zone) 'subnetid)
+	     default-subnet-id))))
 
 (define (encode-user-data s)
   (if (string? s)
@@ -251,8 +256,8 @@
 	   (error |UnknownImage| image))))
 
 (define (iam-lookup-profile name)
-  (let*  ((result (aws/v4/op #[] "GET" "https://iam.amazonaws.com/"
-			     #[accept "application/json"]
+  (let*  ((result (aws/v4/op `#[] "GET" "https://iam.amazonaws.com/"
+			     `#[accept "application/json"]
 			     `#["Action" "GetInstanceProfile"
 				"Version" "2010-05-08"
 				"InstanceProfileName" ,name]))
