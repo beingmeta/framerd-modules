@@ -219,7 +219,58 @@
 	  ((null? scan) (printout))
 	(printout (second (car scan)) ":" (third (car scan)) "\n")))))
 
-;;; Making S3 calls
+;;; Making S3 calls (the wrapper)
+
+(defambda (s3/op op bucket path (opts #f)
+		 (content "") (ctype) (headers '()) . args)
+  (default! ctype
+    (path->mimetype path (if (packet? content) "application" "text")
+		    (getopt opts 'mimetable #f)))
+  (when (has-prefix bucket {"." "/"}) (set! bucket (slice bucket 1)))
+  (if opts (set! opts (cons opts s3opts)) (set! opts s3opts))
+  (let* ((result (tryop 0 (getopt opts 'retry n-retries)
+			op bucket path opts content ctype headers args))
+	 (response (car result))
+	 (content (get response '%content))
+	 (status (get response 'response)))
+    (if (exists? content)
+	(loginfo |S3OP/result|
+	  op " s3://" bucket "/" path
+	  "\n\treturned (" status ") " (length content)
+	  (if (string? content) " characters of " " bytes of ")
+	  (try (get response 'content-type)
+	       "stuff"))
+	(loginfo |S3OP/result|
+	  op " s3://" bucket "/" path
+	  "\n\treturned (" status ")"))
+    response))
+
+;;; Making S3 calls (the guts)
+
+(defambda (tryop tries max
+		 op bucket path opts
+		 content ctype headers args)
+  (when (and tries (> tries 0)) (sleep (+ tries (getopt opts 'pause 2))))
+  (onerror (s3op op bucket path content ctype headers opts args)
+    (lambda (ex)
+      (let ((irritant (error-irritant ex)))
+	(if (or (not tries) (not max) (>= tries max))
+	    (begin (when max
+		     (logcrit |S3/Failure|
+		       "After " max "tries, couldn't " 
+		       op " s3://" bucket "/" path 
+		       " given \n  " (pprint opts) "\nlast result:\n  " 
+		       (pprint irritant)))
+	      (if (getopt opts 's3err)
+		  (s3-error (getopt irritant 'httpstatus) irritant op bucket path opts)
+		  (begin (s3-warn (getopt irritant 'httpstatus) (cdr irritant) (car irritant)
+				  op bucket path opts)
+		    irritant)))
+	    (begin
+	      (logwarn |S3/Retry|
+		"Retrying " op " s3://" bucket "/" path " after " tries "/" max " attempts.")
+	      (lognotice |S3/Retry| "Last response was:\n  " (pprint irritant))
+	      (tryop (1+ tries) max op bucket path opts content ctype headers args)))))))
 
 (define (s3op op bucket path (content #f) (ctype) 
 	      (headerlist '()) (opts #[]) args)
@@ -274,89 +325,16 @@
 	    (else (set! scan (cdr scan)))))
     params))
 
-(defambda (s3/op op bucket path (opts #f)
-		 (content "") (ctype) (headers '()) . args)
-  (default! ctype
-    (path->mimetype path (if (packet? content) "application" "text")
-		    (getopt opts 'mimetable #f)))
-  (when (has-prefix bucket {"." "/"}) (set! bucket (slice bucket 1)))
-  (if opts (set! opts (cons opts s3opts)) (set! opts s3opts))
-  (let* ((err (getopt opts 'errs (getopt opts 's3errs s3errs)))
-	 (retries (getopt opts 'retry n-retries))
-	 (tries 0)
-	 (wait 1)
-	 (s3result
-	  (s3op op bucket path content ctype headers opts args)
-	  #|
-	  (if (and retries (> retries 0))
-	      (onerror (s3op op bucket path content ctype headers opts args)
-		(lambda (ex)
-		  (op-failed ex op bucket path)
-		  (curlcache/reset!)
-		  (set! tries (1+ tries))
-		  (let ((r (error-irritant ex)))
-		    (if (and (pair? r) (table? (car r)) (test (car r) 'response))
-			r ex))))
-	      (s3op op bucket path content ctype headers opts args))
-	  |#)
-	 (request (and s3result (cdr s3result)))
-	 (response (and s3result (car s3result)))
-	 (content (and response (get response '%content)))
-	 (status (and response (get response 'response)))
-	 (retry (and (exists? status) status (>= status 500)))
-	 (success (and status (>= 299 status 200))))
-    (debug%watch "S3/OP" 
-      op bucket path success status retry
-      "\nREQUEST" request "\nRESPONSE" response)
-    (while (and retry retries (> retries 0))
-      (logwarn |S3/Retry|
-	"Retrying " op " (" status ") for " path " in " bucket " after:\n"
-	(pprint s3result))
-      (sleep wait)
-      (set! retries (-1+ retries))
-      (set! wait (+ wait retry-wait))
-      (set! s3result
-	    (onerror (s3op op bucket path content ctype headers opts args)
-	      (lambda (ex)
-		(op-failed ex op bucket path)
-		(curlcache/reset!)
-		(let ((r (error-irritant ex)))
-		  (if (and (pair? r) (table? (car r)) (test (car r) 'response))
-		      r ex)))))
-      (set! request (and s3result (cdr s3result)))
-      (set! response (and s3result (car s3result)))
-      (set! content (and response (get response '%content)))
-      (set! status (and response (get response 'response)))
-      (set! retry (or (not status) (>= status 500)))
-      (set! success (and status (>= 299 status 200))))
-    (when (and success (equal? op "GET") (exists? content))
-      (loginfo |S3OP/result| "GET s3://" bucket "/" path
-	       "\n\treturned " (length content)
-	       (if (string? content) " characters of " " bytes of ")
-	       (try (get response 'content-type)
-		    "stuff")))
-    (unless success
-      (onerror (store! response '%content (xmlparse content))
-	(lambda (ex) #f)))
-    (cond (success response)
-	  ;; Don't generate warnings for HEAD probes
-	  ((equal? op "HEAD") response)
-	  ((testopt opts 'ignore status) response)
-	  ((testopt opts 's3pass status) response)
-	  (err (s3-error status s3result op bucket path opts))
-	  (else (s3-warn status request response op bucket path opts)
-		response))))
-
 (define (s3-error status s3result op bucket path opts)
   (set! s3result (cons* (car s3result) (cdr s3result)
 			(if (exists? opts)
 			    (if (pair? opts) opts (list opts))
 			    '())))
   (cond ((not status)
-	 (irritant s3result |S3/Failure| S3/OP
-		   op " " "s3://" bucket
-		   (if (has-prefix path "/") "" "/")
-		   path))
+	 (newerr s3result (glom "S3/" op "/Failure") 'S3/OP
+		 op " " "s3://" bucket
+		 (if (has-prefix path "/") "" "/")
+		 path))
 	((= status 404)
 	 (irritant s3result |S3/NotFound| S3/OP
 		   op " " "s3://" bucket
@@ -365,10 +343,10 @@
 	 (irritant s3result |S3/Forbidden| S3/OP
 		   op " " "s3://" bucket
 		   (if (has-prefix path "/") "" "/") path))
-	(else (irritant s3result |S3/Failure| S3/OP
-			op " " "s3://" bucket
-			(if (has-prefix path "/") "" "/")
-			path))))
+	(else (newerr s3result (glom "S3/" op "/Failure") 'S3/OP
+		      op " " "s3://" bucket
+		      (if (has-prefix path "/") "" "/")
+		      path))))
 
 (define (s3-warn status request response op bucket path opts)
   (cond ((= status 404)
@@ -406,16 +384,6 @@
 		 (segment (car (get (xmlget (xmlparse (get response '%content))
 					    'stringtosignbytes)
 				    '%content))))))
-
-(define (op-failed ex op bucket path)
-  (logwarn |S3/Error|
-    "Error on " OP " to s3://" bucket "/" path "\n\t"
-    (error-condition ex)
-    (when (error-context ex) (printout " @" (error-context ex)))
-    (when (error-details ex)
-      (printout " (" (error-details ex) ") "))
-    (when (error-irritant ex)
-      (printout "\n\t" (pprint (error-irritant ex))))))
 
 ;;; Getting S3 URIs for the API
 

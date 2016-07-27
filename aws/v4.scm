@@ -110,12 +110,12 @@
      "SignedHeaders=" (signed-headers req) ", "
      "Signature=" (downcase (packet->base16 (getopt req 'signature)))))
   (info%watch "AWS/V4/get" endpoint args)
-  (let* ((err (getopt req 'v4err v4err))
+  (let* ((err (not (getopt req 'noerr #f)))
 	 (url (scripturl+ endpoint args))
 	 (result (urlget url curl))
 	 (status (and result (try (get result 'response) #f))))
     (if (and err status (or (not (number? status)) (not (>= 299 status 200))))
-	(irritant (cons result req)
+	(irritant (aws/error result req)
 		  |AWS/V4/Error| aws/v4/get
 		  "endpoint=" endpoint "\nurl=" url "\ncurl=" curl)
 	(cons result req))))
@@ -205,11 +205,13 @@
 			(if (equal? op "PUT")
 			    (urlput url (or payload "") ptype curl)
 			    (urlget url curl))))))
-	   (err (getopt req 'v4err v4err))
+	   (err (not (getopt req 'noerr #f)))
 	   (status (get result 'response)))
-      (if (and err status (not (equal? op "HEAD"))
-	       (not (>= 299 status 200)))
-	  (irritant (cons result req)
+      (if (and err status 
+	       (if (equal? op "HEAD") 
+		   (>= status 500)
+		   (or (>= status 400) (< status 200))))
+	  (irritant (aws/error result req)
 		    |AWS/V4/Error| aws/v4/op
 		    "\nop=" op "\nendpoint=" endpoint ", "
 		    "\nurl=" url "\ncurl=" curl)

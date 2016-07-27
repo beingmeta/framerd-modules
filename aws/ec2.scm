@@ -52,13 +52,7 @@
 	 (response
 	  (aws/v4/op req method "https://ec2.amazonaws.com/" opts
 		     args)))
-    (if (>= 299 (getopt response 'response) 200)
-	(reject (elts (xmlparse (getopt response '%content) 'data)) string?)
-	(irritant (cons (if (and (pair? response) (null? (cdr response)))
-			    (car response)
-			    response)
-			req)
-		  |EC2 Error|))))
+    (reject (elts (xmlparse (getopt response '%content) 'data)) string?)))
 
 (define resource-types
   (downcase

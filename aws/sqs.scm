@@ -56,22 +56,22 @@
    (sqs-attrib-pattern "DelaySeconds" 'delay #t)})
 
 (define (handle-sqs-response result (extract (qc sqs-fields)))
-  (debug%watch result)
-  (if (<= 200 (getopt result 'response) 299)
-      (let* ((combined (frame-create #f
-			 'queue (getopt result '%queue {})
-			 'received (gmtimestamp)))
-	     (content (getopt result '%content))
-	     (fields (tryif content (text->frames extract content))))
-	(if (or (fail? fields) (fail? (get fields 'msgid)))
-	    (begin (debug%watch content fields) #f)
-	    (begin (debug%watch fields)
-	      (do-choices (field fields)
-		(do-choices (key (getkeys field))
-		  (add! combined key (get field key))))
-	       combined)))
-      (irritant result |Bad SQS response| SQS/GET
-		"Received from " (getopt result 'effective-url))))
+  (let* ((combined (frame-create #f
+		     'queue (getopt result '%queue {})
+		     'received (gmtimestamp)))
+	 (content (getopt result '%content))
+	 (fields (tryif content (text->frames extract content))))
+    (if (or (fail? fields) (fail? (get fields 'msgid)))
+	(begin (debug%watch content fields) #f)
+	(begin (debug%watch fields)
+	  (do-choices (field fields)
+	    (do-choices (key (getkeys field))
+	      (add! combined key (get field key))))
+	  combined))))
+
+(define (handle-sqs-error method queue irritant)
+  (newerr+ irritant (glom "SQS/" method "/Failed") queue
+	   "Received from " (getopt irritant 'effective-url)))
 
 (define (get-queue-opts (queue #f) (opts #[]) (qopts))
   (default! qopts (try (tryif queue (get queue-opts queue)) #[]))
@@ -83,41 +83,60 @@
     (store! args "WaitTimeSeconds" (getopt opts 'wait)))
   (when (getopt opts 'reserve)
     (store! args "VisibilityTimeout" (getopt opts 'reserve)))
-  (handle-sqs-response 
-   (aws/v4/op (get-queue-opts queue opts)
-	      "GET" queue opts args)))
+  (onerror
+      (handle-sqs-response 
+       (aws/v4/op (get-queue-opts queue opts)
+		  "GET" queue opts args))
+    (lambda (ex)
+      (handle-sqs-error (error-irritant ex) '|ReceiveMessage| queue))))
 
 (define (sqs/send queue msg (opts #[]) (args `#["Action" "SendMessage"]))
   (store! args "MessageBody" msg)
   (when (getopt opts 'delay) (store! args "DelaySeconds" (getopt opts 'delay)))
-  (handle-sqs-response 
-   (aws/v4/get (get-queue-opts queue opts) queue opts args)))
+  (onerror
+      (handle-sqs-response 
+       (aws/v4/get (get-queue-opts queue opts) queue opts args))
+    (lambda (ex)
+      (handle-sqs-error (error-irritant ex) '|SendMessage| queue))))
 
 (define (sqs/list (prefix #f) (args #["Action" "ListQueues"]) (opts #[]))
   (when prefix (set! args `#["Action" "ListQueues" "QueueNamePrefix" ,prefix]))
-  (handle-sqs-response 
-   (aws/v4/get (get-queue-opts #f opts) sqs-endpoint opts args)))
+  (onerror
+      (handle-sqs-response 
+       (aws/v4/get (get-queue-opts #f opts) sqs-endpoint opts args))
+    (lambda (ex)
+      (handle-sqs-error (error-irritant ex) '|ListQueues| #f))))
 
 (define (sqs/info queue
 		  (args #["Action" "GetQueueAttributes" "AttributeName.1" "All"])
 		  (opts #[]))
-  (handle-sqs-response
-   (aws/v4/get (get-queue-opts queue opts) queue opts args)
-   (qc sqs-info-fields)))
+  (onerror
+      (handle-sqs-response
+       (aws/v4/get (get-queue-opts queue opts) queue opts args)
+       (qc sqs-info-fields))
+    (lambda (ex)
+      (handle-sqs-error (error-irritant ex) '|GetQueueAttributes| queue))))
 
 (define (sqs/delete message (opts #[]))
-  (handle-sqs-response
-   (aws/v4/get (get-queue-opts (get message 'queue))
-	       (get message 'queue) opts
-	       `#["Action" "DeleteMessage" "ReceiptHandle" ,(get message 'handle)])))
+  (onerror
+      (handle-sqs-response
+       (aws/v4/get (get-queue-opts (get message 'queue))
+		   (get message 'queue) opts
+		   `#["Action" "DeleteMessage" "ReceiptHandle" ,(get message 'handle)]))
+    (lambda (ex)
+      (handle-sqs-error (error-irritant ex) '|DeleteMessage| (get message 'queue)))))
 
 (define (sqs/extend message secs (opts #[]))
-  (handle-sqs-response
-   (aws/v4/get (get-queue-opts (get message 'queue))
-	       (get message 'queue) opts
-	       `#["Action" "ChangeMessageVisibility"
-		  "ReceiptHandle" ,(get message 'handle)
-		  "VisibilityTimeout" ,secs])))
+  (onerror
+      (handle-sqs-response
+       (aws/v4/get (get-queue-opts (get message 'queue))
+		   (get message 'queue) opts
+		   `#["Action" "ChangeMessageVisibility"
+		      "ReceiptHandle" ,(get message 'handle)
+		      "VisibilityTimeout" ,secs]))
+    (lambda (ex)
+      (handle-sqs-error (error-irritant ex) '|ExtendMessage|
+			(get message 'queue)))))
 
 (define reqvar '_sqs)
 (define default-extension 60)

@@ -16,7 +16,8 @@
  '{aws:account aws:key aws:secret aws:token aws:expires 
    aws/ok? aws/checkok aws/set-creds! aws/creds!
    aws/datesig aws/datesig/head aws/template
-   aws/update-creds!})
+   aws/update-creds!
+   aws/error})
 
 ;;; Templates source
 (define template-sources
@@ -155,3 +156,44 @@
 	      (if (gp/exists? arg)
 		  (jsonparse (gp/fetch arg))
 		  (irritant ARG |Template| aws/template))))))
+
+;;;; Extracting AWS error information
+
+(define (aws/error result req)
+  (let* ((content (get result '%content))
+	 (ctype (try (get result 'content-type) #f))
+	 (parsed (parse-error content ctype)))
+    (store! result '%content parsed)
+    (store! result 'httpstatus (get result 'response))
+    (cons result req)))
+
+(define (parse-error content type)
+  (cond ((and type (search "/xml" type))
+	 (xml-error (stringify content)))
+	((and type (search "/json" type))
+	 (json-error (stringify content)))
+	(else (let ((string (stringify content)))
+		(if (string-starts-with? string #((spaces*) "<"))
+		    (xml-error string)
+		    (json-error string))))))
+
+(define (stringify arg)
+  (if (string? arg) arg
+      (if (packet? arg)
+	  (packet->string arg)
+	  (stringout arg))))
+
+(define (xml-error xmlstring)
+  (onerror
+      (xmlparse xmlstring '{data slotify})
+    (lambda (ex)
+      (logwarn  (error-condition ex)
+	"Couldn't parse XML error description:\n\t" ex 
+	"\n  " xmlstring))))
+(define (json-error jsonstring)
+  (onerror
+      (jsonparse jsonstring)
+    (lambda (ex)
+      (logwarn  (error-condition ex)
+	"Couldn't parse JSON error description:\n\t" ex 
+	"\n  " jsonstring))))
