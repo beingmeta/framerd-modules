@@ -353,7 +353,9 @@
 	    (dotighten arg env bound lexrefs w/rails)))
       expr))
 
-(define (optimize-procedure! proc (lexrefs lexrefs-dflt) (w/rails rails-dflt))
+(define (optimize-procedure! proc (opts #f) (lexrefs) (w/rails))
+  (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
+  (default! w/rails (getopt opts 'rails rails-dflt))
   (let* ((env (procedure-env proc))
 	 (arglist (procedure-args proc))
 	 (body (procedure-body proc))
@@ -396,10 +398,13 @@
     (lambda (ex) (irritant+ spec |GetModuleFailed| optimize-module
 			    "Couldn't load module " spec))))
 
-(define (optimize-module! module (lexrefs lexrefs-dflt) (w/rails rails-dflt))
+(define (optimize-module! module (opts) (lexrefs) (w/rails))
   (loginfo "Optimizing module " module)
   (when (symbol? module)
     (set! module (optimize-get-module module)))
+  (default! opts (try (get module '%optimize_options) #f))
+  (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
+  (default! w/rails (getopt opts 'rails rails-dflt))
   (let ((bindings (module-bindings module))
 	(count 0))
     (do-choices (var bindings)
@@ -407,7 +412,7 @@
       (let ((value (get module var)))
 	(when (and (exists? value) (compound-procedure? value))
 	  (set! count (1+ count))
-	  (optimize-procedure! value lexrefs w/rails))))
+	  (optimize-procedure! value opts lexrefs w/rails))))
     (when (exists symbol? (get module '%moduleid))
       (let* ((referenced-modules (get module '%used_modules))
 	     (used-modules
@@ -422,7 +427,9 @@
 		   (do-choices (um unused i) (printout (if (> i 0) ", ") um))))))
     count))
 
-(define (optimize-bindings! bindings (lexrefs lexrefs-dflt) (w/rails rails-dflt))
+(define (optimize-bindings! bindings (opts #f) (lexrefs) (w/rails))
+  (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
+  (default! w/rails (getopt opts 'rails rails-dflt))
   (logdebug "Optimizing bindings " bindings)
   (let ((count 0))
     (do-choices (var (getkeys bindings))
@@ -430,7 +437,8 @@
       (let ((value (get bindings var)))
 	(if (bound? value)
 	    (when (compound-procedure? value)
-	      (set! count (1+ count)) (optimize-procedure! value lexrefs w/rails))
+	      (set! count (1+ count))
+	      (optimize-procedure! value #f lexrefs w/rails))
 	    (warning var " is unbound"))))
     count))
 
