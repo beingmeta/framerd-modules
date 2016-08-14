@@ -268,7 +268,8 @@
       (let* ((ctype (try (get node 'type) "text"))
 	     (href (get node 'href))
 	     (ref (get urlmap href)))
-	(when (or (fail? ref) (not ref))
+	(when (or (fail? ref) (not ref) 
+		  (has-prefix href "data:") (has-prefix ref "data:"))
 	  (loginfo |Localize|
 		   "Localizing stylesheet " (get node 'href)
 		   "\n\tfrom " base "\n\tto " saveto
@@ -309,7 +310,7 @@
 	  (dom/set! node 'href ref)
 	  (logdebug |Localize/css|
 	    "New converted node: \n" (pprint node)))))
-    (let ((hrefs (dom/select->list dom "[href]")) 
+    (let ((hrefs (remove-if data-href? (dom/select->list dom "[href]"))) 
 	  (ignored '())
 	  (anchors '())
 	  (others '()))
@@ -398,6 +399,9 @@
 	(store! head '%content
 		(append (get head '%content) xresources))))))
 
+(define (data-href? node)
+  (has-prefix (get node 'href) "data:"))
+
 (define (hashmerge root hash urlmap)
   (cond ((fail? (get urlmap hash))
 	 (store! urlmap (glom root hash) hash)
@@ -439,21 +443,22 @@
 		    (pick (dom/find doc "LINK") 'href)
 		    (pick (pick (dom/find doc "LINK") 'href) 'rel syncrels)))
 	 (csslinks (pick links 'rel "stylesheet" 'type "text/css")))
-    (choice (get links 'href)
-	    (get (dom/find doc "SCRIPT") 'src)
-	    (get (dom/find doc "IMG") 'src)
-	    (gathersubst srcset-url-pat (get (dom/find doc "IMG") 'srcset))
-	    ;; From SVG
-	    (get (dom/find doc "IMAGE") 'href)
-	    ;; From HTML5
-	    (gathersubst srcset-url-pat
-			 (get (dom/find doc "SOURCE") 'srcset))
-	    (tryif refroot
-	      (for-choices (ref csslinks)
-		(let* ((fullpath (gp/mkpath refroot ref))
-		       (content (and (gp/exists? fullpath)
-				     (gp/fetch fullpath))))
-		  (tryif content (dom/getcssurls content))))))))
+    (reject (choice (get links 'href)
+		    (get (dom/find doc "SCRIPT") 'src)
+		    (get (dom/find doc "IMG") 'src)
+		    (gathersubst srcset-url-pat (get (dom/find doc "IMG") 'srcset))
+		    ;; From SVG
+		    (get (dom/find doc "IMAGE") 'href)
+		    ;; From HTML5
+		    (gathersubst srcset-url-pat
+				 (get (dom/find doc "SOURCE") 'srcset))
+		    (tryif refroot
+		      (for-choices (ref csslinks)
+			(let* ((fullpath (gp/mkpath refroot ref))
+			       (content (and (gp/exists? fullpath)
+					     (gp/fetch fullpath))))
+			  (tryif content (dom/getcssurls content))))))
+	    has-prefix {"data:" "urn:"})))
 
 (defambda (dom/textmanifest node (staticrefs {}) (dynamicrefs {}))
   "Generates a text manifest for a document, with additional static or dynamic refs"
