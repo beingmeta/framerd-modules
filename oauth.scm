@@ -100,9 +100,17 @@
        ACCESS_TOKEN "oauth2_access_token"
        REALM LINKEDIN
        NAME "LinkedIn"]
-     DROPBOX
+     DROPBOXV1
      #[AUTHORIZE "https://www.dropbox.com/1/oauth2/authorize"
        ACCESS "https://api.dropbox.com/1/oauth2/token"
+       KEY DROPBOX:KEY SECRET DROPBOX:SECRET
+       ;; ACCESS_TOKEN HTTP
+       VERSION "2.0"
+       REALM DROPBOXV1
+       NAME "Dropbox"]
+     DROPBOX
+     #[AUTHORIZE "https://www.dropbox.com/oauth2/authorize"
+       ACCESS "https://api.dropbox.com/oauth2/token"
        KEY DROPBOX:KEY SECRET DROPBOX:SECRET
        ;; ACCESS_TOKEN HTTP
        VERSION "2.0"

@@ -46,13 +46,13 @@
 	 (strip-prefix path "/")))))
 
 (define (dropbox/get/req oauth path (revision #f))
-  (let ((endpoint (mkurl "https://api-content.dropbox.com/1/files/"
+  (let ((endpoint (mkurl "https://content.dropboxapi.com/2/files/download/"
 			  oauth path)))
     (if revision
 	(oauth/call oauth 'GET endpoint `(rev ,revision) #f #f #t)
 	(oauth/call oauth 'GET endpoint '() #f #f #t))))
 (define (dropbox/get oauth path (revision #f))
-  (let* ((endpoint (mkurl "https://api-content.dropbox.com/1/files/"
+  (let* ((endpoint (mkurl "https://content.dropboxapi.com/2/files/download/"
 			   oauth path))
 	 (result (if revision
 		     (oauth/call oauth 'GET endpoint `(rev ,revision) #f #f #t)
@@ -66,7 +66,7 @@
 	    (irritant result CALLFAILED DROPBOX/GET
 		      path " with " oauth)))))
 (define (dropbox/get+ oauth path (revision #f) (err #f))
-  (let* ((endpoint (mkurl "https://api-content.dropbox.com/1/files/"
+  (let* ((endpoint (mkurl "https://content.dropboxapi.com/2/files/download/"
 			   oauth path))
 	 (result (if revision
 		     (oauth/call oauth 'GET endpoint `(rev ,revision) #f #f #t)
@@ -98,7 +98,7 @@
 		      path " with " oauth)))))
 
 (define (dropbox/info oauth path (revision #f) (error #f))
-  (let* ((endpoint (mkurl "https://api.dropbox.com/1/metadata/"
+  (let* ((endpoint (mkurl "https://api.dropboxapi.com/2/files/get_metadata/"
 			   oauth path))
 	 (result (if revision
 		     (oauth/call oauth 'GET endpoint `(rev ,revision) #f #f #t)
@@ -122,7 +122,7 @@
 			   path " with " oauth))))))
 
 (define (dropbox/list oauth path (revision #f))
-  (let* ((endpoint (mkurl "https://api.dropbox.com/1/metadata/"
+  (let* ((endpoint (mkurl "https://api.dropboxapi.com/2/files/get_metadata/"
 			   oauth path))
 	 (result (if revision
 		     (oauth/call oauth 'GET endpoint
@@ -144,7 +144,7 @@
   (loginfo |DROPBOX/PUT!| "Saving " (length content) " of " ctype " to " path
 	   " given\n\t" (pprint oauth))
   (let* ((endpoint
-	  (mkurl "https://api-content.dropbox.com/1/files_put/"
+	  (mkurl "https://content.dropboxapi.com/2/files/upload"
 		  oauth path))
 	 (result (oauth/call oauth 'put endpoint '() content ctype))
 	 (status (get result 'response)))
