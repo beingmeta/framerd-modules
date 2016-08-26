@@ -18,6 +18,7 @@
    gp:config gpath/handler
    gp/urlfetch gp/urlinfo
    dtype->gpath gpath->dtype
+   datauri/fetch+ datauri/info
    gp/copy!})
 (module-export! '{zip/gopen zip/gclose})
 
@@ -98,6 +99,30 @@
       (if (has-prefix path "./") (slice path 2)
 	  path)))
 
+(define datauri-pat
+  #("data:" (label ctype (not> ";")) ";" (label enc (not> ",")) ","
+    (label content (rest)))  )
+(define (datauri/fetch+ string (justinfo #f))
+  (let* ((parsed (text->frame datauri-pat string))
+	 (ctype (get parsed 'ctype))
+	 (enc (get parsed 'enc))
+	 (data (get parsed 'content))
+	 (base64 (identical? (downcase (get parsed 'enc)) "base64")))
+    (if justinfo
+	(if base64
+	    `#[ctype ,ctype]
+	    `#[ctype ,ctype encoding ,enc])
+	(let* ((charset (try (get (text->frames #(";charset=" (label charset (not> ";"))) ctype) 'charset)
+			     #f))
+	       (content (if base64 
+			    (if (mimetype/text? ctype)
+				(packet->string (base64->packet data) charset)
+				(base64->packet data))
+			    data)))
+	  (if charset
+	      `#[ctype ,ctype content ,content charset ,charset]
+	      `#[ctype ,ctype content ,content])))))
+
 ;;; Writing to a gpath
 
 (defambda (gp/write! saveto name content (ctype #f) (charset #f) (opts #f) (encoding #f))
@@ -116,6 +141,7 @@
 		 (not (overlaps? (downcase charset) {"utf8" "utf-8"})))
 	(set! content (packet->string (string->packet content) charset)))
       (gp/save! (gp/mkpath saveto name) content ctype charset))))
+(define (datauri/info string) (datauri/fetch+ string #t))
 
 (define (get-namestring gpath)
   (if (string? gpath) gpath
@@ -232,6 +258,9 @@
 	 (gp/basename (car path)))
 	((pair? path) (gp/basename (cdr path)))
 	((s3loc? path) (basename (s3loc-path path)))
+	((and (string? path) (has-prefix path "data:"))
+	 (glom "data-" (packet->base16 (md5 path))
+	   (try (ctype->suffix (get (datauri/info path) 'ctype) ".") "")))
 	((string? path) (basename path))
 	(else "")))
 
@@ -396,6 +425,8 @@
 	 (if (string? ref)
 	     (get (gp/urlfetch ref) 'content)
 	     (get (gp/fetch ref) 'content)))
+	((and (string? ref) (has-prefix ref "data:"))
+	 (get (datauri/fetch+ ref) 'content))
 	((and (string? ref) (has-prefix ref "s3:")) (s3/get (->s3loc ref)))
 	((and (string? ref) (string-starts-with? ref #((isalnum+) ":")))
 	 (irritant ref |Bad gpath scheme|))
@@ -501,6 +532,8 @@
 	((and (string? ref) (exists has-prefix ref {"http:" "https:" "ftp:"}))
 	 (set! ref (try (->s3loc ref) (uri->gpath ref) ref))
 	 (if (string? ref) (gp/urlfetch ref) (gp/fetch+ ref)))
+	((and (string? ref) (has-prefix ref "data:"))
+	 (datauri/fetch+ ref))
 	((and (string? ref) (has-prefix ref "s3:")) (s3/get+ (->s3loc ref)))
 	((and (string? ref) (string-starts-with? ref #((isalnum+) ":")))
 	 (irritant ref |Bad gpath scheme|))
@@ -562,6 +595,8 @@
 	((pair? ref) (gp/info (gp/path (car ref) (cdr ref))))
 	((and (string? ref) (exists has-prefix ref {"http:" "https:" "ftp:"}))
 	 (gp/urlinfo ref))
+	((and (string? ref) (has-prefix ref "data:"))
+	 (datauri/fetch+ ref #t))
 	((and (string? ref) (has-prefix ref "s3:"))
 	 (s3/info (->s3loc ref)))
 	((and (string? ref) (not (file-exists? ref))) #f)
@@ -604,6 +639,7 @@
 	 (get ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
 	       (car ref) (cdr ref) #f #f)
 	      'modified))
+	((and (string? ref) (has-prefix ref "data:")) #T2001-08-16)
 	((and (string? ref)
 	      (exists has-prefix ref {"http:" "https:" "ftp:"}))
 	 (let ((response (urlget ref)))
