@@ -25,6 +25,12 @@
       (begin (system "mkdir -p " (dirname filename))
 	filename)))
 
+(define (showuri s)
+  (unless (string? s) (set! s (gp/string s)))
+  (if (and (string? s) (has-prefix s "data:"))
+      (printout "data uri (" (packet->base16 (md5 s)) ")")
+      (write s)))
+
 (define (addversion string num)
   (if (textsearch #("." (isalpha+) (eos)) string)
       (textsubst string `#((SUBST "." ,(glom "-" num ".")) (isalpha+) (eos)))
@@ -70,7 +76,7 @@
 		    (not (getopt options 'updateall (config 'updateall))))))
   (default! exists (gp/exists? savepath))
   (logdebug |LOCALIZE/sync|
-    "Syncing " ref " with " (gp/string savepath) " from " (gp/string absref)
+    "Syncing " ref " with " (gp/string savepath) " from " (showuri absref)
     (if exists " exists" " missing")
     (if checksync " checksync" " dontcheck"))
   (cond ((equal? (gp/string savepath) (gp/string absref))
@@ -81,12 +87,12 @@
 	      (not (needsync? savepath absref (getopt options 'basetime))))
 	 (logdebug |DOMUTILS/LOCALIZE/sync!|
 		   "Content " ref " is up to date in " (gp/string savepath)
-		   " from " (gp/string absref))
+		   " from " (showuri absref))
 	 #t)
 	(else
 	 (logdebug |DOMUTILS/LOCALIZE/sync!|
 	   "Updating out-of-date " ref " at " (gp/string savepath)
-	   " from " (gp/string absref))
+	   " from " (showuri absref))
 	 (let* ((fetched
 		 (onerror (gp/fetch+ absref)
 		   (lambda (ex)
@@ -100,13 +106,13 @@
 	   (cond ((and exists (not fetched))
 		  (logwarn |LOCALIZE/sync|
 			   "Couldn't update content for " ref
-			   " from " (gp/string absref) ", "
+			   " from " (showuri absref) ", "
 			   "using current " (gp/string savepath)))
 		 ((or (not fetched)
 		      (fail? (get fetched 'content))
 		      (not (get fetched 'content)))
 		  (logwarn |LOCALIZE/sync|
-			   "Couldn't read content from " (gp/string absref)
+			   "Couldn't read content from " (showuri absref)
 			   " for " ref))
 		 (else (onerror (gp/save! savepath
 				  (if xform (xform (get fetched 'content))
@@ -115,14 +121,14 @@
 			 (lambda (ex)
 			   (logwarn |LOCALIZE/sync/save|
 				    "Couldn't update content for " ref
-				    " from " (gp/string absref) ", "
+				    " from " (showuri absref) ", "
 				    "using current " (gp/string savepath))))))
 	   (when (and fetched (test fetched 'content)
 		      (or (string? content) (packet? content)))
 	     (loginfo "Copied " (length content) " "
 		      (if (packet? content) "bytes" "characters")
 		      " of " (or ftype "stuff")
-		      " from\n\t" (gp/string absref)
+		      " from\n\t" (showuri absref)
 		      "\n  to\t " (gp/string savepath)
 		      "\n  for\t" ref)
 	     (store! urlmap (list absref) (get fetched 'modified)))
@@ -146,14 +152,14 @@
    (tryif (or (empty-string? ref) (has-prefix ref "#")
 	      (has-prefix ref {"javascript:" "chrome-extension:"})
 	      (and (string-starts-with? ref #((isalpha+) ":"))
-		   (not (has-prefix ref {"http:" "https:" "ftp:"}))))
+		   (not (has-prefix ref {"http:" "https:" "ftp:" "data:"}))))
      ;; (begin (logdebug |LOCALIZE/ref| "Ignoring " ref) )
      ref)
    (tryif (test urlmap absref)
      (begin (logdebug |LOCALIZE/ref| "Cached " absref " ==> " (get urlmap absref))
        (get urlmap absref)))
    (begin (logdebug |LOCALIZE/ref| 
-	    ref " " absref "\n\tfrom " base "\n\tto " saveto "\n\tfor " resources)
+	    ref " " (showuri absref) "\n\tfrom " base "\n\tto " saveto "\n\tfor " resources)
      {})
    (tryif (position #\# ref)
      (let* ((baseuri (uribase ref))
@@ -164,7 +170,7 @@
 			   (localref baseuri urlmap base
 				     saveto resources options)))))
        (logdebug |LOCALIZE/ref|
-	 ref " " absref "\n\tfrom " base "\n\tto " saveto "\n\tfor " resources)
+	 ref " " (showuri absref) "\n\tfrom " base "\n\tto " saveto "\n\tfor " resources)
        (debug%watch baseuri hashid lref)
        (glom lref "#" hashid)))
    ;; Check the cache
@@ -172,6 +178,9 @@
    ;; don't bother localizing these references
    (tryif (exists string-starts-with? ref
 		  (getopt options 'localhosts {}))
+     ref)
+   ;; Skip local refs
+   (tryif (%wc has-prefix ref (mkpath resources ""))
      ref)
    ;; No easy outs, fetch the content and store it
    (let* ((name (gp/basename ref))
@@ -203,12 +212,12 @@
 	   ;;  same table)
 	   (store! urlmap absref lref)
 	   (store! urlmap (vector lref) absref)
-	   (logdebug |LOCALIZE/ref| "LOCALREF " ref " ==> " lref
+	   (logdebug |LOCALIZE/ref| "LOCALREF " (showuri ref) " ==> " lref
 		     ",\n\tsynced from " base "\n\tto " saveto)
 	   lref)
 	 (begin 
 	   (logwarn |LOCALIZE/sync|
-		    "Couldn't sync " ref "==>" lref
+		    "Couldn't sync " (showuri ref) "==>" lref
 		    ",\n\tsynced from " base "\n\tto " saveto)
 	   ref)))))
 
@@ -226,7 +235,7 @@
   (loginfo |DOM/LOCALIZE!|
     "Localizing references for "
     (try (gp/string (get dom 'source)) "source")
-    "\n\tfrom " (write (gp/string base))
+    "\n\tfrom " (showuri base)
     "\n\tto " (write read) ", copying content to "
     (if (singleton? saveto) (write (gp/string saveto))
 	(do-choices saveto
@@ -238,27 +247,29 @@
     (loginfo |Localize| "Localizing [src] elements")
     (dolist (node (dom/select->list dom "[src]"))
       (loginfo |Localize| "Localizing " (dom/sig node)
-	       "\n\tfrom " (gp/string base) "\n\tto "
+	       "\n\tfrom " (showuri base) "\n\tto "
 	       (gp/string saveto))
       (let* ((cached (get urlmap (get node 'src)))
 	     (ref (try cached
 		       (begin
-			 (logdebug "Localizing " (write (get node 'src))
-				   " for " (dom/sig node #t))
+			 (logdebug DOM/LOCALIZE!
+			   "Localizing " (showuri (get node 'src))
+			   " for " (dom/sig node #t))
 			 (localref (get node 'src) urlmap
 				   base (qc saveto) read options)))))
 	(when (and (exists? ref) ref)
 	  (if (exists? cached)
 	      (loginfo |Localize|
-		       "Localized (cached) " (write (get node 'src))
+		       "Localized (cached) " (showuri (get node 'src))
 		       "\n\tto " (write ref) " for " (dom/sig node #t) " saved in"
 		       (do-choices saveto (printout "\n\t\t" (gp/string saveto))))
 	      (loginfo |Localize|
-		       "Localized " (write (get node 'src))
+		       "Localized " (showuri (get node 'src))
 		       "\n\tto " (write ref) " for " (dom/sig node #t) " saved in"
 		       (do-choices saveto (printout "\n\t\t" (gp/string saveto)))))
 	  (when saveslot (dom/set! node saveslot (get node 'src)))
-	  (unless (test node 'data-origin) (dom/set! node 'data-origin (get node 'src)))
+	  (unless (or (test node 'data-origin) (has-prefix (get node 'src) "data:"))
+	    (dom/set! node 'data-origin (get node 'src)))
 	  (dom/set! node 'src ref)
 	  (logdebug |Localize| "New converted node: \n"  (pprint node)))))
     ;; Convert url() references in stylesheets
@@ -272,7 +283,7 @@
 		  (has-prefix href "data:") (has-prefix ref "data:"))
 	  (loginfo |Localize|
 		   "Localizing stylesheet " (get node 'href)
-		   "\n\tfrom " base "\n\tto " saveto
+		   "\n\tfrom " (showuri base) "\n\tto " saveto
 		   (when (exists? stylerules)
 		     (printout "\n\twith CSS rules " 
 		       (pprint stylerules))))
@@ -351,7 +362,7 @@
 			    (glom rootref hashid)))))
 	  (debug%watch href baseuri rootref hashid ref)
 	  (loginfo |Localize|
-	    "Localized " (write href) " to " (write ref)
+	    "Localized " (write (showuri href)) " to " (write ref)
 	    " for " (dom/sig node #t))
 	  (when (and (exists? ref) ref)
 	    (when (and saveslot (not (equal? ref href)))
@@ -458,7 +469,7 @@
 			       (content (and (gp/exists? fullpath)
 					     (gp/fetch fullpath))))
 			  (tryif content (dom/getcssurls content))))))
-	    has-prefix {"data:" "urn:"})))
+	    has-prefix "data:")))
 
 (defambda (dom/textmanifest node (staticrefs {}) (dynamicrefs {}))
   "Generates a text manifest for a document, with additional static or dynamic refs"
