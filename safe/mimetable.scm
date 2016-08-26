@@ -516,7 +516,10 @@
 
 (define getsuffix path-suffix)
 
-(define (ctype->suffix ctype) (get *inv-mimetable* ctype))
+(define (ctype->suffix ctype (prefix #f))
+  (if prefix
+      (glom prefix (get *inv-mimetable* ctype))
+      (get *inv-mimetable* ctype)))
 
 (define (ctype->charset string)
   (try (get (text->frames #("charset" (spaces*) "="
