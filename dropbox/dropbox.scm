@@ -31,9 +31,6 @@
 	       (begin (logwarn "Fixing invalid dropbox-root " dropbox-root)
 		 (set! dropbox-root "sandbox")))))))
 
-(define (add-suffix string suffix)
-  (if (has-suffix string suffix) string (glom string suffix)))
-
 (define (mkurl base oauth path (root))
   (glom base
     (mkpath
