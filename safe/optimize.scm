@@ -272,7 +272,7 @@
 			   (and (ambiguous? value)
 				(singleton? (applicable? value))
 				(applicable? value)))
-		       (when (and optdowarn (procedure? value))
+		       (when (and optdowarn (exists? value) (procedure? value))
 			 (when (and (procedure-min-arity value)
 				    (< n-exprs (procedure-min-arity value)))
 			   (codewarning (list 'TOOFEWARGS expr value))
@@ -285,7 +285,8 @@
 			   (warning "The call to " expr " provides too many "
 				    "arguments (" n-exprs ") for " value)))
 		       (callcons (qc (map-opcode
-				      (cond ((not from) value)
+				      (cond ((not from) (try value head))
+					    ((fail? value) `(,%modref ,from ,head))
 					    ((test from '%nosubst head) head)
 					    ((test from '%volatile head)
 					     (if w/rails

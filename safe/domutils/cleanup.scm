@@ -29,7 +29,11 @@
   #((isalnum) (subst (spaces) "; ") (lword) ":"))
 
 (define default-stylefixes {})
+(varconfig! dom:stylefixes default-stylefixes)
+
 (define default-classfixes {})
+(varconfig! dom:classfixes default-classfixes)
+
 
 (define dom-cleanup-rules #[])
 (config-def! 'dom:cleanup:rules
@@ -273,17 +277,19 @@
 (define (dom/cleanup! node (opts #[])
 		      (textfn #f) (dropfn (config 'dom:drop #f)) 
 		      (unwrapfn (config 'dom:unwrap #f)) 
-		      (dropempty (config 'dom:dropempty #f))
-		      (classfixes (config 'dom:classfix #f))
-		      (stylefixes (config 'dom:stylefix #f)))
+		      (dropempty)
+		      (classfixes)
+		      (stylefixes))
   (set! textfn (getopt opts 'dom:textfn textfn))
   (set! dropfn (getopt opts 'dom:drop dropfn))
   (set! unwrapfn (getopt opts 'dom:unwrap unwrapfn))
   (set! dropempty (getopt opts 'dom:dropempty dropempty))
   (set! classfixes (getopt opts 'dom:classfix classfixes))
   (set! stylefixes (getopt opts 'dom:stylefix stylefixes))
-  (if (overlaps? classfixes #t) (set+! classfixes default-classfixes))
-  (if (overlaps? stylefixes #t) (set+! stylefixes default-stylefixes))
+  (when (overlaps? classfixes #t) 
+    (set! classfixes (choice (difference classfixes #t) default-classfixes)))
+  (when (overlaps? stylefixes #t)
+    (set! stylefixes (choice (difference stylefixes #t) default-stylefixes)))
   (notice%watch "DOM/CLEANUP!" 
     "NODE" (dom/nodeid node)
     dropempty classfixes stylefixes 
@@ -555,6 +561,7 @@
 	 (len (score-styles content spans spanscores))
 	 (maxval (table-maxval spanscores))
 	 (top (table-max spanscores)))
+    (logwarn |RaiseSpansBefore| (xmleval node))
     (when (and (exists? content) len (> len 0)
 	       (exists? maxval) (> maxval (/ len 2))
 	       (not (or (fail? top) (ambiguous? top)
@@ -567,7 +574,8 @@
       (when (and (car top) (not (empty-string? (car top))))
 	(if (and (test node 'class) (not (empty-string? (get node 'class))))
 	    (dom/set! node 'class (glom (get node 'class) " " (car top)))
-	    (dom/set! node 'class (car top)))))
+	    (dom/set! node 'class (car top))))
+      (logwarn |RaiseSpans| node))
     (store! node '%content
 	    (->list
 	     (apply append
@@ -576,7 +584,15 @@
 			       (if (test spans top elt)
 				   (->vector (get elt '%content))
 				   (vector elt))))
-			 (->vector (get node '%content))))))))
+			 (->vector (get node '%content))))))
+    (drop! node '%markup)
+    (logwarn |RaiseSpansDone| (xmleval node))))
+
+(define (test-add node cl)
+  (let ((addclass cl))
+    (if (= 3 3)
+	(dom/set! node 'class (glom (get node 'class) " " addclass))
+	(message "Nothing"))))
 
 (define (score-styles content spans scores (len 0))
   (if (null? content) len

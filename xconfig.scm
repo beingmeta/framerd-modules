@@ -10,6 +10,7 @@
 (module-export! '{load-xconfig xconfig:root xconfig? xconfig/reset!})
 
 (define-init %loglevel %notice%)
+;;(set!  %loglevel %debug%)
 
 (define-init xconfig:root #f)
 (define-init xconfigs {})
@@ -42,6 +43,7 @@
   (let* ((root (try (threadget 'xconfig:root) xconfig:root))
 	 (gp (->gpath path (if (string? root) (->gpath root) root)))
 	 (canonical (and (gpath? gp) (gpath->string gp))))
+    (debug%watch "LOAD-XCONFIG" path root gp canonical)
     (if (gpath? gp)
 	(unless (overlaps? canonical xconfigs) 
 	  (if (gp/exists? gp)
