@@ -29,7 +29,11 @@
   #((isalnum) (subst (spaces) "; ") (lword) ":"))
 
 (define default-stylefixes {})
+(varconfig! dom:stylefixes default-stylefixes)
+
 (define default-classfixes {})
+(varconfig! dom:classfixes default-classfixes)
+
 
 (define dom-cleanup-rules #[])
 (config-def! 'dom:cleanup:rules
@@ -282,8 +286,10 @@
   (set! dropempty (getopt opts 'dom:dropempty dropempty))
   (set! classfixes (getopt opts 'dom:classfix classfixes))
   (set! stylefixes (getopt opts 'dom:stylefix stylefixes))
-  (if (overlaps? classfixes #t) (set+! classfixes default-classfixes))
-  (if (overlaps? stylefixes #t) (set+! stylefixes default-stylefixes))
+  (when (overlaps? classfixes #t) 
+    (set! classfixes (choice (difference classfixes #t) default-classfixes)))
+  (when (overlaps? stylefixes #t)
+    (set! stylefixes (choice (difference stylefixes #t) default-stylefixes)))
   (notice%watch "DOM/CLEANUP!" 
     "NODE" (dom/nodeid node)
     dropempty classfixes stylefixes 
