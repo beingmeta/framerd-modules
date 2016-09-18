@@ -180,7 +180,7 @@
 		  (getopt options 'localhosts {}))
      ref)
    ;; Skip local refs
-   (tryif (%wc has-prefix ref (mkpath resources ""))
+   (tryif (has-prefix ref (mkpath resources ""))
      ref)
    ;; No easy outs, fetch the content and store it
    (let* ((name (gp/basename ref))
