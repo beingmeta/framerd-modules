@@ -38,7 +38,7 @@
 
 (define-init jwt/algorithms {"RS256" "HS256"})
 
-(define-init jwt/default-refresh 20) ;; one hour
+(define-init jwt/default-refresh 3600) ;; one hour
 (varconfig! jwt:refresh jwt/default-refresh)
 
 (define-init jwt-verbose #f)
