@@ -38,8 +38,8 @@
 
 (define-init jwt/algorithms {"RS256" "HS256"})
 
-(define-init jwt/refresh 3600) ;; one hour
-(varconfig! jwt:refresh jwt/refresh)
+(define-init jwt/default-refresh 20) ;; one hour
+(varconfig! jwt:refresh jwt/default-refresh)
 
 (define-init jwt-verbose #f)
 (varconfig! jwt:verbose jwt-verbose)
@@ -146,7 +146,7 @@
 				 (elt segs 0) (elt segs 1)))
 	    (cons-jwt header payload signature string 
 		      (getopt opts 'domain issuer)
-		      (and key #t) (try (get payload "exp") #f))
+		      (and key #t) (try (get payload "exp") (get payload 'exp) #f))
 	    (and err (signal-error string key alg issuer header 
 				   payload signature body))))
       (cons-jwt (jwt/b64.json (car segs)) (jwt/b64.json (cadr segs)) 
@@ -337,13 +337,13 @@
   (debug%watch "JWT/REFRESH" 
     jwt "EXPIRES" (jwt-expiration jwt) opts key alg checker issuer)
   (and (or (jwt-valid jwt) (jwt/valid? jwt key alg checker issuer))
-       (or (and (jwt-expiration jwt) (< (time) (jwt-expiration jwt)))
-	   (and (not (jwt-expiration jwt)) (not checker))
+       (or (and (jwt-expiration jwt) (time-earlier? (jwt-expiration jwt)) jwt)
+	   (and (not (jwt-expiration jwt)) (not checker) jwt)
 	   (if (jwt-expiration jwt)
 	       (let ((payload (if checker 
 				  (checker (jwt-payload jwt) #t #f)
 				  (deep-copy (jwt-payload jwt))))
-		     (refresh (getopt opts 'refresh jwt/refresh)))
+		     (refresh (getopt opts 'refresh jwt/default-refresh)))
 		 (when payload 
 		   (if refresh
 		       (store! payload 'exp (time+ refresh))
@@ -355,14 +355,14 @@
 (define (jwt/refreshed jwt (opts) (key) (alg) (checker) (issuer))
   "Refresh a JWT if needed or fails otherwise"
   (and (or (jwt-valid jwt) (jwt/check jwt))
-       (if (or (and (jwt-expiration jwt) (< (time) (jwt-expiration jwt)))
+       (if (or (and (jwt-expiration jwt) (time-earlier? (jwt-expiration jwt)))
 	       (and (not (jwt-expiration jwt)) (not checker)))
 	   (fail)
 	   (let ((payload (if checker 
 			      (checker (jwt-payload jwt) #t #f)
 			      (deep-copy (jwt-payload jwt))))
-		 (refresh (getopt opts 'refresh jwt/refresh)))
-	     (when payload 
+		 (refresh (getopt opts 'refresh jwt/default-refresh)))
+	     (when payload
 	       (if refresh
 		   (store! payload 'exp (time+ refresh))
 		   (drop! payload 'exp)))
@@ -375,6 +375,7 @@
 
 ;;; Table for PKCS#1 digest prefixes
 ;;; This should probably be part of a more general
+;;;  module
 
 (define pcks1-SHA256-prefix
   #x"3031300d060960864801650304020105000420")

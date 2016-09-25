@@ -68,9 +68,11 @@
 	       (loginfo |JWT/AUTH/getinfo| 
 		 "Couldn't get JWT " jwt " from bearer or " cookie))
 	     (when (exists? jwt)
+	       (set! jwt (jwt/refresh jwt jwtarg))
 	       (loginfo |JWT/AUTH/getinfo| 
 		 "Got JWT " jwt " from " 
-		 (if (exists? bjwt) "Bearer authorization" cookie))
+		 (if (exists? bjwt) "Bearer authorization" cookie) 
+		 "\n    w/payload " (pprint (jwt-payload jwt)))
 	       (req/set! cachename jwt))
 	     jwt)))
 (define (extract-bearer string)
