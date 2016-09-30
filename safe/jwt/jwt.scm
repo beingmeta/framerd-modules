@@ -13,11 +13,11 @@
 ;;(set! %loglevel %debug%)
 
 (module-export! '{jwt? jwt:default-domain
-		  jwt-header jwt-payload jwt-text 
+		  jwt-header jwt-payload jwt-text jwt-expiration
 		  jwt-valid jwt-domain jwt-signature 
 		  jwt/parse jwt/valid? jwt/check 
 		  jwt/make jwt/string jwt/sign
-		  jwt/refresh jwt/refreshed
+		  jwt/configs jwt/algorithms
 		  jwt/b64.bin jwt/b64.txt jwt/b64.json
 		  jwt/rs256/sign jwt/rs256/verify
 		  jwt/getdomain 
@@ -38,35 +38,23 @@
 
 (define-init jwt/algorithms {"RS256" "HS256"})
 
-(define-init jwt/default-refresh 3600) ;; one hour
-(varconfig! jwt:refresh jwt/default-refresh)
-
 (define-init jwt-verbose #f)
 (varconfig! jwt:verbose jwt-verbose)
 
-;;; This checks the payload for validity.  It is a function
-;;;  of the form (fn payload update err)
-;;; If update is #t, it may return an updated payload,
-;;;  otherwise it returns the payload or #f
-;;; Err determines whether or not an error is returned if the 
-;;;  check fails
-(define-init jwt/checker #f)
-(varconfig! jwt:checker jwt/checker)
-
 ;;; The table for configuration options
 
-(define-init config-table (make-hashtable))
+(define-init jwt/configs (make-hashtable))
 (config-def! 'jwt:domains
 	     (lambda (var (val))
 	       (if (bound? val)
 		   (begin
-		     (store! config-table (get val 'domain) val)
-		     (store! config-table (get val 'issuer) val)
-		     (store! config-table (get val 'cookie) val))
-		   (deep-copy (get config-table (getkeys config-table))))))
+		     (store! jwt/configs (get val 'domain) val)
+		     (store! jwt/configs (get val 'issuer) val)
+		     (store! jwt/configs (get val 'cookie) val))
+		   (deep-copy (get jwt/configs (getkeys jwt/configs))))))
 (config! 'jwt:domains #[domain "jwt.io" key "secret" alg "HS256"])
 
-(define (jwt/getdomain spec) (try (get config-table spec) #f))
+(define (jwt/getdomain spec) (try (get jwt/configs spec) #f))
 
 ;;; Common code for handling args to JWT functions
 
@@ -74,9 +62,9 @@
   (macro expr
     `(begin
        (default! opts 
-	 (try (and jwt:default-domain (get config-table jwt:default-domain)) #f))
-       (when (and (or (symbol? opts) (string? opts)) (test config-table opts))
-	 (set! opts (get config-table opts)))
+	 (try (and jwt:default-domain (get jwt/configs jwt:default-domain)) #f))
+       (when (and (or (symbol? opts) (string? opts)) (test jwt/configs opts))
+	 (set! opts (get jwt/configs opts)))
        (if (and (string? opts) (overlaps? (upcase opts) jwt/algorithms))
 	   (if (and (bound? key) (or (packet? key) (string? key)))
 	       (begin (set! alg opts) (set! opts #f))
@@ -89,7 +77,6 @@
 	     (set! opts #f)))
        (default! key (getopt opts 'key #f)) 
        (default! alg (getopt opts 'alg #f))
-       (default! checker (getopt opts 'checker jwt/checker))
        (default! issuer (getopt opts 'issuer #f))
        )))
 
@@ -128,12 +115,12 @@
 
 ;;; Working with existing tokens
 
-(define (jwt/parse string (opts) (key) (alg) (checker) (issuer)
+(define (jwt/parse string (opts) (key) (alg) (issuer)
 		   (err #f) (segs) (header) (signature))
   (handle-jwt-args)
   (set! segs (segment string "."))
   (debug%watch "JWT/PARSE" 
-    key alg checker issuer "STRING" string "OPTS" opts)
+    key alg issuer "STRING" string "OPTS" opts)
   (if key
       (let ((header (jwt/b64.json (elt segs 0)))
 	    (payload (jwt/b64.json (elt segs 1)))
@@ -153,12 +140,12 @@
 		(jwt/b64.bin (caddr segs)) string
 		(getopt opts 'domain issuer))))
 
-(define (jwt/valid? jwt (opts) (key) (alg) (checker) (issuer)
+(define (jwt/valid? jwt (opts) (key) (alg) (issuer)
 		    (header) (payload))
   (handle-jwt-args)
   (default! header (jwt-header jwt))
   (default! payload (jwt-payload jwt))
-  (debug%watch "JWT/VALID?" jwt opts key alg checker issuer)
+  (debug%watch "JWT/VALID?" jwt opts key alg issuer)
   (if key
       (and (or (not alg) (test header 'alg alg))
 	   (or (not issuer) (test payload 'iss issuer))
@@ -166,10 +153,10 @@
 			   (jwt-body jwt)))
       (error |JWT/NoKey| "No key was provided to validate " jwt)))
 
-(define (jwt/check jwt (opts) (key) (alg) (checker) (issuer)
+(define (jwt/check jwt (opts) (key) (alg) (issuer)
 		   (header) (payload))
   (handle-jwt-args)
-  (debug%watch "JWT/CHECK" jwt opts key alg checker issuer)
+  (debug%watch "JWT/CHECK" jwt opts key alg issuer)
   (set! header (jwt-header jwt))
   (set! payload (jwt-payload jwt))
   (if key
@@ -177,11 +164,10 @@
 	   (or (not issuer) (test payload 'iss issuer))
 	   (test-signature jwt (jwt-signature jwt) key alg
 			   (jwt-body jwt))
-	   (and (or (not checker) (checker (jwt-payload jwt)))
-		(cons-jwt (jwt-header jwt) (jwt-payload jwt)
-			  (jwt-signature jwt) (jwt-text jwt) 
-			  (getopt opts 'domain issuer) key
-			  (try (get (jwt-payload jwt) 'exp) #f))))
+	   (cons-jwt (jwt-header jwt) (jwt-payload jwt)
+		     (jwt-signature jwt) (jwt-text jwt) 
+		     (getopt opts 'domain issuer) key
+		     (try (get (jwt-payload jwt) 'exp) #f)))
       (error |JWT/NoKey| "No key was provided to validate " jwt)))
 
 ;; With three args, the third arg is header64.payload64; with four, the first
@@ -228,7 +214,7 @@
   
 ;;; Generating new tokens
 
-(define (jwt/make payload (opts) (key) (alg) (checker) (issuer)
+(define (jwt/make payload (opts) (key) (alg) (issuer)
 		  (header) (usepay) (nopad) (urisafe) 
 		  (hdr64) (pay64) (body) (sig))
   (handle-jwt-args)
@@ -237,7 +223,6 @@
   (if (testopt opts 'header)
       (set! header (keys->strings (getopt opts 'header)))
       (set! header `#[TYP "JWT" ALG ,alg]))
-  (when checker (set! payload (checker payload #t #f)))
   (if (table? payload) 
       (set! usepay (keys->strings payload))
       (set! usepay payload))
@@ -250,13 +235,13 @@
   (set! body (glom hdr64 "." pay64))
   (set! sig (get-signature body key alg))
   (debug%watch "JWT/MAKE"
-    payload opts key alg checker issuer
+    payload opts key alg issuer
     hdr64 pay64 sig)
   (cons-jwt header payload sig
 	    (and sig (glom hdr64 "." pay64 "." (->base64 sig #t urisafe)))
 	    (getopt opts 'domain issuer) (and key #t) #t))
 
-(define (jwt/string payload (opts) (key) (alg) (checker) (issuer)
+(define (jwt/string payload (opts) (key) (alg) (issuer)
 		    (header #f) (usepay) (nopad) (urisafe)
 		    (hdr64) (pay64) (body) (sig))
   (handle-jwt-args)
@@ -265,9 +250,6 @@
   (if (testopt opts 'header)
       (set! header (keys->strings (getopt opts 'header)))
       (set! header `#["typ" "JWT" "alg" ,alg]))
-  (if checker
-      (set! usepay (checker payload #t #t))
-      (set! usepay payload))
   (when (table? usepay) (set! usepay (keys->strings usepay)))
   (when (and issuer (not (test payload 'iss)))
     (store! usepay "iss" issuer))
@@ -276,10 +258,10 @@
 		  (->base64 (->json usepay) nopad urisafe)))
   (set! body (glom hdr64 "." pay64))
   (set! sig (get-signature body key alg))
-  (debug%watch "JWT/STRING" payload opts key alg checker issuer)
+  (debug%watch "JWT/STRING" payload opts key alg issuer)
   (glom hdr64 "." pay64 "." (packet->base64 sig nopad urisafe)))
 
-(define (jwt/sign jwt (opts) (key) (alg) (checker) (issuer)
+(define (jwt/sign jwt (opts) (key) (alg) (issuer)
 		  (payload) (header) (usepay) (nopad) (urisafe)
 		  (hdr64) (pay64) (body) (sig))
   (handle-jwt-args)
@@ -289,18 +271,14 @@
   (if (testopt opts 'header)
       (set! header (keys->strings (getopt opts 'header)))
       (set! header `#["typ" "JWT" "alg" ,alg]))
-  (if checker 
-      (set! usepay (checker payload #t #f))
-      (set! usepay payload))
   (when (table? payload) (set! payload (keys->strings payload)))
   (when (and issuer (not (test payload "iss")))
     (store! payload "iss" issuer))
   (set! hdr64 (->base64 (->json (keys->strings header)) nopad urisafe))
-  (set! pay64 (if (string? usepay) (->base64 usepay nopad urisafe)
-		  (->base64 (->json usepay) nopad urisafe)))
+  (set! pay64 (->base64 payload nopad urisafe))
   (set! body (glom hdr64 "." pay64))
   (set! sig (get-signature body key alg))
-  (debug%watch "JWT/SIGN" payload opts key alg checker issuer)
+  (debug%watch "JWT/SIGN" payload opts key alg issuer)
   (cons-jwt header payload sig
 	    (glom hdr64 "." pay64 "." (->base64 sig #t urisafe))
 	    (getopt opts 'domain (or (jwt-domain jwt) issuer))
@@ -328,46 +306,6 @@
   (if (bound? value)
       (test (jwt-payload jwt) slotid value)
       (test (jwt-payload jwt) slotid)))
-
-;;; Refreshing tokens
-
-(define (jwt/refresh jwt (opts) (key) (alg) (checker) (issuer))
-  "Refresh a JWT if needed or returns the JWT as is"
-  (handle-jwt-args)
-  (debug%watch "JWT/REFRESH" 
-    jwt "EXPIRES" (jwt-expiration jwt) opts key alg checker issuer)
-  (and (or (jwt-valid jwt) (jwt/valid? jwt key alg checker issuer))
-       (or (and (jwt-expiration jwt) (time-earlier? (jwt-expiration jwt)) jwt)
-	   (and (not (jwt-expiration jwt)) (not checker) jwt)
-	   (if (jwt-expiration jwt)
-	       (let ((payload (if checker 
-				  (checker (jwt-payload jwt) #t #f)
-				  (deep-copy (jwt-payload jwt))))
-		     (refresh (getopt opts 'refresh jwt/default-refresh)))
-		 (when payload 
-		   (if refresh
-		       (store! payload 'exp (time+ refresh))
-		       (drop! payload 'exp)))
-		 (and payload 
-		      (jwt/make payload opts key alg checker issuer)))
-	       jwt))))
-
-(define (jwt/refreshed jwt (opts) (key) (alg) (checker) (issuer))
-  "Refresh a JWT if needed or fails otherwise"
-  (and (or (jwt-valid jwt) (jwt/check jwt))
-       (if (or (and (jwt-expiration jwt) (time-earlier? (jwt-expiration jwt)))
-	       (and (not (jwt-expiration jwt)) (not checker)))
-	   (fail)
-	   (let ((payload (if checker 
-			      (checker (jwt-payload jwt) #t #f)
-			      (deep-copy (jwt-payload jwt))))
-		 (refresh (getopt opts 'refresh jwt/default-refresh)))
-	     (when payload
-	       (if refresh
-		   (store! payload 'exp (time+ refresh))
-		   (drop! payload 'exp)))
-	     (and payload 
-		  (jwt/make payload opts key alg checker issuer))))))
 
 ;;;; RSA signing
 

@@ -15,6 +15,10 @@
 		  auth/deauthorize! auth/sticky?
 		  auth/maketoken})
 
+(module-export! '{jwt/refresh jwt/refreshed})
+
+(define handle-jwt-args (within-module 'jwt handle-jwt-args))
+
 ;;;; Constant and configurable variables
 
 (define-init jwt/auth/domain #f)
@@ -22,9 +26,14 @@
 (define-init jwt/auth/defaults #[key "secret" alg "HS256"])
 (varconfig! jwt:auth:defaults jwt/auth/defaults)
 
+;; This is the cookie to store the JWT auth token itself
 (define-init auth-cookie 'JWT:AUTH)
+;; This is the request field for caching the parsee JWT token;
+;;  note that _xxx (with the leading underscore) can't be passed
+;;  in as a CGI parameter
 (define-init auth-cache '_JWT:AUTH)
-(define-init identity-cache '__JWT:AUTH)
+;; This is where the identity value itself is cached
+(define-init identity-cache '_.JWT:AUTH)
 (config-def! 'jwt:cookie
 	     (lambda (var (val))
 	       (if (bound? val)
@@ -32,18 +41,35 @@
 		     (lognotice |JWT:AUTH| "Set cookie to " val)
 		     (set! auth-cookie val)
 		     (set! auth-cache (string->symbol (glom "_" val)))
-		     (set! identity-cache (string->symbol (glom "__" val))))
+		     (set! identity-cache (string->symbol (glom "_." val))))
 		   auth-cookie)))
 	     
+;; The host name to use for setting the auth cookie
 (define-init cookie-host #f)
 (varconfig! jwt:cookie:host cookie-host)
+;; The path to use for setting the auth cookie
 (define-init cookie-path "/")
 (varconfig! jwt:cookie:path cookie-path)
+;; The lifetime of the cookie if persistent
 (define-init cookie-lifetime (* 7 24 3600))
 (varconfig! jwt:cookie:lifetime cookie-lifetime)
 
-(define (auth/maketoken (length 7) (mult (microtime)))
-  (let ((sum 0) (modulus 1))
+(define-init jwt/default-refresh 3600) ;; one hour (3600)
+(varconfig! jwt:refresh jwt/default-refresh)
+;;(set! jwt/default-refresh 30) ;; useful for debugging
+
+;;; This checks the payload for validity.  It is a function
+;;;  of the form (fn payload update err)
+;;; If update is #t, it may return an updated payload,
+;;;  otherwise it returns the payload or #f
+;;; Err determines whether or not an error is returned if the 
+;;;  check fails
+(define-init jwt/checker #f)
+(varconfig! jwt:auth:checker jwt/checker)
+
+;; This makes a numeric token identifying a login session
+(define (auth/maketoken (length 4) (mult (microtime)))
+  (let ((sum 0) (modulus 1/2))
     (dotimes (i length)
       (set! sum (+ (* 256 sum) (random 256)))
       (set! modulus (* modulus 256)))
@@ -59,21 +85,40 @@
       (set! cachename auth-cache)
       (set! cachename (string->symbol (glom "_" cookie))))
   (req/get cachename
-	   (let* ((bjwt (jwt/parse (get-bearer-token) jwtarg))
+	   (let* ((bjwt (try (jwt/parse (get-bearer-token) jwtarg) #f))
 		  (jwt #f))
-	     (if (fail? bjwt)
-		 (set! jwt (jwt/parse (or (req/get cookie {}) {}) jwtarg))
+	     (if (not bjwt)
+		 (set! jwt (or (jwt/parse (or (req/get cookie {}) {}) jwtarg) {}))
 		 (set! jwt bjwt))
-	     (when (fail? jwt)
+	     (when (not jwt)
 	       (loginfo |JWT/AUTH/getinfo| 
 		 "Couldn't get JWT " jwt " from bearer or " cookie))
-	     (when (exists? jwt)
-	       (set! jwt (jwt/refresh jwt jwtarg))
-	       (loginfo |JWT/AUTH/getinfo| 
-		 "Got JWT " jwt " from " 
-		 (if (exists? bjwt) "Bearer authorization" cookie) 
-		 "\n    w/payload " (pprint (jwt-payload jwt)))
-	       (req/set! cachename jwt))
+	     (when jwt 
+	       (if (time-earlier? (jwt-expiration jwt))
+		   (loginfo |JWT/AUTH/getinfo|
+		     "Got JWT " jwt " from " 
+		     (if (exists? bjwt) "Bearer authorization" cookie) 
+		     "\n    w/payload " (pprint (jwt-payload jwt)))
+		   (let ((new (jwt/refresh jwt jwtarg)))
+		     (unless (equal? new jwt)
+		       (unless bjwt
+			 (when new
+			   (loginfo |JWT/AUTH/getinfo| 
+			     "Refreshed JWT " jwt " to " new " from " 
+			     (if (exists? bjwt) "Bearer authorization" cookie) 
+			     "\n    w/old payload " (pprint (jwt-payload jwt))
+			     "\n    w/new payload " (pprint (jwt-payload new)))
+			   (req/set! cachename new)
+			   (req/set! cookie (jwt-text new)))
+			 (unless new
+			   (logwarn |JWT/AUTH/getinfo| 
+			     "Failed to refreshed JWT " jwt " from " 
+			     (if (exists? bjwt) "Bearer authorization" cookie) 
+			     "\n    w/payload " (pprint (jwt-payload jwt)))
+			   (req/drop! cachename)
+			   (req/drop! cookie)))
+		       (set! jwt new)))))
+	     (when jwt (req/set! cachename jwt))
 	     jwt)))
 (define (extract-bearer string)
   (get (text->frame #((bos) (spaces*) "Bearer" (spaces) (label token (rest)))
@@ -104,28 +149,83 @@
       (try (jwt/get arg 'sticky) #f)
       (try (jwt/get (auth/getinfo arg) 'sticky) #f)))
 
+;;; Refreshing tokens
+
+(define (jwt/refresh jwt (opts) (key) (alg) (checker) (issuer))
+  "Refresh a JWT if needed or returns the JWT as is"
+  (handle-jwt-args)
+  (default! checker (getopt opts 'checker jwt/checker))
+  (debug%watch "JWT/REFRESH" 
+    jwt "EXPIRES" (jwt-expiration jwt) opts key alg checker issuer)
+  (and (or (jwt-valid jwt) (jwt/valid? jwt key alg issuer))
+       (or (and (jwt-expiration jwt) (time-earlier? (jwt-expiration jwt)) jwt)
+	   (not (jwt-expiration jwt))
+	   (if (jwt-expiration jwt)
+	       (let ((payload (if checker 
+				  (checker (jwt-payload jwt) #t #f)
+				  (deep-copy (jwt-payload jwt))))
+		     (refresh (getopt opts 'refresh jwt/default-refresh))
+		     (new #f))
+		 (when payload 
+		   (if refresh
+		       (store! payload 'exp (time+ refresh))
+		       (drop! payload 'exp))
+		   (set! new (jwt/make payload opts key alg checker issuer)))
+		 (loginfo |JWT/refresh| "Refreshed JWT " jwt " ==> " new)
+		 new)
+	       jwt))))
+
+(define (jwt/refreshed jwt (opts) (key) (alg) (checker) (issuer))
+  "Refresh a JWT if needed or fails otherwise"
+  (and (or (jwt-valid jwt) (jwt/check jwt))
+       (if (or (and (jwt-expiration jwt) (time-earlier? (jwt-expiration jwt)))
+	       (and (not (jwt-expiration jwt)) (not checker)))
+	   (fail)
+	   (let ((payload (if checker 
+			      (checker (jwt-payload jwt) #t #f)
+			      (deep-copy (jwt-payload jwt))))
+		 (refresh (getopt opts 'refresh jwt/default-refresh)))
+	     (when payload
+	       (if refresh
+		   (store! payload 'exp (time+ refresh))
+		   (drop! payload 'exp)))
+	     (and payload 
+		  (jwt/make payload opts key alg checker issuer))))))
+
 ;;;; Authorize/deauthorize API
 
 (define (auth/identify! identity (cookie auth-cookie) 
 			(jwtarg (or jwt/auth/domain jwt/auth/defaults))
-			(payload #t))
+			(payload #t)
+			(opts)
+			(checker))
   (cond ((number? payload) 
 	 (set! payload `#[sticky ,payload]))
 	((eq? payload #t)
 	 (set! payload `#[sticky ,cookie-lifetime]))
 	((not payload) (set! payload `#[]))
 	((not (table? payload)) (set! payload `#[])))
+  (default! opts
+    (cond ((table? jwtarg) jwtarg)
+	  ((symbol? jwtarg) (get jwt/configs jwtarg))
+	  ((jwt? jwtarg)
+	   (get jwt/configs (jwt-domain jwt)))
+	  (else #[])))
+  (default! checker (getopt opts 'checker jwt/checker))
   (when (jwt? identity)
     (set! payload (jwt-payload identity))
     (set! identity (get payload 'sub)))
   (and identity
        (let* ((payload (frame-update payload 'sub identity))
-	      (jwt (jwt/make payload jwtarg))
-	      (text (jwt-text jwt)))
+	      (checked (if checker 
+			   (checker payload 'init #t)
+			   (frame-update payload 'token (auth/maketoken))))
+	      (jwt (jwt/make checked jwtarg))
+	      (text (and jwt (jwt-text jwt))))
 	 (lognotice |JWT/AUTH/identify!|
 	   "Identity=" identity " in " cookie 
 	   " signed by " jwtarg " w/payload " 
-	   "\n" (pprint payload))
+	   "\n" (pprint checked))
 	 (detail%watch "AUTH/IDENTIFY!" 
 	   identity session expires payload jwt (auth->string auth))
 	 (unless text
