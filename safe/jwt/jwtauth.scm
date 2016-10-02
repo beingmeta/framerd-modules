@@ -209,7 +209,7 @@
     (cond ((table? jwtarg) jwtarg)
 	  ((symbol? jwtarg) (get jwt/configs jwtarg))
 	  ((jwt? jwtarg)
-	   (get jwt/configs (jwt-domain jwt)))
+	   (get jwt/configs (jwt-domain jwtarg)))
 	  (else #[])))
   (default! checker (getopt opts 'checker jwt/checker))
   (when (jwt? identity)
