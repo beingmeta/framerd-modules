@@ -190,7 +190,7 @@
 		   (store! payload 'exp (time+ refresh))
 		   (drop! payload 'exp)))
 	     (and payload 
-		  (jwt/make payload opts key alg checker issuer))))))
+		  (jwt/make payload opts key alg issuer))))))
 
 ;;;; Authorize/deauthorize API
 
