@@ -76,7 +76,7 @@
 	((eq? value #f) (printout "false"))
 	((timestamp? value) (printout (get value 'tick)))
 	((oid? value)
-	 (printout "\"" (oid->string value) "\""))
+	 (printout "\":" (oid->string value) "\""))
 	((table? value) (jsontable value))
 	(else (let ((string (stringout (printout json-lisp-prefix)
 			      (write value))))
