@@ -117,7 +117,7 @@
 		      (if (uuid? object)
 			  (glom "#U" (uuid->string object))
 			  (if (oid? object)
-			      (oid->string object)
+			      (glom ":" (oid->string object))
 			      (if (vector? object) (vector (map exportjson object))
 				  (if (table? object)
 				      (let ((obj (frame-create #f)))
