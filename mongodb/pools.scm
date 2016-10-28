@@ -7,7 +7,8 @@
 
 (module-export! '{mgo/pool mgo/poolfetch
 		  mgo/store! mgo/drop! mgo/add!
-		  mgo/decache!})
+		  mgo/decache!
+		  mgo/adjslot})
 
 (define-init pool-table (make-hashtable))
 
@@ -103,6 +104,86 @@
 
 (define (mgo/decache! oid (slotid #f))
   (swapout oid))
+
+;;; Defining adjunct slots of various kinds
+
+(define-init adjunct-indices (make-hashtable))
+
+(define (mgo/adjslot pool slot qcoll query (extract '_id))
+  (let ((spec (get adjunct-indices (vector pool slot))))
+    (debug%watch "MGO/ADJSLOT" spec pool slot (test adjunct-indices spec))
+    (if (and (exists? spec)
+	     (equal? spec (vector pool slot qcoll query extract))
+	     (test adjunct-indices spec))
+	(get adjunct-indices spec)
+	(let ((adjunct (%wc make-adjslot pool slot qcoll query extract)))
+	  (when (exists? spec)
+	    (logwarn |AdjunctRedefine| "Redefining the adjunct slot " 
+		     slot " of " pool " with difference parameters:"
+		     "\n old: " spec
+		     "\n new: " (get adjunct-indices (vector pool slot)))
+	    (drop! adjunct-indices spec))
+	  adjunct))))
+
+(define (make-adjslot pool slot qcoll query extract)
+  (info%watch "MAKE-ADJSLOT" pool slot qcoll query extract)
+  (let* ((fetchfn (lambda (oid collection)
+		    (if extract
+			(get (mongodb/find collection (adjunct-query query oid)
+					   `#[returns ,extract])
+			     extract)
+			(mongodb/find collection (adjunct-query query oid)))))
+	 (coll (get pool-table pool))
+	 (name 
+	  (if (exists? coll) 
+	      (glom (mongodb/name coll) "/" (collection/name coll) "/" slot)
+	      (glom (pool-id pool) "/" slot)))
+	 (adjunct (cons-extindex name fetchfn #f qcoll #t)))
+      (info%watch "MAKE-ADJSLOT/setup" adjunct name coll fetchfn)
+      (store! adjunct-indices (vector pool slot qcoll query extract) adjunct)
+      (store! adjunct-indices (vector pool slot) 
+	      (vector pool slot qcoll query extract))
+      (use-adjunct adjunct slot pool)
+      adjunct))
+
+(defambda (adjunct-query query subjects)
+  (cond ((fail? subjects) query)
+	((ambiguous? query)
+	 (for-choices (q query) (adjslot-query q subjects)))
+	((or (oid? query) (symbol? query) (number? query) (string? query))
+	 query)
+	((or (slotmap? query) (schemap? query))
+	 (let ((keys (getkeys query))
+	       (copy (frame-create #f)))
+	   (do-choices (key keys)
+	     (let ((v (get query key)))
+	       (if (identical? v '$subject)
+		   (store! copy key
+			   (if (ambiguous? subjects)
+			       `#[$oneof ,subjects]
+			       subjects))
+		   (if (and (singleton? v)
+			    (or (oid? v) (symbol? v) (number? v) (string? v)))
+		       (store! copy key v)
+		       (store! copy key (adjslot-query v subjects))))))
+	   copy))
+	((vector? query) (map (lambda (e) (adjslot-query e subjects)) query))
+	((pair? query) 
+	 (cons (adjslot-query (car e) subjects)
+	       (adjslot-query (cdr e) subjects)))
+	((mongovec? query)
+	 (let ((unpacked (unpack-compound query)))
+	   (vector->compound
+	    (map (lambda (e) (adjslot-query e subjects)) (cdr unpacked))
+	    '%mongovec
+	    #f #f)))
+	((mongomap? query)
+	 (let ((unpacked (unpack-compound query)))
+	   (vector->compound
+	    (map (lambda (e) (adjslot-query e subjects)) (cdr unpacked))
+	    '%mongomap
+	    #f #f)))
+	(else query)))
 
 ;;; Handling mongo/pool arguments
 
