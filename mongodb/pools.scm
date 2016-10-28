@@ -3,7 +3,7 @@
 
 (in-module 'mongodb/pools)
 
-(use-module '{mongodb})
+(use-module '{mongodb logger})
 
 (module-export! '{mgo/pool mgo/poolfetch
 		  mgo/store! mgo/drop! mgo/add!
