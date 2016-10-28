@@ -30,7 +30,7 @@
 
 (define (allocfn n collection)
   (if (and (integer? n) (> n 0) (<= n 1024))
-      (let* ((mod (%wc mongodb/modify collection
+      (let* ((mod (mongodb/modify collection
 				  #[_id "_pool"] 
 				  `#[$inc #[load ,n]]))
 	     (before (get mod 'value))
@@ -41,7 +41,7 @@
 	  (set+! result (oid-plus base (+ i start))))
 	(do-choices (oid result)
 	  (mongodb/insert! collection `#[_id ,oid]))
-	(%watch result))
+	result)
       (irritant n |BadAllocCount| "For pool in " collection)))
 
 (define (mgo/pool/alloc n collection) (allocfn n collection))
@@ -116,7 +116,7 @@
 	     (equal? spec (vector pool slot qcoll query extract))
 	     (test adjunct-indices spec))
 	(get adjunct-indices spec)
-	(let ((adjunct (%wc make-adjslot pool slot qcoll query extract)))
+	(let ((adjunct (make-adjslot pool slot qcoll query extract)))
 	  (when (exists? spec)
 	    (logwarn |AdjunctRedefine| "Redefining the adjunct slot " 
 		     slot " of " pool " with difference parameters:"
