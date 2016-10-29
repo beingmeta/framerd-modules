@@ -42,7 +42,7 @@
 		  "dropIndexes" (collection/name collection)
 		  "index" (get 'name))))
 
-(defambda (mgo/index/add! collection specs)
+(defambda (mgo/index/add! collection specs (opts #f))
   (mongodb/do collection
 	      "createIndexes" (collection/name collection)
 	      "indexes" (qc (generate-index-specs specs))))
@@ -80,11 +80,11 @@
     (do-choices (field (difference (getkeys spec)
 				   '{$name $unique $sparse $fields $ttl
 				     $background}))
-      (set! key (cons* field (qc (get spec field)) key)))
+      (set! key (cons* (qc (get spec field)) field key)))
     (when (exists? fields)
       (do-choices fields
 	(cond ((symbol? fields) 
-	       (set! key (cons* fields 1 key)))
+	       (set! key (cons* 1 fields key)))
 	      ((or (vector? fields) (pair? fields))
 	       (doseq (field fields)
 		 (set! key (cons* 1 (if (symbol? field) (downcase field) field)
@@ -93,15 +93,16 @@
 	       (irritant fields "Bad $fields arg")))))
     (when (fail? name)
       (set! name
-	    (stringout (doseq (elt key i)
+	    (stringout (doseq (elt (reverse key) i)
 			 (printout (if (> i 0) "_") 
 			   (if (symbol? elt) (downcase elt) elt))))))
-    (mongomap "key" (apply mongomap (reverse key))
-	      "name" name
-	      "unique" unique
-	      "sparse" sparse
-	      "background" background
-	      "expireAfterSeconds" ttl)))
+    (mongomap 
+      "key" (apply mongomap (reverse key))
+      "name" name
+      "unique" unique
+      "sparse" sparse
+      "background" background
+      "expireAfterSeconds" ttl)))
 
 (define (collection/new db name (opts #f))
   (mongodb/do db (monogmap "create" name 

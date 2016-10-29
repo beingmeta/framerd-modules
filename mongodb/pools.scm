@@ -84,9 +84,9 @@
 	       `#[_id ,(if (ambiguous? oid)
 			   `#[$oneof ,oid]
 			   oid)]
-	     `#[$set (if (ambiguous? slotid)
-			 (get-store-modifier slotid values)
-			 #[,slotid ,values])]
+	     `#[$set ,(if (ambiguous? slotid)
+			  (get-store-modifier slotid values)
+			  `#[,slotid ,values])]
 	     #[new #t return #[__index 0]])))))
 
 (defambda (get-store-modifier slotids values (result))
