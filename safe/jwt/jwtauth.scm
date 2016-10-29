@@ -88,7 +88,7 @@
 	   (let* ((bjwt (try (jwt/parse (get-bearer-token) jwtarg) #f))
 		  (jwt #f))
 	     (if (not bjwt)
-		 (set! jwt (or (jwt/parse (or (req/get cookie {}) {}) jwtarg) {}))
+		 (set! jwt (jwt/parse (or (req/get cookie {}) {}) jwtarg))
 		 (set! jwt bjwt))
 	     (when (not jwt)
 	       (loginfo |JWT/AUTH/getinfo| 
@@ -97,7 +97,7 @@
 	       (if (time-earlier? (jwt-expiration jwt))
 		   (loginfo |JWT/AUTH/getinfo|
 		     "Got JWT " jwt " from " 
-		     (if (exists? bjwt) "Bearer authorization" cookie) 
+		     (if bjwt "Bearer authorization" cookie) 
 		     "\n    w/payload " (pprint (jwt-payload jwt)))
 		   (let ((new (jwt/refresh jwt jwtarg)))
 		     (unless (equal? new jwt)
@@ -105,15 +105,19 @@
 			 (when new
 			   (loginfo |JWT/AUTH/getinfo| 
 			     "Refreshed JWT " jwt " to " new " from " 
-			     (if (exists? bjwt) "Bearer authorization" cookie) 
+			     (if bjwt "Bearer authorization" cookie) 
 			     "\n    w/old payload " (pprint (jwt-payload jwt))
 			     "\n    w/new payload " (pprint (jwt-payload new)))
 			   (req/set! cachename new)
-			   (req/set! cookie (jwt-text new)))
+			   (req/set! cookie (jwt-text new))
+			   (set-cookie! cookie (jwt-text new) cookie-host cookie-path
+					(and (jwt/get new 'sticky)
+					     (time+ (jwt/get new 'sticky)))
+					#t))
 			 (unless new
 			   (logwarn |JWT/AUTH/getinfo| 
 			     "Failed to refreshed JWT " jwt " from " 
-			     (if (exists? bjwt) "Bearer authorization" cookie) 
+			     (if bjwt "Bearer authorization" cookie) 
 			     "\n    w/payload " (pprint (jwt-payload jwt)))
 			   (req/drop! cachename)
 			   (req/drop! cookie)))
