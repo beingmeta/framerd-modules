@@ -1,13 +1,14 @@
 (use-module '{logger optimize})
 (config! 'optalltest #t)
 (config! 'traceload #t)
+;(config! 'optimize:rails #t)
 ;(config! 'optimize:checkusage #f)
 (config! 'mysql:lazyprocs #f)
 (define %loglevel %info%)
 
 (config! 'loadpath 
 	 (let ((dir (dirname (get-component "optall.scm"))))
-	   (glom dir "/%/module.scm:" dir "/%.scm:"
+	   (glom dir "%/module.scm:" dir "%.scm:"
 	     dir "safe/%/module.scm:" dir "safe/%.scm:" )))
 
 (optimize! 'optimize)
@@ -27,7 +28,7 @@
 		 hashfs hashstats histogram hostinfo i18n
 		 ice isbn jsonout logctl logger
 		 meltcache mergeutils mimeout mimetable
-		 mttools oauth openlibrary optimize
+		 mttools oauth openlibrary ;; optimize
 		 opts packetfns parsetime bugjar
 		 pump readcsv rulesets samplefns
 		 savecontent saveopt signature speling ;; soap
