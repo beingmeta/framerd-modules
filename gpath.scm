@@ -9,17 +9,18 @@
    writeout writeout/type
    gp/writeout gp/writeout! gp/writeout+!
    gpath? ->gpath uri->gpath
-   gp/location? gp/location gp/basename
+   gp/location? gp/location gp/basename gp/fullpath
    gp/has-suffix gp/has-prefix
    gp/fetch gp/fetch+ gp/etag gp/info
-   gp/exists? gp/exists gp/modified gp/newer
+   gp/exists? gp/exists gp/modified gp/newer 
+   gp/list gp/list+
    gp/path gp/mkpath gp/subpath gp/makepath
    gpath->string gp/string gp>s gpath->location
    gp:config gpath/handler
    gp/urlfetch gp/urlinfo
    dtype->gpath gpath->dtype
    datauri/fetch+ datauri/info
-   gp/copy!})
+   gp/copy! gp/copy*!})
 (module-export! '{zip/gopen zip/gclose})
 
 ;;; This is a generic path facility (it grew out of the savecontent
@@ -38,7 +39,7 @@
        (define (zip/add! . args) #f)))
 
 (use-module '{fileio aws/s3 varconfig logger fdweb 
-	      texttools mimetable ezrecords hashfs})
+	      texttools mimetable ezrecords hashfs zipfs})
 (define-init %loglevel %notice%)
 
 (define gp/urlsubst {})
@@ -47,7 +48,7 @@
 (defrecord memfile mimetype content modified (hash #f))
 
 (defrecord gpath-handler name get (save #f)
-  (tostring #f) (fromstring #f) (fromuri #f) (prefixes {}))
+  (tostring #f) (fromstring #f) (fromuri #f) (fullpath #f) (prefixes {}))
 (define gpath/handler cons-gpath-handler)
 
 (define-init gpath-handlers (make-hashtable))
@@ -186,6 +187,8 @@
 	      ((s3loc? dest) (s3/write! dest content ctype headers))
 	      ((and (pair? dest) (hashfs? (car dest)))
 	       (hashfs/save! (car dest) (cdr dest) content ctype))
+	      ((and (pair? dest) (zipfs? (car dest)))
+	       (zipfs/save! (car dest) (cdr dest) content ctype))
 	      ((and (pair? dest) (hashtable? (car dest)))
 	       (store! (car dest) (cdr dest)
 		       (cons-memfile ctype content (timestamp)
@@ -264,6 +267,20 @@
 	((string? path) (basename path))
 	(else "")))
 
+(define (gp/fullpath path)
+  (when (string? path) (set! path (string->root path)))
+  (cond ((pair? path)
+	 (mkpath (gp/fullpath (car path)) (cdr path)))
+	((s3loc? path) (s3loc-path path))
+	((and (compound-type? path) (test gpath-handlers (compound-tag path)))
+	 (if (gpath-handler-fullpath (get gpath-handlers (compound-tag path)))
+	     ((gpath-handler-fullpath (get gpath-handlers (compound-tag path)))
+	      path)
+	     ""))
+	((and (string? path) (has-prefix path "data:")) "")
+	((string? path) path)
+	(else "")))
+
 (define (gp/location? path)
   (when (string? path) (set! path (string->root path)))
   (cond ((string? path) (has-suffix path "/"))
@@ -319,6 +336,8 @@
 	   "(0x" (number->string (hashptr (car path)) 16) ")"))
 	((and (pair? path) (hashfs? (car path)) (string? (cdr path)))
 	 (hashfs/string (car path) (cdr path)))
+	((and (pair? path) (zipfs? (car path)) (string? (cdr path)))
+	 (zipfs/string (car path) (cdr path)))
 	((and (compound-type? path) (test gpath-handlers (compound-tag path)))
 	 ((gpath-handler-tostring (get gpath-handlers (compound-tag path)))
 	  path #f))
@@ -326,9 +345,6 @@
 	      (test gpath-handlers (compound-tag (car path))))
 	 ((gpath-handler-tostring (get gpath-handlers (compound-tag (car path))))
 	  (car path) (cdr path)))
-	((and (pair? path) (compound-type? (car path) 'hashfs)
-	      (string? (cdr path)))
-	 (hashfs/string (car path) (cdr path)))
 	((s3loc? path) (s3loc->string path))
 	((and (pair? path) (s3loc? (car path)))
 	 (s3loc->string (s3/mkpath (car path) (cdr path))))
@@ -355,10 +371,13 @@
   (cond ((or (not path) (null? path)) root)
 	((and require-subpath (not (string? path)))
 	 (error |TypeError| makepath "Relative path is not a string" path))
-	((or (s3loc? path) (zipfile? path) (hashtable? path) (hashfs? path)
+	((or (s3loc? path) (zipfile? path) 
+	     (hashtable? path) (hashfs? path)
+	     (zipfs? path)
 	     (and (pair? path) (string? (cdr path))
 		  (or (s3loc? (car path)) (zipfile? (car path))
-		      (hashtable? (car path)) (hashfs? (car path)))))
+		      (hashtable? (car path)) (hashfs? (car path))
+		      (zipfs? (car path)))))
 	 path)
 	((not (string? path))
 	 (error |TypeError| makepath "Relative path is not a string" path))
@@ -371,6 +390,7 @@
 	((zipfile? root) (cons root path))
 	((hashtable? root) (cons root path))
 	((hashfs? root) (cons root path))
+	((zipfs? root) (cons root path))
 	((and (compound-type? root) (test gpath-handlers (compound-tag root)))
 	 (cons root path))
 	((and (pair? root) (not (string? (cdr root))))
@@ -414,6 +434,8 @@
 	 (memfile-content (get (car ref) (cdr ref))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/get (car ref) (cdr ref)))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (zipfs/get (car ref) (cdr ref) opts))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
@@ -523,6 +545,8 @@
 		       etag ,(packet->base16 (md5 mf))]))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/get+ (car ref) (cdr ref)))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (zipfs/get+ (car ref) (cdr ref)))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
@@ -587,6 +611,8 @@
 			   (md5 mf))))]))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/info (car ref) (cdr ref)))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (zipfs/info (car ref) (cdr ref)))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
@@ -631,7 +657,9 @@
 	((and (pair? ref) (hashtable? (car ref)))
 	 (memfile-modified (get (car ref) (cdr ref))))
 	((and (pair? ref) (hashfs? (car ref)))
-	 (get (hashfs/get+ (car ref) (cdr ref)) 'modified))
+	 (get (hashfs/info (car ref) (cdr ref)) 'modified))
+	((and (pair? ref) (zipfs? (car ref)))
+	 (get (zipfs/info (car ref) (cdr ref)) 'modified))
 	((and (pair? ref) (pair? (car ref)))
 	 (gp/modified (gp/path (car ref) (cdr ref))))
 	((and (pair? ref) (compound-type? (car ref))
@@ -675,6 +703,8 @@
 	 (test (car ref) (cdr ref)))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (exists? (hashfs/get+ (car ref) (cdr ref))))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (exists? (zipfs/info (car ref) (cdr ref))))
 	((and (pair? ref) (pair? (car ref)))
 	 (gp/exists? (gp/path (car ref) (cdr ref))))
 	((and (pair? ref) (compound-type? (car ref))
@@ -705,6 +735,8 @@
 	      (md5 (get (car ref) (cdr ref)))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (try (md5 (hashfs/get (car ref) (cdr ref))) #f))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (try (md5 (zipfs/get (car ref) (cdr ref))) #f))
 	((and (pair? ref) (pair? (car ref)))
 	 (gp/etag (gp/path (car ref) (cdr ref)) compute))
 	((pair? ref) (gp/etag (gp/path (car ref) (cdr ref)) compute))
@@ -724,6 +756,36 @@
 	((string? ref)
 	 (and (file-exists? ref) compute (md5 (filedata ref))))
 	(else (error "Weird GPATH ref" ref))))
+
+(defambda (filter-list matches matcher (prefix #f))
+  (if (not matcher) 
+      matches
+      (filter-choices (match matches)
+	(and
+	 (or (not prefix) (has-prefix (gp/fullpath match) prefix))
+	 (textsearch (qc matcher) (gp/fullpath match))))))
+
+(defambda (gp/list ref (matcher #f))
+  (for-choices ref
+    (cond ((s3loc? ref) (filter-list (s3/list ref) matcher))
+	  ((zipfile? ref) (filter-list (zip/getfiles ref) matcher))
+	  ((hashfs? ref) (filter-list (hashfs/list ref) matcher))
+	  ((zipfs? ref) (filter-list (zipfs/list ref) matcher))
+	  ((and (pair? ref) (s3loc? (car ref)) (string? (cdr ref)))
+	   (filter-list (s3/list (s3/mkpath (car ref) (mkpath (cdr ref) "")))
+			matcher (cdr ref)))
+	  ((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
+	   (filter-list (zip/getfiles (car ref)) matcher (cdr ref)))
+	  ((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
+	   (filter-list (getkeys (car ref)) matcher (cdr ref)))
+	  ((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
+	   (filter-list (hashfs/list (car ref)) matcher (cdr ref))
+	   (try (md5 (hashfs/get (car ref) (cdr ref))) #f))
+	  ((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	   (filter-list (zipfs/list (car ref)) matcher (cdr ref)))
+	  ((and (string? ref) (has-prefix ref "s3:"))
+	   (gp/list (->s3loc ref)))
+	  (else (irritant ref |NoListingMethod| )))))
 
 ;;; Recognizing and parsing GPATHs
 
@@ -859,6 +921,16 @@
        (singleton (get (text->frames charset-patterns content)
 		       'charset))
        "utf-8"))
+
+(define (gp/copy*! from into (prefix))
+  (default! prefix (gp/fullpath from))
+  (do-choices (src (gp/list from))
+    (if (gp/location? src)
+	(gp/copy*! src into prefix)
+	(gp/copy! src 
+	    (gp/mkpath into 
+		       (strip-prefix (gp/fullpath src)
+				     prefix))))))
 
 ;;;; Writing dtypes to gpaths
 
