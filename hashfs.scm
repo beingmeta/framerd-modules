@@ -59,10 +59,11 @@
 
 (define (hashfs/info hashfs path)
   (unless (has-prefix path "/") (set! path (glom "/" path)))
-  `#[path ,path gpath (gp/mkpath hashfs path)
-     gpathstring (hashfs/string hashfs path)
-     ctype ,(get (get (hashfs-files hashfs) path) 'ctype)
-     modified ,(get (get (hashfs-files hashfs) path) 'ctype)])
+  (tryif (test (hashfs-files hashfs) path)
+    `#[path ,path gpath (gp/mkpath hashfs path)
+       gpathstring (hashfs/string hashfs path)
+       ctype ,(get (get (hashfs-files hashfs) path) 'ctype)
+       modified ,(get (get (hashfs-files hashfs) path) 'ctype)]))
 
 (define (hashfs/list hashfs (match #f))
   (let* ((paths (pickstrings (getkeys (hashfs-files hashfs))))
