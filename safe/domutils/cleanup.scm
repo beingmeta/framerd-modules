@@ -23,6 +23,8 @@
 		  dom/cleanup/mergelines+unipunct
 		  dom/cleanup/drop-imagesizes!})
 
+(message "Loading " (get-component "cleanup.scm"))
+
 ;;; Rules
 
 (define fix-bad-style
@@ -277,9 +279,9 @@
 (define (dom/cleanup! node (opts #[])
 		      (textfn #f) (dropfn (config 'dom:drop #f)) 
 		      (unwrapfn (config 'dom:unwrap #f)) 
-		      (dropempty)
-		      (classfixes)
-		      (stylefixes))
+		      (dropempty #f)
+		      (classfixes #f)
+		      (stylefixes #f))
   (set! textfn (getopt opts 'dom:textfn textfn))
   (set! dropfn (getopt opts 'dom:drop dropfn))
   (set! unwrapfn (getopt opts 'dom:unwrap unwrapfn))
