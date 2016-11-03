@@ -33,6 +33,7 @@
 (varconfig! optimize:bindvecs bindvecs-dflt)
 
 (defslambda (codewarning warning)
+  (debug%watch "CODEWARNING" warning)
   (threadset! 'codewarnings (choice warning (threadget 'codewarnings))))
 
 (define (module? arg)
@@ -362,6 +363,7 @@
 (define (optimize-procedure! proc (opts #f) (lexrefs) (w/rails))
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
   (default! w/rails (getopt opts 'rails rails-dflt))
+  (threadset! 'codewarnings #{})
   (let* ((env (procedure-env proc))
 	 (arglist (procedure-args proc))
 	 (body (procedure-body proc))
@@ -386,7 +388,6 @@
 		     (and (rail? initial) (> (length initial) 1)
 			  (eq? (elt initial 0) 'COMMENT)
 			  (eq? (elt initial 1) '|original|))))
-      (threadset! 'codewarnings #{})
       (set-procedure-body! proc 
 			   (if w/rails 
 			       (->rail (cons (->rail (car new-body))
