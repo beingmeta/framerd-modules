@@ -858,16 +858,23 @@
     (debug%watch "S3/LIST+" content)
     (choice
      (for-choices (elt (get content 'contents))
-       `#[key ,(get elt 'key) name ,(basename (get elt 'key))
-	  loc ,(make-s3loc (s3loc-bucket loc) (get elt 'key))
-	  size ,(string->number (get elt 'size))
-	  modified ,(timestamp (get elt 'lastmodified))
-	  etag ,(slice (decode-entities (get elt 'etag)) 1 -1)
-	  content-type ,(get elt 'content-type)
-	  content-encoding ,(get elt 'content-encoding)
-	  hash ,(try (base16->packet (get req 'x-amz-meta-md5))
-		     (base16->packet
-		      (get (text->frames etag-pat (get elt 'etag)) 'hash)))])
+       (let* ((path (get elt 'key))
+	      (ctype (try (get elt 'content-type)
+			  (get elt 'ctype)
+			  (path->mimetype path)))
+	      (gpath (make-s3loc (s3loc-bucket loc) (get elt 'key))))
+	 (frame-create #f
+	   'key path 'path path 'name (basename path)
+	   'ctype ctype 'content-type ctype
+	   'gpath gpath 'loc gpath
+	   'gpathstring (s3loc->string gpath)
+	   'size (string->number (get elt 'size))
+	   'modified (timestamp (get elt 'lastmodified))
+	   'etag (slice (decode-entities (get elt 'etag)) 1 -1)
+	   'content-encoding (get elt 'content-encoding)
+	   'hash (try (base16->packet (get req 'x-amz-meta-md5))
+		      (base16->packet
+		       (get (text->frames etag-pat (get elt 'etag)) 'hash))))))
      (tryif next (s3/list+ loc headers opts next)))))
 (module-export! 's3/list+)
 
