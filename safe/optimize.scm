@@ -266,9 +266,16 @@
 		       expr)
 		      ((and from (%test from '%rewrite)
 			    (%test (get from '%rewrite) head))
-		       (dotighten
-			((%get (get from '%rewrite) head) expr)
-			env bound opts lexrefs w/rails))
+		       (let ((rewriter (%get (get from '%rewrite) head)))
+			 (onerror
+			     (dotighten
+			      (rewriter expr)
+			      env bound opts lexrefs w/rails)
+			   (lambda (ex)
+			     (logwarn |RewriteError| 
+			       "Error rewriting " expr " with " rewriter)
+			     (logwarn |RewriteError| "Error rewriting " expr ": " ex)
+			     expr))))
 		      ((or (applicable? value) (opcode? value)
 			   (and (ambiguous? value)
 				(singleton? (applicable? value))
