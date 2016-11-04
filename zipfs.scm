@@ -5,7 +5,8 @@
 
 ;;; Virtual file system implemented on top of zipfiles and hashtables
 
-(use-module '{mimetable ezrecords texttools gpath ziptools})
+(use-module '{mimetable ezrecords texttools 
+	      logger gpath ziptools})
 (define %used_modules '{ezrecords mimetable})
 
 (module-export! '{zipfs? zipfs/open zipfs/make zipfs/save!
@@ -29,51 +30,64 @@
 	(irritant source |NoSuchFile|)
 	(error |NoSourceSpecified|
 	    "Use zipfs/make to create an anonymous ZIPFS")))
-  (let* ((zipfile (get-zipfile source opts)))
-    (cons-zipfs (make-hashtable) zipfile opts source 
-		(getopt opts 'sync #f))))
+  (let* ((zipfile (get-zipfile source opts))
+	 (has-metadata (zip/exists? zipfile ".zipfs/bemeta"))
+	 (zipfs (cons-zipfs (make-hashtable) zipfile opts source 
+			    (getopt opts 'sync #f)
+			    (getopt opts 'bemeta has-metadata))))
+    (when (and (not has-metadata) (getopt opts 'bemeta))
+      (zip/add! zipfile ".zipfs/bemeta" (get (gmtimestamp) 'iso)))
+    zipfs))
 (define (zipfs/make (source #f) (opts #f) (create #t))
   (when (and (not opts) (table? source) (not (gpath? source)))
     (set! opts source)
     (set! source (getopt opts 'source #f)))
   (when source (set! source (->gpath source)))
-  (let* ((zipfile (get-zipfile source opts)))
-    (cons-zipfs (make-hashtable) zipfile opts source
-		(getopt opts 'sync #f))))
+  (let* ((zipfile (get-zipfile source opts))
+	 (has-metadata (zip/exists? zipfile ".zipfs/bemeta"))
+	 (zipfs (cons-zipfs (make-hashtable) zipfile opts source 
+			    (getopt opts 'sync #f)
+			    (getopt opts 'bemeta has-metadata))))
+    (when (and (not has-metadata) (getopt opts 'bemeta))
+      (zip/add! zipfile ".zipfs/bemeta" (get (gmtimestamp) 'iso)))
+    zipfs))
 
 (define (zipfs/string zipfs path)
-  (stringout "zipfs:" path
-    "(" (gpath->string (zipfs-source zipfs)) ")"))
+  (stringout "zipfs:" path "(" (gpath->string (zipfs-source zipfs)) ")"))
 
 (define (zipfs->string zipfs)
-  (stringout "#<ZIPFS " (or (zipfs-source zipfs)
-			    (zip/filename (zipfs-zip zipfs)))
+  (stringout "#<ZIPFS " 
+    (when (zipfs-source zipfs) (write (gpath->string (zipfs-source zipfs))))
+    " "
+    (write (zip/filename (zipfs-zip zipfs)))
     ">"))
 (compound-set-stringfn! 'ZIPFS zipfs->string)
 
 (define (zipfs/filename zipfs)
   (zip/filename (zipfs-zip zipfs)))
 
-(define (get-zipfile source opts)
-  (if (and source (string? source) 
-	   (not (has-prefix source {"http:" "ftp:"})))
-      (if (file-exists? source)
-	  (zip/open source)
-	  (zip/make source))
-      (let* ((tmpdir (getopt opts 'tmpdir 
-			     (tempdir (getopt opts 'template)
-				      (getopt opts 'keeptemp))))
-	     (filename (getopt opts 'name
-			       (if source
-				   (gp/basename source)
-				   "zipfs.zip")))
-	     (path (mkpath tmpdir filename)))
-	(if (or (not source) (not (gp/exists? source)))
-	    (zip/make path)
-	    (if (gp/exists? source)
-		(begin (gp/copy! source path)
-		  (zip/open path))
-		(zip/make path))))))
+(define (get-zipfile source opts (copy))
+  (default! copy (getopt opts 'copy #f))
+  (cond ((and (gp/exists? source) copy)
+	 (irritant source |ZIPFSAlreadyExists|
+		   "Can't copy from " copy))
+	((gp/exists? source) (zip/open source))
+	(else (let* ((tmpdir (getopt opts 'tmpdir 
+				     (tempdir (getopt opts 'template)
+					      (getopt opts 'keeptemp))))
+		     (name (getopt opts 'name
+				   (if source (gp/basename source)
+				       (if copy (gp/basename copy)
+					   "zipfs.zip"))))
+		     (path (mkpath tmpdir name))
+		     (zip #f))
+		(cond ((and source (gp/exists? source))
+		       (gp/copy! source path)
+		       (set! zip (zip/open path opts)))
+		      ((and copy (gp/exists? copy))
+		       (gp/copy! copy path)
+		       (set! zip (zip/open path opts))))
+		(or zip (zip/make path))))))
 
 (define (zipfs/save! zipfs path data (type) (metadata #f))
   (default! type 
@@ -105,7 +119,8 @@
 	   (entry (frame-create #f
 		    'ctype (tryif ctype ctype)
 		    'charset (if (string? charset) charset (if charset "utf-8" {}))
-		    'modified (tryif (bound? zip/modtime) (zip/modtime zip realpath)))))
+		    'modified (tryif (bound? zip/modtime)
+				(zip/modtime zip path)))))
       entry)))
 
 (define (cached-content files zip path content opts)
@@ -176,7 +191,7 @@
 
 (define (zipfs/commit! zipfs)
   (if (zipfs-source zipfs)
-      (begin (zip/close (zipfs-zip zipfs))
+      (begin (zip/close! (zipfs-zip zipfs))
 	(unless (equal? (zipfs-source zipfs)
 			(zip/filename (zipfs-zip zipfs)))
 	  (logwarn |CopyingZIPFS|
