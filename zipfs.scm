@@ -68,12 +68,13 @@
 
 (define (get-zipfile source opts (copy))
   (default! copy (getopt opts 'copy #f))
-  (cond ((and (gp/exists? source) copy)
-	 (irritant source |ZIPFSAlreadyExists|
-		   "Can't copy from " copy))
+  (cond ((zipfile? source) source)
+	((and (gp/exists? source) copy)
+	 (irritant source |ZipFSConflict|
+		   " already exists, can't copy from " copy))
 	((gp/exists? source) (zip/open source))
 	(else (let* ((tmpdir (getopt opts 'tmpdir 
-				     (tempdir (getopt opts 'template)
+				     (tempdir (getopt opts 'tmplate)
 					      (getopt opts 'keeptemp))))
 		     (name (getopt opts 'name
 				   (if source (gp/basename source)
