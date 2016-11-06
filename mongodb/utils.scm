@@ -11,11 +11,14 @@
 		  mgo/params/list mgo/params/get mgo/params/set! })
 
 
+(defamba (getbatch v)
+  (if (vector? v) (elts v) v))
+
 (define (extract-results result (collection #f) (batch 100))
   (if (not collection)
-      (get (get result 'cursor) '|firstBatch|)
+      (getbatch (get (get result 'cursor) '|firstBatch|))
       (let* ((cursor (get result 'cursor))
-	     (results (get cursor '|firstBatch|))
+	     (results (getbatch (get cursor '|firstBatch|)))
 	     (cursor-id (get cursor 'id)))
 	(while (not (zero? cursor-id))
 	  (set! result 
@@ -24,7 +27,7 @@
 				 "collection" (collection/name collection)
 				 "batchSize" batch))
 	  (set! cursor (get result 'cursor))
-	  (set+! results (get cursor '|nextBatch|))
+	  (set+! results (getbatch (get cursor '|nextBatch|)))
 	  (set! cursor-id (get cursor 'id)))
 	results)))
 
@@ -132,9 +135,4 @@
 (define (mgo/params/set! arg param value (db))
   (set! db (mongodb/getdb arg))
   (mongodb/results db "setParameter" 1 param value))
-
-
-
-
-
 
