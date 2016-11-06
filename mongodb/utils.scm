@@ -11,7 +11,7 @@
 		  mgo/params/list mgo/params/get mgo/params/set! })
 
 
-(defamba (getbatch v)
+(defambda (getbatch v)
   (if (vector? v) (elts v) v))
 
 (define (extract-results result (collection #f) (batch 100))
