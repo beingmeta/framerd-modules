@@ -8,7 +8,7 @@
  '{gp/write! gp/save!
    writeout writeout/type
    gp/writeout gp/writeout! gp/writeout+!
-   gpath? ->gpath uri->gpath
+   gpath? ->gpath uri->gpath gp/localpath?
    gp/location? gp/location gp/basename gp/fullpath
    gp/has-suffix gp/has-prefix
    gp/fetch gp/fetch+ gp/etag gp/info
@@ -837,6 +837,11 @@
 	      (has-prefix (downcase gpath) (downcase prefixes)))
 	  #f)))
 
+(define (gp/localpath? gpath)
+  (and (string? gpath)
+       (string? (->gpath gpath))
+       (not (has-prefix gpath {"ftp:" "http:" "https:"}))))
+
 (define (gp:config spec) (->gpath spec))
 
 ;;; Opening zip files at GPATHs
@@ -888,7 +893,7 @@
 (config! 'gpath:handlers
 	 (gpath/handler 'samplegfs samplegfs-get samplegfs-save))
 
-;;;; Copying/downloads
+;;;; Copying
 
 (define guess-encoding #t)
 (varconfig! gpath:guess-encoding guess-encoding)
