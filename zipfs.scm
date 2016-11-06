@@ -56,7 +56,7 @@
   (stringout "zipfs:" path "(" (gpath->string (zipfs-source zipfs)) ")"))
 
 (define (zipfs->string zipfs)
-  (stringout "#<ZIPFS " 
+  (stringout "#<ZIPFS "
     (when (zipfs-source zipfs) (write (gpath->string (zipfs-source zipfs))))
     " "
     (write (zip/filename (zipfs-zip zipfs)))
@@ -69,10 +69,16 @@
 (define (get-zipfile source opts (copy))
   (default! copy (getopt opts 'copy #f))
   (cond ((zipfile? source) source)
-	((and (gp/exists? source) copy)
+	((and (gp/exists? source) copy 
+	      (not (getopt opts 'overwrite)))
 	 (irritant source |ZipFSConflict|
 		   " already exists, can't copy from " copy))
-	((gp/exists? source) (zip/open source))
+	((and (gp/localpath? source) (gp/exists? source))
+	 (if (getopt opts 'overwrite)
+	     (begin (move-file! source (zip-backup-file source))
+	       (zip/make source))
+	     (zip/open source)))
+	((gp/localpath? source) (zip/make source))
 	(else (let* ((tmpdir (getopt opts 'tmpdir 
 				     (tempdir (getopt opts 'tmplate)
 					      (getopt opts 'keeptemp))))
@@ -82,13 +88,16 @@
 					   "zipfs.zip"))))
 		     (path (mkpath tmpdir name))
 		     (zip #f))
-		(cond ((and source (gp/exists? source))
+		(cond ((and source (gp/exists? source) (not (getopt settings 'overwrite)))
 		       (gp/copy! source path)
 		       (set! zip (zip/open path opts)))
 		      ((and copy (gp/exists? copy))
 		       (gp/copy! copy path)
 		       (set! zip (zip/open path opts))))
 		(or zip (zip/make path))))))
+
+(define (zip-backup-file source)
+  (string-subst source ".zip" (glom (millitime) ".zip")))
 
 (define (zipfs/save! zipfs path data (type) (metadata #f))
   (default! type 
