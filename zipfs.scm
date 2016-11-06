@@ -13,6 +13,7 @@
 		  zipfs/filename zipfs/string
 		  zipfs/get zipfs/get+ zipfs/info 
 		  zipfs/list zipfs/list+
+		  zipfs-source 
 		  zipfs/commit!})
 
 (defrecord (zipfs OPAQUE)
@@ -88,7 +89,8 @@
 					   "zipfs.zip"))))
 		     (path (mkpath tmpdir name))
 		     (zip #f))
-		(cond ((and source (gp/exists? source) (not (getopt settings 'overwrite)))
+		(cond ((and source (gp/exists? source) 
+			    (not (getopt opts 'overwrite)))
 		       (gp/copy! source path)
 		       (set! zip (zip/open path opts)))
 		      ((and copy (gp/exists? copy))
@@ -204,9 +206,10 @@
       (begin (zip/close! (zipfs-zip zipfs))
 	(unless (equal? (zipfs-source zipfs)
 			(zip/filename (zipfs-zip zipfs)))
-	  (logwarn |CopyingZIPFS|
+	  (loginfo |CopyingZIPFS|
 	    "To " (zipfs-source zipfs)
 	    " from "(zip/filename (zipfs-zip zipfs)))
 	  (gp/save! (zipfs-source zipfs)
-	      (dtype->packet (zipfs-files zipfs)))))
+	      (filedata (zip/filename (zipfs-zip zipfs)))
+	    "application/zip")))
       (error "This ZIPFS doesn't have a source" zipfs)))
