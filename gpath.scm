@@ -268,7 +268,6 @@
 	(else "")))
 
 (define (gp/fullpath path)
-  (when (string? path) (set! path (string->root path)))
   (cond ((pair? path)
 	 (mkpath (gp/fullpath (car path)) (cdr path)))
 	((s3loc? path) (s3loc-path path))
@@ -278,6 +277,7 @@
 	      path)
 	     ""))
 	((and (string? path) (has-prefix path "data:")) "")
+	((and (string? path) (file-directory? path)) (mkpath path ""))
 	((string? path) path)
 	(else "")))
 
@@ -625,6 +625,9 @@
 	 (datauri/fetch+ ref #t))
 	((and (string? ref) (has-prefix ref "s3:"))
 	 (s3/info (->s3loc ref)))
+	((and (string? ref) (file-directory? ref))
+	 (frame-create #f
+	   'path ref 'gpath ref 'location #t))
 	((and (string? ref) (not (file-exists? ref))) #f)
 	((string? ref)
 	 (let* ((ref (abspath ref))
@@ -764,6 +767,13 @@
 	(and
 	 (or (not prefix) (has-prefix (gp/fullpath match) prefix))
 	 (textsearch (qc matcher) (gp/fullpath match))))))
+(defambda (filter-info matches matcher (prefix #f))
+  (if (not matcher) 
+      matches
+      (filter-choices (match matches)
+	(and
+	 (or (not prefix) (has-prefix (gp/fullpath match) prefix))
+	 (textsearch (qc matcher) (gp/fullpath match))))))
 
 (defambda (gp/list ref (matcher #f))
   (for-choices ref
@@ -785,7 +795,13 @@
 	   (filter-list (zipfs/list (car ref)) matcher (cdr ref)))
 	  ((and (string? ref) (has-prefix ref "s3:"))
 	   (gp/list (->s3loc ref)))
+	  ((and (string? ref) (gp/localpath? ref))
+	   (filter-list (choice (getfiles ref) (mkpath (getdirs ref) ""))
+			matcher))
 	  (else (irritant ref |NoListingMethod| )))))
+
+(defambda (gp/list+ ref (matcher #f))
+  (gp/info (gp/list ref matcher)))
 
 ;;; Recognizing and parsing GPATHs
 
