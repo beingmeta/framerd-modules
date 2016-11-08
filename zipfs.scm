@@ -111,8 +111,8 @@
   (if metadata
       (set! metadata (deep-copy metadata))
       (set! metadata (frame-create #f)))
-  (store! metadata 'ctype type)
-  (store! metadata 'modified (gmtimestamp))
+  (store! metadata 'content-type type)
+  (store! metadata 'last-modified (gmtimestamp))
   (when (zipfs-bemeta zipfs)
     (zip/add! (zipfs-zip zipfs)
 	      (glom ".zipfs/" path)
@@ -122,21 +122,27 @@
   (zip/add! (zipfs-zip zipfs) path data)
   (when (zipfs-sync zipfs) (zip/close (zipfs-zip zipfs))))
 
-(define (zip-info zip path opts)
+(define (zip-info zipfs zip path opts)
   (tryif (zip/exists? zip path)
     (let* ((ctype (path->mimetype path #f))
 	   (encoding (path->encoding path))
 	   (istext (and ctype (mimetype/text? ctype) (not encoding)))
 	   (charset (and istext (ctype->charset ctype)))
 	   (entry (frame-create #f
-		    'ctype (tryif ctype ctype)
-		    'charset (if (string? charset) charset (if charset "utf-8" {}))
-		    'modified (tryif (bound? zip/modtime)
-				(zip/modtime zip path)))))
+		    'gpath (cons zipfs path)
+		    'gpathstring (gpath->string (cons zipfs path))
+		    'relpath path
+		    'content-type (tryif ctype ctype)
+		    'charset 
+		    (if (string? charset) charset (if charset "utf-8" {}))
+		    'content-length (tryif (bound? zip/getsize)
+				      (zip/getsize zip path))
+		    'last-modified (tryif (bound? zip/modtime)
+				     (zip/modtime zip path)))))
       entry)))
 
 (define (cached-content files zip path content opts)
-  (let* ((ctype (getopt opts 'ctype 
+  (let* ((ctype (getopt opts 'content-type
 			(path->mimetype path #f (getopt opts 'typemap))))
 	 (encoding (getopt opts 'encoding (path->encoding path)))
 	 (istext (and ctype (mimetype/text? ctype) (not encoding)))
@@ -150,9 +156,11 @@
 			((packet? content) content)
 			((string? content) (string->packet content charset))
 			(else (irritant content "Not a string or packet")))
-		  'ctype (tryif ctype ctype)
+		  'content-type (tryif ctype ctype)
+		  'content-length (length content)
 		  'charset (if (string? charset) charset (if charset "utf-8" {}))
-		  'modified (tryif (bound? zip/modtime) (zip/modtime zip realpath))
+		  'last-modified (tryif (bound? zip/modtime)
+				   (zip/modtime zip realpath))
 		  'etag (packet->base16 (md5 content)))))
     (store! files path entry)
     entry))
@@ -175,7 +183,7 @@
 	     (fail)))))
 
 (define (zipfs/info zipfs path)
-  (zip-info (zipfs-zip zipfs) path #f))
+  (zip-info zipfs (zipfs-zip zipfs) path #f))
 
 (define (zipfs/list zipfs (match #f))
   (let* ((paths (pickstrings (zip/getfiles (zipfs-zip zipfs))))
@@ -194,12 +202,10 @@
 	 (files (zipfs-files zipfs))
 	 (zip (zipfs-zip zipfs)))
     (for-choices (path matching)
-      (modify-frame (zip-info zip path #f)
+      (modify-frame (zip-info zipfs zip path #f)
 	'path (if (has-prefix path "/") (slice  path 1) path)
 	'gpath (gp/mkpath zipfs path)
-	'gpathstring (zipfs/string zipfs path)
-	'ctype (get (get (zipfs-files zipfs) path) 'ctype)
-	'modified (get (get (zipfs-files zipfs) path) 'ctype)))))
+	'gpathstring (zipfs/string zipfs path)))))
 
 (define (zipfs/commit! zipfs)
   (if (zipfs-source zipfs)

@@ -262,15 +262,19 @@
 		       " given \n  " (pprint opts) "\nlast result:\n  " 
 		       (pprint irritant)))
 	      (if (getopt opts 's3err)
-		  (s3-error (getopt irritant 'httpstatus) irritant op bucket path opts)
-		  (begin (s3-warn (getopt irritant 'httpstatus) (cdr irritant) (car irritant)
+		  (s3-error (getopt irritant 'httpstatus)
+			    irritant op bucket path opts)
+		  (begin (s3-warn (getopt irritant 'httpstatus)
+				  (cdr irritant) (car irritant)
 				  op bucket path opts)
 		    irritant)))
 	    (begin
 	      (logwarn |S3/Retry|
-		"Retrying " op " s3://" bucket "/" path " after " tries "/" max " attempts.")
+		"Retrying " op " s3://" bucket "/" path
+		" after " tries "/" max " attempts.")
 	      (lognotice |S3/Retry| "Last response was:\n  " (pprint irritant))
-	      (tryop (1+ tries) max op bucket path opts content ctype headers args)))))))
+	      (tryop (1+ tries) max op bucket path opts content 
+		     ctype headers args)))))))
 
 (define (s3op op bucket path (content #f) (ctype) 
 	      (headerlist '()) (opts #[]) args)
@@ -593,22 +597,25 @@
   (let* ((req (s3/op "GET" (s3loc-bucket loc) (s3loc-path loc)
 		opts "" "text" headers))
 	 (err (getopt opts 'errs (getopt opts 's3errs s3errs)))
-	 (status (get req 'response)))
+	 (status (get req 'response))
+	 (md5sum (packet->base16 (md5 (get req '%content)))))
     (when headcache
       (let ((copy (deep-copy req)))
 	(drop! copy '%content)
 	(meltcache/store headcache copy s3head (list loc headers))))
     (if (and status (>= 299 status 200))
-	`#[content ,(get req '%content)
-	   ctype ,(try (get req 'content-type)
-		       (getopt opts 'mimetype {})
-		       (path->mimetype (s3loc-path loc)
-				       (if text "text" "application")
-				       (getopt opts 'mimetable #f))
-		       (if text "text" "application"))
-	   encoding ,(get req 'content-encoding)
-	   modified ,(try (get req 'last-modified) (timestamp))
-	   etag ,(try (get req 'etag) (md5 (get req '%content)))]
+	(frame-create #f
+	  'content-type 
+	  (try (get req 'content-type)
+	       (getopt opts 'mimetype {})
+	       (path->mimetype (s3loc-path loc)
+			       (if text "text" "application")
+			       (getopt opts 'mimetable #f))
+	       (if text "text" "application"))
+	  'content-encoding  (get req 'content-encoding)
+	  'last-modified (try (get req 'last-modified) (timestamp))
+	  'etag (try (get req 'etag) md5sum)
+	  'md5 md5sum)
 	(and err (irritant req S3FAILURE S3LOC/CONTENT
 			   (s3loc->string loc))))))
 (define s3/get+ s3loc/get+)
@@ -653,19 +660,20 @@
     (debug%watch "S3LOC/INFO" loc req)
     (and (response/ok? req)
 	 (frame-create #f
-	   'path (s3loc/s3uri loc)
-	   'ctype (try (get req 'content-type)
-		       (path->mimetype (s3loc-path loc)
-				       (if text "text" "application")
-				       mimetable)
-		       (if text "text" "application"))
-	   'size (get req 'content-length)
-	   'encoding (get req 'content-encoding)
-	   'modified (try (get req 'last-modified) (timestamp))
+	   'path (s3loc/s3uri loc) 'gpath loc 'relpath (s3loc-path loc)
+	   'content-type (try (get req 'content-type)
+			      (path->mimetype (s3loc-path loc)
+					      (if text "text" "application")
+					      mimetable)
+			      (if text "text" "application"))
+	   'content-length (get req 'content-length)
+	   'content-encoding (get req 'content-encoding)
+	   'last-modified (try (get req 'last-modified) (timestamp))
 	   'etag (try (get req 'etag) 
 		      (packet->base16 (md5 (get req '%content))))
 	   'hash (try (base16->packet (get req 'x-amz-meta-md5))
-		      (base16->packet (get (text->frames etag-pat (get req 'etag)) 'hash))
+		      (base16->packet 
+		       (get (text->frames etag-pat (get req 'etag)) 'hash))
 		      (md5 (get req '%content)))))))
 (define s3/info s3loc/info)
 
@@ -864,10 +872,9 @@
 			  (path->mimetype path)))
 	      (gpath (make-s3loc (s3loc-bucket loc) (get elt 'key))))
 	 (frame-create #f
-	   'key path 'path path 'name (basename path)
-	   'ctype ctype 'content-type ctype
-	   'gpath gpath 'loc gpath
-	   'gpathstring (s3loc->string gpath)
+	   'relpath path 'gpath gpath 'gpathstring (s3loc->string gpath)
+	   'key path 'name (basename path) 'loc gpath
+	   'content-type ctype
 	   'size (string->number (get elt 'size))
 	   'modified (timestamp (get elt 'lastmodified))
 	   'etag (slice (decode-entities (get elt 'etag)) 1 -1)
