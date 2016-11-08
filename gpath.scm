@@ -559,7 +559,7 @@
 		    (if (string? charset) charset (if charset "utf-8" {}))
 		    'last-modified
 		    (tryif (bound? zip/modtime) (zip/modtime zip realpath))
-		    'etag hash 'md5 hash)))))
+		    'md5 hash)))))
 	((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
 	 (let ((mf (get (car ref) (cdr ref))))
 	   (and (exists? mf)
@@ -573,7 +573,7 @@
 		       ,(or (memfile-mimetype mf) ctype
 			    (guess-mimetype (get-namestring ref) #f opts))
 		       last-modified ,(memfile-modified mf)
-		       etag ,(memfile-hash mf)]
+		       md5 ,(memfile-hash mf)]
 		    `#[gpath ,(->gpath ref) 
 		       gpathstring ,(gpath->string (->gpath ref))
 		       relpath ,(gp/relpath ref)
@@ -582,8 +582,7 @@
 		       content-type
 		       ,(or ctype
 			    (guess-mimetype (get-namestring ref) #f opts))
-		       etag ,(packet->base16 (md5 mf))
-		       etag ,(packet->base16 (md5 mf))]))))
+		       md5 ,(packet->base16 (md5 mf))]))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/get+ (car ref) (cdr ref)))
 	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
@@ -617,7 +616,7 @@
 	     'content-type (or ctype {})
 	     'content-length (length content)
 	     'charset  (or charset {})
-	     'etag     (packet->base16 (md5 content))
+	     'md5      (packet->base16 (md5 content))
 	     'last-modified (file-modtime ref))))
 	(else (error "Weird GPATH ref" ref))))
 
@@ -650,23 +649,24 @@
 		    (tryif (bound? zip/modtime) (zip/modtime zip realpath))
 		    'content-length
 		    (tryif (bound? zip/getsize) (zip/getsize zip realpath))
-		    'etag (tryif md5 md5)
-		    'md5 (tryif md5 md5))))))
+		    'md5 md5)))))
 	((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
-	 (let ((mf (get (car ref) (cdr ref))))
-	   `#[gpath ,(->gpath ref) 
-	      gpathstring ,(gpath->string (->gpath ref))
-	      relpath ,(gp/relpath ref)
-	      path ,(gpath->string ref)
-	      content-type ,(try (tryif (memfile? mf) (memfile-mimetype mf))
-				 ctype)
-	      last-modified ,(tryif (memfile? mf)
-			       (memfile-modified (get (car ref) (cdr ref))))
-	      etag ,(tryif etag
-		      (packet->base16
-		       (if (memfile? mf)
-			   (md5 (memfile-content mf))
-			   (md5 mf))))]))
+	 (let* ((mf (get (car ref) (cdr ref)))
+		(hash (tryif etag
+			(packet->base16
+			 (if (memfile? mf)
+			     (md5 (memfile-content mf))
+			     (md5 mf))))))
+	   (frame-create #f
+	     'gpath (->gpath ref) 'gpathstring (gpath->string (->gpath ref))
+	     'relpath (gp/relpath ref)
+	     'path (gpath->string ref)
+	     'content-type (try (tryif (memfile? mf) (memfile-mimetype mf))
+				ctype)
+	     'last-modified (tryif (memfile? mf)
+			      (memfile-modified (get (car ref) (cdr ref))))
+	     'etag (tryif hash hash)
+	     'md5 (tryif hash hash))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/info (car ref) (cdr ref)))
 	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
@@ -698,12 +698,12 @@
 	     'content-type (or ctype {})
 	     'charset (or charset {})
 	     'last-modified (file-modtime ref)
-	     'etag (tryif etag
-		     (packet->base16
-		      (md5 (if charset
-			       (filestring ref charset)
-			       (if istext (filestring ref)
-				   (filedata ref)))))))))
+	     'md5 (tryif etag
+		    (packet->base16
+		     (md5 (if charset
+			      (filestring ref charset)
+			      (if istext (filestring ref)
+				  (filedata ref)))))))))
 	(else (error "Weird GPATH ref" ref))))
 
 (define (gp/modified ref)
@@ -807,17 +807,18 @@
 	 (let ((response (urlhead ref)))
 	   (and (test response 'response)
 		(<= 200 (get response 'response) 299)
-		(try (get response 'tag)
+		(try (get response 'etag)
 		     (and compute
 			  (begin (set! response (urlget ref))
 			    (and (test response 'response)
 				 (<= 200 (get response 'response) 299)
 				 (try (get response 'etag)
-				      (md5 (get response '%content))))))))))
+				      (packet->string (md5 (get response '%content))
+						      16)))))))))
 	((and (string? ref) (has-prefix ref "s3:"))
 	 (s3/etag (->s3loc ref) compute))
 	((string? ref)
-	 (and (file-exists? ref) compute (md5 (filedata ref))))
+	 (and (file-exists? ref) compute (packet->string (md5 (filedata ref)) 16)))
 	(else (error "Weird GPATH ref" ref))))
 
 (defambda (filter-list matches matcher (prefix #f))
@@ -849,8 +850,7 @@
 	  ((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
 	   (filter-list (getkeys (car ref)) matcher (cdr ref)))
 	  ((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
-	   (filter-list (hashfs/list (car ref)) matcher (cdr ref))
-	   (try (md5 (hashfs/get (car ref) (cdr ref))) #f))
+	   (filter-list (hashfs/list (car ref)) matcher (cdr ref)))
 	  ((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
 	   (filter-list (zipfs/list (car ref)) matcher (cdr ref)))
 	  ((and (string? ref) (has-prefix ref "s3:"))
@@ -965,6 +965,7 @@
 	    'content-type ctype
 	    'charset (tryif charset (if (string? charset) charset "utf-8"))
 	    'last-modified (timestamp) 'content-length (length content)
+	    'md5 (md5 content)
 	    'etag (md5 content))))
 (config! 'gpath:handlers
 	 (gpath/handler 'samplegfs samplegfs-get samplegfs-save))
