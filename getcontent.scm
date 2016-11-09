@@ -97,7 +97,7 @@
 			   ((or (not enc) (eq? enc 'binary)) (filedata file))
 			   ((string? enc) (filestring file enc))
 			   ;; This is UTF-8
-			   (else (filestring file))))
+			   (else (filecontent file))))
 	       (result (if parser (parser data) data))
 	       (newinfo (cons-loadinfo file mtime lagtime
 				       enc parser (timestamp) result)))
