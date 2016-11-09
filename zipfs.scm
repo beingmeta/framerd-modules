@@ -54,7 +54,9 @@
     zipfs))
 
 (define (zipfs/string zipfs path)
-  (stringout "zipfs:" path "(" (gpath->string (zipfs-source zipfs)) ")"))
+  (if path
+      (stringout "zipfs:" path "(" (gpath->string (zipfs-source zipfs)) ")")
+      (stringout "zipfs:" "(" (gpath->string (zipfs-source zipfs)) ")")))
 
 (define (zipfs->string zipfs)
   (stringout "#<ZIPFS "
@@ -70,11 +72,11 @@
 (define (get-zipfile source opts (copy))
   (default! copy (getopt opts 'copy #f))
   (cond ((zipfile? source) source)
-	((and (gp/exists? source) copy 
+	((and source (gp/exists? source) copy 
 	      (not (getopt opts 'overwrite)))
 	 (irritant source |ZipFSConflict|
 		   " already exists, can't copy from " copy))
-	((and (gp/localpath? source) (gp/exists? source))
+	((and source (gp/localpath? source) (gp/exists? source))
 	 (if (getopt opts 'overwrite)
 	     (begin (move-file! source (zip-backup-file source))
 	       (zip/make source))
@@ -131,7 +133,7 @@
 	   (entry (frame-create #f
 		    'gpath (cons zipfs path)
 		    'gpathstring (gpath->string (cons zipfs path))
-		    'relpath path
+		    'rootpath path
 		    'content-type (tryif ctype ctype)
 		    'charset 
 		    (if (string? charset) charset (if charset "utf-8" {}))
@@ -185,27 +187,37 @@
 (define (zipfs/info zipfs path)
   (zip-info zipfs (zipfs-zip zipfs) path #f))
 
-(define (zipfs/list zipfs (match #f))
-  (let* ((paths (pickstrings (zip/getfiles (zipfs-zip zipfs))))
+(define (zipfs/list zipfs (prefix #f) (match #f))
+  (let* ((paths (if prefix
+		    (pick (pickstrings (zip/getfiles (zipfs-zip zipfs)))
+			  has-prefix prefix)
+		    (pickstrings (zip/getfiles (zipfs-zip zipfs)))))
 	 (matching (if match
 		       (filter-choices (path paths)
 			 (textsearch (qc match) path))
 		       paths)))
     (for-choices (path matching)
       (cons zipfs (if (has-prefix path "/") (slice  path 1) path)))))
-(define (zipfs/list+ zipfs (match #f))
-  (let* ((paths (pickstrings (zip/getfiles (zipfs-zip zipfs))))
+(define (zipfs/list+ zipfs (prefix #f) (match #f))
+  (let* ((paths (if prefix
+		    (pick (pickstrings (zip/getfiles (zipfs-zip zipfs)))
+			  has-prefix prefix)
+		    (pickstrings (zip/getfiles (zipfs-zip zipfs)))))
 	 (matching (if match
 		       (filter-choices (path paths)
 			 (textsearch (qc match) path))
 		       paths))
 	 (files (zipfs-files zipfs))
 	 (zip (zipfs-zip zipfs)))
-    (for-choices (path matching)
-      (modify-frame (zip-info zipfs zip path #f)
-	'path (if (has-prefix path "/") (slice  path 1) path)
-	'gpath (gp/mkpath zipfs path)
-	'gpathstring (zipfs/string zipfs path)))))
+    (if prefix
+	(for-choices (path matching)
+	  (add-relpath (zip-info zipfs zip path #f)
+		       prefix))
+	(zip-info zipfs zip matching #f))))
+
+(define (add-relpath info prefix)
+  (modify-frame info 'relpath 
+		(strip-prefix (get info 'rootpath) prefix)))
 
 (define (zipfs/commit! zipfs)
   (if (zipfs-source zipfs)
