@@ -62,6 +62,13 @@
 		       (error "NOT a GPATH HANDLER"))
 		   (get gpath-handlers (getkeys gpath-handlers)))))
 
+(define-init urish?
+  (lambda (x)
+    (and (string? x)
+	 (string-starts-with? x #/^[a-zA-Z.]{2,32}:/))))
+
+(define simple-gpath-prefixes {"s3:" "http:" "https:" "dropbox:"})
+
 (define (guess-mimetype name (content) (opts #f))
   (when (and (bound? content) (table? content) (not opts))
     (set! opts content)
@@ -138,6 +145,7 @@
 
 (defambda (gp/write! saveto name content
 	    (ctype #f) (charset #f) (opts #f) (encoding))
+  (when (urish? saveto) (set! saveto (->gpath saveto)))
   (when (and ctype (table? ctype) (not opts))
     (set! opts ctype) (set! ctype #f))
   (when (and charset (table? charset) (not opts))
@@ -162,6 +170,7 @@
 	      ""))))
 
 (defambda (gp/save! dest content (ctype #f) (charset #f) (opts #f) (encoding #f))
+  (when (urish? dest) (set! dest (->gpath dest)))
   (when (and ctype (table? ctype) (not opts))
     (set! opts ctype) (set! ctype #f))
   (when (and charset (table? charset) (not opts))
@@ -267,18 +276,23 @@
 	(else (uribase string))))
 
 (define (gp/basename path)
-  (when (string? path) (set! path (string->root path)))
-  (cond ((and (pair? path) (null? (cdr path)))
-	 (gp/basename (car path)))
-	((pair? path) (gp/basename (cdr path)))
-	((s3loc? path) (basename (s3loc-path path)))
-	((and (string? path) (has-prefix path "data:"))
-	 (glom "data-" (packet->base16 (md5 path))
-	   (try (ctype->suffix (get (datauri/info path) 'content-type) ".") "")))
-	((string? path) (basename path))
-	(else "")))
+  (if (and (string? path) (has-prefix path simple-gpath-prefixes))
+      (basename path)
+      (begin
+	(when (urish? path) (set! path (->gpath path)))
+	(cond ((and (pair? path) (null? (cdr path)))
+	       (gp/basename (car path)))
+	      ((pair? path) (gp/basename (cdr path)))
+	      ((s3loc? path) (basename (s3loc-path path)))
+	      ((and (string? path) (has-prefix path "data:"))
+	       (glom "data-" (packet->base16 (md5 path))
+		 (try (ctype->suffix (get (datauri/info path) 'content-type) ".")
+		      "")))
+	      ((string? path) (basename path))
+	      (else "")))))
 
 (define (gp/rootpath path)
+  (if (urish? path) (set! path (->gpath path)))
   (cond ((pair? path)
 	 (mkpath (gp/rootpath (car path))
 		 (strip-prefix (cdr path) "/")))
@@ -296,7 +310,7 @@
 	(else "")))
 
 (define (gp/location? path)
-  (when (string? path) (set! path (string->root path)))
+  (when (urish? path) (set! path (string->root path)))
   (cond ((string? path) (has-suffix path "/"))
 	((and (pair? path) (string? (cdr path)))
 	 (has-suffix (cdr path) "/"))
@@ -306,6 +320,7 @@
 	(else #f)))
 
 (define (gp/location path)
+  (when (urish? path) (set! path (->gpath path)))
   (when (string? path) (set! path (string->root path)))
   (cond ((and (pair? path)
 	      (or (null? (cdr path)) (empty-string? (cdr path))))
@@ -331,7 +346,7 @@
 	(else path)))
 
 (define (gpath->location path)
-  (if (string? path) (set! path (->gpath path)))
+  (when (urish? path) (set! path (->gpath path)))
   (if (gp/location? path) path (gp/location path)))
 
 (define (gpath->string path)
@@ -433,6 +448,7 @@
 	    (apply gp/subpath result (car more) (cdr more))))))
 
 (define (gp/fetch ref (ctype #f) (opts #f) (encoding #f))
+  (if (urish? ref) (set! ref (->gpath ref)))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
@@ -530,6 +546,7 @@
 	    response))))
 
 (define (gp/fetch+ ref (ctype #f) (opts #f) (encoding))
+  (if (urish? ref) (set! ref (->gpath ref)))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
@@ -628,6 +645,7 @@
 	(else (error "Weird GPATH ref" ref))))
 
 (define (gp/info ref (etag #t) (ctype #f) (opts #f) (encoding))
+  (if (urish? ref) (set! ref (->gpath ref)))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
@@ -717,6 +735,7 @@
       'md5 (tryif hash (packet->base16 hash)))))
 
 (define (gp/modified ref)
+  (if (urish? ref) (set! ref (->gpath ref)))
   (cond ((s3loc? ref) (s3/modified ref))
 	((and (compound-type? ref) 
 	      (test gpath-handlers (compound-tag ref)))
@@ -755,6 +774,8 @@
 	(else (error "Invalid GPATH" ref))))
 
 (define (gp/newer ref base)
+  (if (urish? ref) (set! ref (->gpath ref)))
+  (if (urish? base) (set! base (->gpath base)))
   (if (gp/exists? base) 
       (and (gp/exists? ref)
 	   (let ((bmod (gp/modified base))
