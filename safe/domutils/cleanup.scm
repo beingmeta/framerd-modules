@@ -23,8 +23,6 @@
 		  dom/cleanup/mergelines+unipunct
 		  dom/cleanup/drop-imagesizes!})
 
-(message "Loading " (get-component "cleanup.scm"))
-
 ;;; Rules
 
 (define fix-bad-style

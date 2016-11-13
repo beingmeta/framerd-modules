@@ -25,7 +25,7 @@
 		 couchdb ctt curlcache dopool dropbox ellipsize
 		 email extoids ezrecords fakezip fifo fillin
 		 findcycles getcontent gpath gravatar gutdb
-		 hashfs hashstats histogram hostinfo i18n
+		 hashfs hashstats zipfs histogram hostinfo i18n
 		 ice isbn jsonout logctl logger
 		 meltcache mergeutils mimeout mimetable
 		 mttools oauth openlibrary ;; optimize

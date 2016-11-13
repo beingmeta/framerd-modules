@@ -74,9 +74,11 @@
     (if (>= 299 status 200)
 	(if (exists? metadata)
 	    (begin (store! metadata 'content (get result '%content))
-	      (store! metadata 'ctype (get result 'content-type))
-	      (store! metadata 'modified (timestamp (get metadata 'modified)))
-	      (store! metadata 'length (string->number (get metadata 'size)))
+	      (store! metadata 'content-type (get result 'content-type))
+	      (store! metadata 'last-modified
+		      (timestamp (get metadata 'modified)))
+	      (store! metadata 'content-length
+		      (string->number (get metadata 'size)))
 	      (store! metadata 'length
 		      (get (text->frame
 			    #((label bytes (isdigit+) #t) (spaces) "bytes")
@@ -85,8 +87,8 @@
 	      metadata)
 	    (frame-create #f
 	      'content (get result '%content)
-	      'ctype (get result 'content-type)
-	      'modified (get result 'modified)
+	      'content-type (get result 'content-type)
+	      'last-modified (get result 'modified)
 	      'etag (get result 'etag)))
 	(if (= status 404)
 	    (begin (lognotice |Dropbox404| "Dropbox call returned 404" result)
@@ -102,15 +104,18 @@
 		     (oauth/call oauth 'GET endpoint '() #f #f #t)))
 	 (status (get result 'response))
 	 (metadata (jsonparse (get result 'x-dropbox-metadata))))
-    (loginfo |DROPBOX/INFO| path " has status " status " given\n\t" (pprint oauth))
+    (loginfo |DROPBOX/INFO| 
+      path " has status " status " given\n\t" (pprint oauth))
     (if (>= 299 status 200)
 	(let ((parsed (jsonparse (get result '%content))))
 	  (debug%watch "DROPBOX/INFO" parsed result)
-	  (store! parsed 'ctype (get parsed 'mime_type))
-	  (store! parsed 'modified (timestamp (get parsed 'modified)))
-	  (store! parsed 'length
-		  (get (text->frame #((label bytes (isdigit+) #t) (spaces) "bytes")
-				    (get parsed 'size))
+	  (store! parsed 'content-type (get parsed 'mime_type))
+	  (store! parsed 'last-modified
+		  (timestamp (get parsed 'modified)))
+	  (store! parsed 'content-length
+		  (get (text->frame 
+			#((label bytes (isdigit+) #t) (spaces) "bytes")
+			(get parsed 'size))
 		       'bytes))
 	  parsed)
 	(if (= status 404) #f
@@ -133,13 +138,12 @@
 	(irritant result CALLFAILED DROPBOX/INFO
 		  path " with " oauth))))
 
-(define (dropbox/put! oauth path content (ctype #f) (revision #f))
-  (unless ctype
-    (set! ctype
-	  (path->mimetype
-	   path (if (packet? content) "application" "text"))))
-  (loginfo |DROPBOX/PUT!| "Saving " (length content) " of " ctype " to " path
-	   " given\n\t" (pprint oauth))
+(define (dropbox/put! oauth path content (ctype) (revision))
+  (default! ctype 
+    (path->mimetype path (if (packet? content) "application" "text")))
+  (loginfo |DROPBOX/PUT!| 
+    "Saving " (length content) " of " ctype " to " path
+    " given\n\t" (pprint oauth))
   (let* ((endpoint
 	  (mkurl "https://api-content.dropbox.com/1/files_put/"
 		  oauth path))
@@ -186,5 +190,8 @@
 	 (gpath/handler 'dropbox
 			(lambda args (apply dropbox-get args))
 			(lambda args (apply dropbox-save args))
-			(lambda (root path) (dropbox-pathstring root path))))
+			(lambda (root path) (dropbox-pathstring root path))
+			#f
+			(lambda (gpath) (dropbox-root-path gpath))))
+
 

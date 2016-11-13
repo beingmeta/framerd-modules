@@ -33,6 +33,7 @@
 (varconfig! optimize:bindvecs bindvecs-dflt)
 
 (defslambda (codewarning warning)
+  (debug%watch "CODEWARNING" warning)
   (threadset! 'codewarnings (choice warning (threadget 'codewarnings))))
 
 (define (module? arg)
@@ -265,9 +266,16 @@
 		       expr)
 		      ((and from (%test from '%rewrite)
 			    (%test (get from '%rewrite) head))
-		       (dotighten
-			((%get (get from '%rewrite) head) expr)
-			env bound opts lexrefs w/rails))
+		       (let ((rewriter (%get (get from '%rewrite) head)))
+			 (onerror
+			     (dotighten
+			      (rewriter expr)
+			      env bound opts lexrefs w/rails)
+			   (lambda (ex)
+			     (logwarn |RewriteError| 
+			       "Error rewriting " expr " with " rewriter)
+			     (logwarn |RewriteError| "Error rewriting " expr ": " ex)
+			     expr))))
 		      ((or (applicable? value) (opcode? value)
 			   (and (ambiguous? value)
 				(singleton? (applicable? value))
@@ -362,6 +370,7 @@
 (define (optimize-procedure! proc (opts #f) (lexrefs) (w/rails))
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
   (default! w/rails (getopt opts 'rails rails-dflt))
+  (threadset! 'codewarnings #{})
   (let* ((env (procedure-env proc))
 	 (arglist (procedure-args proc))
 	 (body (procedure-body proc))
@@ -386,7 +395,6 @@
 		     (and (rail? initial) (> (length initial) 1)
 			  (eq? (elt initial 0) 'COMMENT)
 			  (eq? (elt initial 1) '|original|))))
-      (threadset! 'codewarnings #{})
       (set-procedure-body! proc 
 			   (if w/rails 
 			       (->rail (cons (->rail (car new-body))

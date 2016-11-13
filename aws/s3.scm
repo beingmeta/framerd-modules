@@ -262,15 +262,19 @@
 		       " given \n  " (pprint opts) "\nlast result:\n  " 
 		       (pprint irritant)))
 	      (if (getopt opts 's3err)
-		  (s3-error (getopt irritant 'httpstatus) irritant op bucket path opts)
-		  (begin (s3-warn (getopt irritant 'httpstatus) (cdr irritant) (car irritant)
+		  (s3-error (getopt irritant 'httpstatus)
+			    irritant op bucket path opts)
+		  (begin (s3-warn (getopt irritant 'httpstatus)
+				  (cdr irritant) (car irritant)
 				  op bucket path opts)
 		    irritant)))
 	    (begin
 	      (logwarn |S3/Retry|
-		"Retrying " op " s3://" bucket "/" path " after " tries "/" max " attempts.")
+		"Retrying " op " s3://" bucket "/" path
+		" after " tries "/" max " attempts.")
 	      (lognotice |S3/Retry| "Last response was:\n  " (pprint irritant))
-	      (tryop (1+ tries) max op bucket path opts content ctype headers args)))))))
+	      (tryop (1+ tries) max op bucket path opts content 
+		     ctype headers args)))))))
 
 (define (s3op op bucket path (content #f) (ctype) 
 	      (headerlist '()) (opts #[]) args)
@@ -593,22 +597,28 @@
   (let* ((req (s3/op "GET" (s3loc-bucket loc) (s3loc-path loc)
 		opts "" "text" headers))
 	 (err (getopt opts 'errs (getopt opts 's3errs s3errs)))
-	 (status (get req 'response)))
+	 (status (get req 'response))
+	 (content (get req '%content))
+	 (hash (md5 content)))
     (when headcache
       (let ((copy (deep-copy req)))
 	(drop! copy '%content)
 	(meltcache/store headcache copy s3head (list loc headers))))
     (if (and status (>= 299 status 200))
-	`#[content ,(get req '%content)
-	   ctype ,(try (get req 'content-type)
-		       (getopt opts 'mimetype {})
-		       (path->mimetype (s3loc-path loc)
-				       (if text "text" "application")
-				       (getopt opts 'mimetable #f))
-		       (if text "text" "application"))
-	   encoding ,(get req 'content-encoding)
-	   modified ,(try (get req 'last-modified) (timestamp))
-	   etag ,(try (get req 'etag) (md5 (get req '%content)))]
+	(frame-create #f
+	  'content-type 
+	  (try (get req 'content-type)
+	       (getopt opts 'mimetype {})
+	       (path->mimetype (s3loc-path loc)
+			       (if text "text" "application")
+			       (getopt opts 'mimetable #f))
+	       (if text "text" "application"))
+	  'content-encoding  (get req 'content-encoding)
+	  'content  content
+	  'last-modified (try (get req 'last-modified) (timestamp))
+	  'etag (get req 'etag)
+	  'hash (tryif hash hash)
+	  'md5 (tryif hash (packet->base16 hash)))
 	(and err (irritant req S3FAILURE S3LOC/CONTENT
 			   (s3loc->string loc))))))
 (define s3/get+ s3loc/get+)
@@ -652,21 +662,24 @@
 	(mimetable (getopt opts 'mimetable #f)))
     (debug%watch "S3LOC/INFO" loc req)
     (and (response/ok? req)
-	 (frame-create #f
-	   'path (s3loc/s3uri loc)
-	   'ctype (try (get req 'content-type)
-		       (path->mimetype (s3loc-path loc)
-				       (if text "text" "application")
-				       mimetable)
-		       (if text "text" "application"))
-	   'size (get req 'content-length)
-	   'encoding (get req 'content-encoding)
-	   'modified (try (get req 'last-modified) (timestamp))
-	   'etag (try (get req 'etag) 
-		      (packet->base16 (md5 (get req '%content))))
-	   'hash (try (base16->packet (get req 'x-amz-meta-md5))
-		      (base16->packet (get (text->frames etag-pat (get req 'etag)) 'hash))
-		      (md5 (get req '%content)))))))
+	 (let ((hash (try (base16->packet (get req 'x-amz-meta-md5))
+			  (base16->packet 
+			   (get (text->frames etag-pat (get req 'etag)) 'hash))
+			  (md5 (get req '%content)))))
+	   (frame-create #f
+	     'gpath loc 'rootpath (s3loc-path loc) 
+	     'gpathstring (s3loc->string loc)
+	     'path (s3loc/s3uri loc)
+	     'content-type (try (get req 'content-type)
+				(path->mimetype (s3loc-path loc)
+						(if text "text" "application")
+						mimetable)
+				(if text "text" "application"))
+	     'content-length (get req 'content-length)
+	     'content-encoding (get req 'content-encoding)
+	     'last-modified (try (get req 'last-modified) (timestamp))
+	     'etag (get req 'etag)
+	     'hash hash 'md5 (packet->base16 hash))))))
 (define s3/info s3loc/info)
 
 ;;; Basic S3 network write methods
@@ -854,20 +867,36 @@
     (set! headers (append headers (getopt opts 'headers))))
   (let* ((req (list-chunk loc headers opts "/" next))
 	 (content (reject (elts (xmlparse (get req '%content) 'data)) string?))
-	 (next (try (get content 'nextmarker) #f)))
+	 (next (try (get content 'nextmarker) #f))
+	 (basepath (s3loc-path loc)))
     (debug%watch "S3/LIST+" content)
     (choice
+     (for-choices (path (get (get content 'commonprefixes) 'prefix))
+       (let ((gpath (make-s3loc (s3loc-bucket loc) path))
+	     (basepath (s3loc-path loc)))
+	 (frame-create #f
+	   'rootpath path 'gpath gpath 'gpathstring (s3loc->string gpath)
+	   'key path 'name (basename (strip-suffix path "/")) 'loc gpath
+	   'relpath (strip-prefix (s3loc-path gpath) basepath))))
      (for-choices (elt (get content 'contents))
-       `#[key ,(get elt 'key) name ,(basename (get elt 'key))
-	  loc ,(make-s3loc (s3loc-bucket loc) (get elt 'key))
-	  size ,(string->number (get elt 'size))
-	  modified ,(timestamp (get elt 'lastmodified))
-	  etag ,(slice (decode-entities (get elt 'etag)) 1 -1)
-	  content-type ,(get elt 'content-type)
-	  content-encoding ,(get elt 'content-encoding)
-	  hash ,(try (base16->packet (get req 'x-amz-meta-md5))
-		     (base16->packet
-		      (get (text->frames etag-pat (get elt 'etag)) 'hash)))])
+       (let* ((path (get elt 'key))
+	      (ctype (try (get elt 'content-type)
+			  (get elt 'ctype)
+			  (path->mimetype path)))
+	      (gpath (make-s3loc (s3loc-bucket loc) (get elt 'key)))
+	      (hash (try (base16->packet (get req 'x-amz-meta-md5))
+			 (base16->packet
+			  (get (text->frames etag-pat (get elt 'etag)) 'hash)))))
+	 (frame-create #f
+	   'rootpath path 'gpath gpath 'gpathstring (s3loc->string gpath)
+	   'key path 'name (basename path) 'loc gpath
+	   'relpath (strip-prefix (s3loc-path gpath) basepath)
+	   'content-type ctype
+	   'size (string->number (get elt 'size))
+	   'modified (timestamp (get elt 'lastmodified))
+	   'etag (slice (decode-entities (get elt 'etag)) 1 -1)
+	   'content-encoding (get elt 'content-encoding)
+	   'hash hash 'md5 (packet->base16 hash))))
      (tryif next (s3/list+ loc headers opts next)))))
 (module-export! 's3/list+)
 
@@ -1008,28 +1037,35 @@
 	    "Syncing " (try mimetype "unknown type") " " (write file)
 	    " to " (s3loc->string loc) ":\n info: " info)
 	  (if (or (fail? info) forcewrite)
-	      (let ((data (if (and (not encoding)
-				   (exists? mimetype) mimetype
-				   (or (has-prefix mimetype "text")
-				       (mimetype/text? mimetype)))
-			      (filestring file)
-			      (filedata file))))
-		(loginfo |S3/push| "Pushing " 
-			 (length data) 
-			 (if (mimetype/text? mimetype) 
-			     " characters "
-			     " bytes ")
-			 " to " loc)
+	      (let* ((charset (and (not encoding) (exists? mimetype) mimetype
+				   (ctype->charset mimetype)))
+		     (data (if charset
+			       (onerror (filestring file charset)
+				 (lambda (ex) (filedata file)))
+			       (if (and (not encoding) mimetype
+					(or (has-prefix mimetype "text")
+					    (mimetype/text? mimetype)))
+				   (filecontent file)
+				   (filedata file)))))
+		(loginfo |S3/push| 
+		  "Pushing " (length data) 
+		  (if (mimetype/text? mimetype) 
+		      " characters "
+		      " bytes ")
+		  " to " loc)
 		(s3/write! loc data (try mimetype "application")
 			   (data-headers data encoding headers))
 		(set+! updated loc)
 		(when pause (sleep pause)))
-	      (let ((data (if (and (not encoding)
-				   (exists? mimetype) mimetype
-				   (or (has-prefix mimetype "text")
-				       (mimetype/text? mimetype)))
-			      (filestring file)
-			      (filedata file))))
+	      (let* ((charset (and (not encoding) mimetype (ctype->charset mimetype)))
+		     (data (if charset
+			       (onerror (filestring file charset)
+				 (lambda (ex) (filedata file)))
+			       (if (and (not encoding) mimetype
+					(or (has-prefix mimetype "text")
+					    (mimetype/text? mimetype)))
+				   (filecontent file)
+				   (filedata file)))))
 		(if (and (= (get info 'size) (file-size file))
 			 (or (not (getopt opts 'testhash #t))
 			     (not (test info '{hash etag md5}))
@@ -1123,7 +1159,8 @@
   (if opts
       (set! opts (cons opts (try (cons (s3loc/opts loc) s3opts)  s3opts)))
       (set! opts (try (cons (s3loc/opts loc) s3opts)  s3opts)))
-  (try (if text (filestring (s3loc/filename loc))
+  (try (if text 
+	   (filecontent (s3loc/filename loc))
 	   (filedata (s3loc/filename loc)))
        (let* ((req (s3/op "GET" (s3loc-bucket loc) (s3loc-path loc)
 		     opts "" "text" headers ))

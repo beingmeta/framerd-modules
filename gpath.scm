@@ -8,18 +8,19 @@
  '{gp/write! gp/save!
    writeout writeout/type
    gp/writeout gp/writeout! gp/writeout+!
-   gpath? ->gpath uri->gpath
-   gp/location? gp/location gp/basename
+   gpath? ->gpath uri->gpath gp/localpath?
+   gp/location? gp/location gp/basename gp/rootpath
    gp/has-suffix gp/has-prefix
    gp/fetch gp/fetch+ gp/etag gp/info
-   gp/exists? gp/exists gp/modified gp/newer
+   gp/exists? gp/exists gp/modified gp/newer 
+   gp/list gp/list+
    gp/path gp/mkpath gp/subpath gp/makepath
    gpath->string gp/string gp>s gpath->location
    gp:config gpath/handler
    gp/urlfetch gp/urlinfo
    dtype->gpath gpath->dtype
    datauri/fetch+ datauri/info
-   gp/copy!})
+   gp/copy! gp/copy*!})
 (module-export! '{zip/gopen zip/gclose})
 
 ;;; This is a generic path facility (it grew out of the savecontent
@@ -38,7 +39,7 @@
        (define (zip/add! . args) #f)))
 
 (use-module '{fileio aws/s3 varconfig logger fdweb 
-	      texttools mimetable ezrecords hashfs})
+	      texttools mimetable ezrecords hashfs zipfs})
 (define-init %loglevel %notice%)
 
 (define gp/urlsubst {})
@@ -47,7 +48,7 @@
 (defrecord memfile mimetype content modified (hash #f))
 
 (defrecord gpath-handler name get (save #f)
-  (tostring #f) (fromstring #f) (fromuri #f) (prefixes {}))
+  (tostring #f) (fromstring #f) (fromuri #f) (rootpath #f) (prefixes {}))
 (define gpath/handler cons-gpath-handler)
 
 (define-init gpath-handlers (make-hashtable))
@@ -60,6 +61,13 @@
 			       val)
 		       (error "NOT a GPATH HANDLER"))
 		   (get gpath-handlers (getkeys gpath-handlers)))))
+
+(define-init urish?
+  (lambda (x)
+    (and (string? x)
+	 (string-starts-with? x #/^[a-zA-Z.]{2,32}:/))))
+
+(define simple-gpath-prefixes {"s3:" "http:" "https:" "dropbox:"})
 
 (define (guess-mimetype name (content) (opts #f))
   (when (and (bound? content) (table? content) (not opts))
@@ -100,38 +108,50 @@
 	  path)))
 
 (define datauri-pat
-  #("data:" (label ctype (not> ";")) ";" (label enc (not> ",")) ","
+  #("data:" (label content-type (not> ";")) ";" (label enc (not> ",")) ","
     (label content (rest)))  )
 (define (datauri/fetch+ string (justinfo #f))
   (let* ((parsed (text->frame datauri-pat string))
-	 (ctype (get parsed 'ctype))
+	 (ctype (get parsed 'content-type))
 	 (enc (get parsed 'enc))
 	 (data (get parsed 'content))
 	 (base64 (identical? (downcase (get parsed 'enc)) "base64")))
     (if justinfo
 	(if base64
-	    `#[ctype ,ctype]
-	    `#[ctype ,ctype encoding ,enc])
-	(let* ((charset (try (get (text->frames #(";charset=" (label charset (not> ";"))) ctype) 'charset)
-			     #f))
+	    `#[content-type ,ctype 
+	       content-length ,(length (get parsed 'content))]
+	    `#[content-type ,ctype 
+	       content-length ,(length (get parsed 'content))
+	       content-encoding ,enc])
+	(let* ((charset (ctype->charset ctype))
 	       (content (if base64 
 			    (if (mimetype/text? ctype)
 				(packet->string (base64->packet data) charset)
 				(base64->packet data))
 			    data)))
 	  (if charset
-	      `#[ctype ,ctype content ,content charset ,charset]
-	      `#[ctype ,ctype content ,content])))))
+	      `#[content-type ,ctype 
+		 content-encoding ,enc
+		 content-length ,(length (get parsed 'content))
+		 content-encoded ,(length data)
+		 content ,content charset ,charset]
+	      `#[content-type ,ctype 
+		 content-encoding ,enc
+		 content-length ,(length (get parsed 'content))
+		 content-encoded ,(length data)
+		 content ,content])))))
 
 ;;; Writing to a gpath
 
-(defambda (gp/write! saveto name content (ctype #f) (charset #f) (opts #f) (encoding #f))
+(defambda (gp/write! saveto name content
+	    (ctype #f) (charset #f) (opts #f) (encoding))
+  (when (urish? saveto) (set! saveto (->gpath saveto)))
   (when (and ctype (table? ctype) (not opts))
     (set! opts ctype) (set! ctype #f))
   (when (and charset (table? charset) (not opts))
     (set! opts charset) (set! charset #f))
-  (unless encoding 
-    (set! encoding (getopt opts 'encoding (path->encoding name))))
+  (default! encoding
+    (getopt opts 'content-encoding (path->encoding name)))
   (do-choices name
     (let ((ctype (or ctype (guess-mimetype (get-namestring name) content opts)))
 	  (charset (or charset (get-charset ctype opts))))
@@ -150,76 +170,79 @@
 	      ""))))
 
 (defambda (gp/save! dest content (ctype #f) (charset #f) (opts #f) (encoding #f))
+  (when (urish? dest) (set! dest (->gpath dest)))
   (when (and ctype (table? ctype) (not opts))
     (set! opts ctype) (set! ctype #f))
   (when (and charset (table? charset) (not opts))
     (set! opts charset) (set! charset #f))
   (unless encoding 
-    (set! encoding (getopt opts 'encoding (path->encoding  (get-namestring dest)))))
+    (set! encoding (getopt opts 'content-encoding (path->encoding  (get-namestring dest)))))
   (if (exists? content)
-    (do-choices dest
-      (let ((ctype (or ctype (guess-mimetype content opts)))
-	    (charset (try (or charset (get-charset ctype opts)) #f))
-	    (headers (merge-headers (tryif encoding (glom "Encoding: " encoding))
-				    (getopt opts 'headers))))
-	(when (and (string? dest) (has-prefix dest {"http:" "https:"}))
-	  (set! dest (try (->s3loc dest) (uri->gpath dest) dest)))
-	(loginfo GP/SAVE! "Saving " (length content)
-		 (if (string? content) " characters of "
-		     (if (packet? content) " bytes of "))
-		 (if (and (exists? ctype) ctype)
-		     (printout (write ctype) " "))
-		 "content into " dest)
-	;; Do any charset conversion required by the CTYPE
-	(when (and charset (string? content)
-		   (not (overlaps? (downcase charset) {"utf8" "utf-8"})))
-	  (set! content (packet->string (string->packet content) charset)))
-	(cond ((and (string? dest) (string-starts-with? dest {"http:" "https:"}))
-	       (let ((req (urlput dest content ctype `#[METHOD PUT HEADERS ,headers])))
-		 (unless (response/ok? req)
-		   (if (response/badmethod? req)
-		       (let ((req (urlput dest content ctype `#[METHOD POST HEADERS ,headers])))
-			 (unless (response/ok? req)
-			   (error "Couldn't save to URL" dest req)))
-		       (error "Couldn't save to URL" dest req)))))
-	      ((string? dest) (write-file dest content))
-	      ((s3loc? dest) (s3/write! dest content ctype headers))
-	      ((and (pair? dest) (hashfs? (car dest)))
-	       (hashfs/save! (car dest) (cdr dest) content ctype))
-	      ((and (pair? dest) (hashtable? (car dest)))
-	       (store! (car dest) (cdr dest)
-		       (cons-memfile ctype content (timestamp)
-				     (packet->base16 (md5 content)))))
-	      ((and (pair? dest) (string? (car dest)) (string? (cdr dest)))
-	       (write-file (mkpath (car dest) (cdr dest)) content))
-	      ((and (pair? dest)
-		    (s3loc? (car dest))
-		    (string? (cdr dest)))
-	       (s3/write! (s3/mkpath (car dest) (cdr dest)) content ctype (qc headers)))
-	      ((and havezip (pair? dest)
-		    (zipfile? (car dest))
-		    (string? (cdr dest)))
-	       (zip/add! (car dest) (cdr dest) content))
-	      ((and (pair? dest) (compound-type? (car dest))
-		    (test gpath-handlers (compound-tag (car dest)))
-		    (gpath-handler-save (get gpath-handlers (compound-tag (car dest)))))
-	       ((gpath-handler-save (get gpath-handlers (compound-tag (car dest))))
-		(car dest) (cdr dest) content ctype
-		(if charset (cons `#[charset ,charset] opts) opts)))
-	      (else (error "Bad GP/SAVE call")))
-	(loginfo GP/SAVE! "Saved " (length content)
-		 (if (string? content) " characters of "
-		     (if (packet? content) " bytes of "))
-		 (if (and (exists? ctype) ctype)
-		     (printout (write ctype) " "))
-		 "content into " dest)))))
+      (do-choices dest
+	(let ((ctype (or ctype (guess-mimetype content opts)))
+	      (charset (try (or charset (get-charset ctype opts)) #f))
+	      (headers (merge-headers (tryif encoding (glom "Content-Encoding: " encoding))
+				      (getopt opts 'headers))))
+	  (when (and (string? dest) (has-prefix dest {"http:" "https:"}))
+	    (set! dest (try (->s3loc dest) (uri->gpath dest) dest)))
+	  (loginfo GP/SAVE! "Saving " (length content)
+		   (if (string? content) " characters of "
+		       (if (packet? content) " bytes of "))
+		   (if (and (exists? ctype) ctype)
+		       (printout (write ctype) " "))
+		   "content into " dest)
+	  ;; Do any charset conversion required by the CTYPE
+	  (when (and charset (string? content)
+		     (not (overlaps? (downcase charset) {"utf8" "utf-8"})))
+	    (set! content (packet->string (string->packet content) charset)))
+	  (cond ((and (string? dest) (string-starts-with? dest {"http:" "https:"}))
+		 (let ((req (urlput dest content ctype `#[METHOD PUT HEADERS ,headers])))
+		   (unless (response/ok? req)
+		     (if (response/badmethod? req)
+			 (let ((req (urlput dest content ctype `#[METHOD POST HEADERS ,headers])))
+			   (unless (response/ok? req)
+			     (error "Couldn't save to URL" dest req)))
+			 (error "Couldn't save to URL" dest req)))))
+		((string? dest) (write-file dest content))
+		((s3loc? dest) (s3/write! dest content ctype headers))
+		((and (pair? dest) (hashfs? (car dest)))
+		 (hashfs/save! (car dest) (cdr dest) content ctype))
+		((and (pair? dest) (zipfs? (car dest)))
+		 (zipfs/save! (car dest) (cdr dest) content ctype))
+		((and (pair? dest) (hashtable? (car dest)))
+		 (store! (car dest) (cdr dest)
+			 (cons-memfile ctype content (timestamp)
+				       (packet->base16 (md5 content)))))
+		((and (pair? dest) (string? (car dest)) (string? (cdr dest)))
+		 (write-file (mkpath (car dest) (cdr dest)) content))
+		((and (pair? dest)
+		      (s3loc? (car dest))
+		      (string? (cdr dest)))
+		 (s3/write! (s3/mkpath (car dest) (cdr dest)) content ctype (qc headers)))
+		((and havezip (pair? dest)
+		      (zipfile? (car dest))
+		      (string? (cdr dest)))
+		 (zip/add! (car dest) (cdr dest) content))
+		((and (pair? dest) (compound-type? (car dest))
+		      (test gpath-handlers (compound-tag (car dest)))
+		      (gpath-handler-save (get gpath-handlers (compound-tag (car dest)))))
+		 ((gpath-handler-save (get gpath-handlers (compound-tag (car dest))))
+		  (car dest) (cdr dest) content ctype
+		  (if charset (cons `#[charset ,charset] opts) opts)))
+		(else (error "Bad GP/SAVE call")))
+	  (loginfo GP/SAVE! "Saved " (length content)
+		   (if (string? content) " characters of "
+		       (if (packet? content) " bytes of "))
+		   (if (and (exists? ctype) ctype)
+		       (printout (write ctype) " "))
+		   "content into " dest)))))
 
 (define writeout
   (macro expr
     `(,gp/save!
-      ,(second expr)
-      (,stringout ,@(cdr (cdr expr)))
-      (,guess-mimetype ,(second expr)))))
+	 ,(second expr)
+	 (,stringout ,@(cdr (cdr expr)))
+       (,guess-mimetype ,(second expr)))))
 (define gp/writeout writeout)
 
 (define writeout/type
@@ -234,17 +257,17 @@
 (define gp/writeout!
   (macro expr
     `(,gp/write!
-      ,(second expr) ,(third expr)
-      (,stringout ,@(cdr (cdr (cdr expr))))
-      (,guess-mimetype ,(third expr)))))
+	 ,(second expr) ,(third expr)
+	 (,stringout ,@(cdr (cdr (cdr expr))))
+       (,guess-mimetype ,(third expr)))))
 
 ;; This writes out with an explicit mimetype
 (define gp/writeout+!
   (macro expr
     `(,gp/write!
-      ,(second expr) ,(third expr)
-      (,stringout ,@(cdr (cdr (cdr (cdr expr)))))
-      ,(fourth expr))))
+	 ,(second expr) ,(third expr)
+	 (,stringout ,@(cdr (cdr (cdr (cdr expr)))))
+       ,(fourth expr))))
 
 (define (string->root string)
   (cond ((has-prefix string "s3:") (->s3loc string))
@@ -253,19 +276,41 @@
 	(else (uribase string))))
 
 (define (gp/basename path)
-  (when (string? path) (set! path (string->root path)))
-  (cond ((and (pair? path) (null? (cdr path)))
-	 (gp/basename (car path)))
-	((pair? path) (gp/basename (cdr path)))
-	((s3loc? path) (basename (s3loc-path path)))
-	((and (string? path) (has-prefix path "data:"))
-	 (glom "data-" (packet->base16 (md5 path))
-	   (try (ctype->suffix (get (datauri/info path) 'ctype) ".") "")))
-	((string? path) (basename path))
+  (if (and (string? path) (has-prefix path simple-gpath-prefixes))
+      (basename path)
+      (begin
+	(when (urish? path) (set! path (->gpath path)))
+	(cond ((and (pair? path) (null? (cdr path)))
+	       (gp/basename (car path)))
+	      ((pair? path) (gp/basename (cdr path)))
+	      ((s3loc? path) (basename (s3loc-path path)))
+	      ((and (string? path) (has-prefix path "data:"))
+	       (glom "data-" (packet->base16 (md5 path))
+		 (try (ctype->suffix (get (datauri/info path) 'content-type) ".")
+		      "")))
+	      ((string? path) (basename path))
+	      (else "")))))
+
+(define (gp/rootpath path)
+  (if (urish? path) (set! path (->gpath path)))
+  (cond ((pair? path)
+	 (mkpath (gp/rootpath (car path))
+		 (strip-prefix (cdr path) "/")))
+	((s3loc? path) (s3loc-path path))
+	((or (zipfs? path) (zipfile? path)) "")
+	((and (compound-type? path) (test gpath-handlers (compound-tag path)))
+	 (if (gpath-handler-rootpath (get gpath-handlers (compound-tag path)))
+	     ((gpath-handler-rootpath (get gpath-handlers (compound-tag path)))
+	      path)
+	     ""))
+	((and (string? path) (has-prefix path "data:")) 
+	 (gp/basename path))
+	((and (string? path) (file-directory? path)) (mkpath path ""))
+	((string? path) path)
 	(else "")))
 
 (define (gp/location? path)
-  (when (string? path) (set! path (string->root path)))
+  (when (urish? path) (set! path (string->root path)))
   (cond ((string? path) (has-suffix path "/"))
 	((and (pair? path) (string? (cdr path)))
 	 (has-suffix (cdr path) "/"))
@@ -275,6 +320,7 @@
 	(else #f)))
 
 (define (gp/location path)
+  (when (urish? path) (set! path (->gpath path)))
   (when (string? path) (set! path (string->root path)))
   (cond ((and (pair? path)
 	      (or (null? (cdr path)) (empty-string? (cdr path))))
@@ -300,7 +346,7 @@
 	(else path)))
 
 (define (gpath->location path)
-  (if (string? path) (set! path (->gpath path)))
+  (when (urish? path) (set! path (->gpath path)))
   (if (gp/location? path) path (gp/location path)))
 
 (define (gpath->string path)
@@ -319,6 +365,8 @@
 	   "(0x" (number->string (hashptr (car path)) 16) ")"))
 	((and (pair? path) (hashfs? (car path)) (string? (cdr path)))
 	 (hashfs/string (car path) (cdr path)))
+	((and (pair? path) (zipfs? (car path)) (string? (cdr path)))
+	 (zipfs/string (car path) (cdr path)))
 	((and (compound-type? path) (test gpath-handlers (compound-tag path)))
 	 ((gpath-handler-tostring (get gpath-handlers (compound-tag path)))
 	  path #f))
@@ -326,9 +374,6 @@
 	      (test gpath-handlers (compound-tag (car path))))
 	 ((gpath-handler-tostring (get gpath-handlers (compound-tag (car path))))
 	  (car path) (cdr path)))
-	((and (pair? path) (compound-type? (car path) 'hashfs)
-	      (string? (cdr path)))
-	 (hashfs/string (car path) (cdr path)))
 	((s3loc? path) (s3loc->string path))
 	((and (pair? path) (s3loc? (car path)))
 	 (s3loc->string (s3/mkpath (car path) (cdr path))))
@@ -355,10 +400,13 @@
   (cond ((or (not path) (null? path)) root)
 	((and require-subpath (not (string? path)))
 	 (error |TypeError| makepath "Relative path is not a string" path))
-	((or (s3loc? path) (zipfile? path) (hashtable? path) (hashfs? path)
+	((or (s3loc? path) (zipfile? path) 
+	     (hashtable? path) (hashfs? path)
+	     (zipfs? path)
 	     (and (pair? path) (string? (cdr path))
 		  (or (s3loc? (car path)) (zipfile? (car path))
-		      (hashtable? (car path)) (hashfs? (car path)))))
+		      (hashtable? (car path)) (hashfs? (car path))
+		      (zipfs? (car path)))))
 	 path)
 	((not (string? path))
 	 (error |TypeError| makepath "Relative path is not a string" path))
@@ -371,6 +419,7 @@
 	((zipfile? root) (cons root path))
 	((hashtable? root) (cons root path))
 	((hashfs? root) (cons root path))
+	((zipfs? root) (cons root path))
 	((and (compound-type? root) (test gpath-handlers (compound-tag root)))
 	 (cons root path))
 	((and (pair? root) (not (string? (cdr root))))
@@ -399,12 +448,13 @@
 	    (apply gp/subpath result (car more) (cdr more))))))
 
 (define (gp/fetch ref (ctype #f) (opts #f) (encoding #f))
+  (if (urish? ref) (set! ref (->gpath ref)))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
   (unless ctype (set! ctype (guess-mimetype (get-namestring ref) #f opts)))
   (unless encoding 
-    (set! encoding (getopt opts 'encoding (path->encoding (get-namestring ref)))))
+    (set! encoding (getopt opts 'content-encoding (path->encoding (get-namestring ref)))))
   (loginfo |GP/FETCH| ref " expecting " ctype " given " (pprint opts))
   (cond ((s3loc? ref) (s3/get ref))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
@@ -414,6 +464,8 @@
 	 (memfile-content (get (car ref) (cdr ref))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/get (car ref) (cdr ref)))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (zipfs/get (car ref) (cdr ref) opts))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
@@ -435,8 +487,9 @@
 	 (if  (and ctype (not encoding)
 		   (or (mimetype/text? ctype)
 		       (textsearch #{"xml" "json"} ctype)))
-	      (filestring (abspath ref)
-			  (or (and ctype (ctype->charset ctype)) "auto"))
+	      (if (and ctype (ctype->charset ctype))
+		  (filestring (abspath ref) (and ctype (ctype->charset ctype)))
+		  (filecontent (abspath ref)))
 	      (filedata (abspath ref))))
 	(else (error "Weird GPATH ref" ref))))
 
@@ -446,15 +499,22 @@
 		   (if (equal? url newurl)
 		       (cons url (if (pair? err) err '()))
 		       (cons* newurl (list url) (if (pair? err) err '())))))
-	 (response (urlget newurl)))
+	 (response (urlget newurl))
+	 (encoding (get response 'content-encoding))
+	 (hash (md5 (get response 'content))))
     (if (and (test response 'response)
 	     (<= 200 (get response 'response) 299)
 	     (test response '%content))
-	`#[content ,(get response '%content)
-	   ctype ,(get response 'content-type)
-	   encoding ,(get response 'content-encoding)
-	   modified ,(get response 'last-modified)
-	   etag ,(get response 'etag)]
+	(frame-create #f
+	  'gpath url 'gpathstring url 'rootpath (uripath url)
+	  'content-type (get response 'content-type)
+	  'content-length (length (get response 'content))
+	  'last-modified (get response 'last-modified)
+	  'content-encoding (get response 'content-encoding)
+	  'etag (get response 'etag) 
+	  'hash hash 'md5 (packet->base16 hash)
+	  'content-encoding  (get response 'content-encoding)
+	  'content (get response 'content))
 	(if (<= 300 (get response 'response) 399)
 	    (if (and (number? max-redirects) (> max-redirects 0))
 		(gp/urlfetch (get response 'location)
@@ -462,7 +522,7 @@
 			     (-1+ max-redirects))
 		(if err (error TOO_MANY_REDIRECTS url response)
 		    (begin (logwarn "Too many redirects: "
-				    (cons url err)))))
+			     (cons url err)))))
 	    (tryif err (error URLFETCH_FAILED url response))))))
 
 (define (gp/urlinfo url (err #t) (max-redirects 10))
@@ -482,47 +542,70 @@
 			    (-1+ max-redirects))
 		(if err (error TOO_MANY_REDIRECTS url response)
 		    (begin (logwarn "Too many redirects: "
-				    (cons url err)))))
+			     (cons url err)))))
 	    response))))
 
-(define (gp/fetch+ ref (ctype #f) (opts #f) (encoding #f))
+(define (gp/fetch+ ref (ctype #f) (opts #f) (encoding))
+  (if (urish? ref) (set! ref (->gpath ref)))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
   (unless ctype (set! ctype (guess-mimetype (get-namestring ref) #f opts)))
-  (unless encoding 
-    (set! encoding (getopt opts 'encoding (path->encoding (get-namestring ref)))))
+  (default! encoding 
+    (getopt opts 'content-encoding (path->encoding (get-namestring ref))))
   (loginfo |GP/FETCH+| ref " expecting " ctype " given " (pprint opts))
   (cond ((s3loc? ref) (s3/get+ ref))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
-	 (let* ((realpath (root-path (cdr ref)))
-		(zip (car ref))
-		(ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
-		(charset (and ctype (has-prefix ctype "text")
-			      (or (ctype->charset ctype) #t)))
-		(content (zip/get zip realpath (not charset))))
-	   `#[content ,(if (string? charset)
-			   (packet->string content charset)
-			   content)
-	      ctype ,(or ctype {})
-	      charset ,(if (string? charset) charset (if charset "utf-8" {}))
-	      modified ,(tryif (bound? zip/modtime) (zip/modtime zip realpath))
-	      etag ,(packet->base16 (md5 content))]))
+	 (let ((realpath (root-path (cdr ref)))
+	       (zip (car ref)))
+	   (and (zip/exists? zip realpath)
+		(let* ((ctype (or ctype 
+				  (guess-mimetype (get-namestring ref) #f opts)))
+		       (charset (and ctype (has-prefix ctype "text")
+				     (or (ctype->charset ctype) #t)))
+		       (content (zip/get zip realpath (not charset)))
+		       (hash (md5 content)))
+		  (frame-create #f
+		    'gpath (->gpath ref) 
+		    'gpathstring (gpath->string (->gpath ref))
+		    'rootpath (gp/rootpath ref)
+		    'content (if (string? charset)
+				 (packet->string content charset)
+				 content)
+		    'content-length (length content)
+		    'content-type (or ctype {})
+		    'charset
+		    (if (string? charset) charset (if charset "utf-8" {}))
+		    'last-modified
+		    (tryif (bound? zip/modtime) (zip/modtime zip realpath))
+		    'md5 (packet->base16 hash) 'hash hash)))))
 	((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
 	 (let ((mf (get (car ref) (cdr ref))))
 	   (and (exists? mf)
 		(if (memfile? mf)
-		    `#[content ,(memfile-content mf)
-		       ctype ,(or (memfile-mimetype mf) ctype
-				  (guess-mimetype (get-namestring ref) #f opts))
-		       modified ,(memfile-modified mf)
-		       etag ,(memfile-hash mf)]
-		    `#[content ,mf
-		       ctype ,(or ctype
-				  (guess-mimetype (get-namestring ref) #f opts))
-		       etag ,(packet->base16 (md5 mf))]))))
+		    `#[gpath ,(->gpath ref) 
+		       gpathstring ,(gpath->string (->gpath ref))
+		       rootpath ,(gp/rootpath ref)
+		       content ,(memfile-content mf)
+		       content-length ,(length (memfile-content mf))
+		       content-type
+		       ,(or (memfile-mimetype mf) ctype
+			    (guess-mimetype (get-namestring ref) #f opts))
+		       last-modified ,(memfile-modified mf)
+		       md5 ,(memfile-hash mf)]
+		    `#[gpath ,(->gpath ref) 
+		       gpathstring ,(gpath->string (->gpath ref))
+		       rootpath ,(gp/rootpath ref)
+		       content ,mf
+		       content-length ,(length mf)
+		       content-type
+		       ,(or ctype
+			    (guess-mimetype (get-namestring ref) #f opts))
+		       md5 ,(packet->base16 (md5 mf))]))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/get+ (car ref) (cdr ref)))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (zipfs/get+ (car ref) (cdr ref)))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
@@ -542,51 +625,76 @@
 	 (let* ((ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
 		(istext (and ctype (has-prefix ctype "text") (not encoding)))
 		(charset (and istext (ctype->charset ctype)))
-		(content (if istext (filestring (abspath ref) charset)
-			     (filedata (abspath ref)))))
-	   `#[content  ,content
-	      ctype    ,(or ctype {})
-	      charset  ,(or charset {})
-	      etag     ,(packet->base16 (md5 content))
-	      modified ,(file-modtime ref)]))
+		(content (if istext 
+			     (if charset 
+				 (filestring (abspath ref) charset)
+				 (filecontent (abspath ref)))
+			     (filedata (abspath ref))))
+		(hash (md5 content)))
+	   (frame-create #f
+	     'gpath (->gpath ref) 
+	     'gpathstring (gpath->string (->gpath ref))
+	     'rootpath (gp/rootpath ref)
+	     'content  content
+	     'content-type (or ctype {})
+	     'content-length (length content)
+	     'charset  (or charset {})
+	     'hash     (packet->base16 hash)
+	     'md5      (packet->base16 hash)
+	     'last-modified (file-modtime ref))))
 	(else (error "Weird GPATH ref" ref))))
 
-(define (gp/info ref (etag #t) (ctype #f) (opts #f) (encoding #f))
+(define (gp/info ref (etag #t) (ctype #f) (opts #f) (encoding))
+  (if (urish? ref) (set! ref (->gpath ref)))
   (when (and (table? ctype) (not opts))
     (set! opts ctype)
     (set! ctype #f))
   (unless ctype (set! ctype (guess-mimetype (get-namestring ref) #f opts)))
-  (unless encoding 
-    (set! encoding (getopt opts 'encoding (path->encoding (get-namestring ref)))))
+  (default! encoding
+    (getopt opts 'content-encoding (path->encoding (get-namestring ref))))
   (loginfo |GP/INFO| ref " expecting " ctype " given " (pprint opts))
   (cond ((s3loc? ref) (s3/info ref))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
-	 (let* ((realpath (root-path (cdr ref)))
-		(zip (car ref))
-		(ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
-		(charset (and ctype (has-prefix ctype "text")
-			      (or (ctype->charset ctype) #t)))
-		(etag (tryif etag
-			(packet->base16 (md5 (zip/get zip realpath #t))))))
-	   `#[path ,(gpath->string ref)
-	      ctype ,(or ctype {})
-	      charset ,(if (string? charset) charset (if charset "utf-8" {}))
-	      modified ,(tryif (bound? zip/modtime) (zip/modtime zip realpath))
-	      etag ,etag]))
+	 (let ((realpath (root-path (cdr ref)))
+	       (zip (car ref)))
+	   (and (zip/exists? zip realpath)
+		(let* ((ctype (or ctype
+				  (guess-mimetype (get-namestring ref) #f opts)))
+		       (charset (and ctype (has-prefix ctype "text")
+				     (or (ctype->charset ctype) #t)))
+		       (content (if etag (zip/get zip realpath #t) #f))
+		       (md5 (tryif content (md5 content))))
+		  (frame-create #f 
+		    'gpath (->gpath ref) 'gpathstring (gpath->string (->gpath ref))
+		    'rootpath (gp/rootpath ref)
+		    'content-type (or ctype {})
+		    'charset
+		    (if (string? charset) charset (if charset "utf-8" {}))
+		    'last-modified 
+		    (tryif (bound? zip/modtime) (zip/modtime zip realpath))
+		    'content-length
+		    (tryif (bound? zip/getsize) (zip/getsize zip realpath))
+		    'hash md5 'md5 (packet->base16 md5))))))
 	((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
-	 (let ((mf (get (car ref) (cdr ref))))
-	   `#[path ,(gpath->string ref)
-	      ctype ,(try (tryif (memfile? mf) (memfile-mimetype mf))
-			  ctype)
-	      modified ,(tryif (memfile? mf)
-			  (memfile-modified (get (car ref) (cdr ref))))
-	      etag ,(tryif etag
-		      (packet->base16
-		       (if (memfile? mf)
-			   (md5 (memfile-content mf))
-			   (md5 mf))))]))
+	 (let* ((mf (get (car ref) (cdr ref)))
+		(hash (tryif etag
+			(if (memfile? mf)
+			    (md5 (memfile-content mf))
+			    (md5 mf)))))
+	   (frame-create #f
+	     'gpath (->gpath ref) 'gpathstring (gpath->string (->gpath ref))
+	     'rootpath (gp/rootpath ref)
+	     'content-type (try (tryif (memfile? mf) (memfile-mimetype mf))
+				ctype)
+	     'last-modified (tryif (memfile? mf)
+			      (memfile-modified (get (car ref) (cdr ref))))
+	     'etag (tryif hash hash)
+	     'hash (tryif hash hash)
+	     'md5 (tryif hash (packet->base16 hash)))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (hashfs/info (car ref) (cdr ref)))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (zipfs/info (car ref) (cdr ref)))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
@@ -599,31 +707,41 @@
 	 (datauri/fetch+ ref #t))
 	((and (string? ref) (has-prefix ref "s3:"))
 	 (s3/info (->s3loc ref)))
+	((and (string? ref) (file-directory? ref))
+	 (frame-create #f
+	   'path ref 'gpath ref 'location #t))
 	((and (string? ref) (not (file-exists? ref))) #f)
-	((string? ref)
-	 (let* ((ref (abspath ref))
-		(ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
-		(istext (and ctype (mimetype/text? ctype) (not encoding)))
-		(charset (and istext (ctype->charset ctype))))
-	   (frame-create #f
-	     'path (gpath->string ref) 'ctype (or ctype {})
-	     'charset (or charset {})
-	     'modified (file-modtime ref)
-	     'etag (tryif etag
-		     (packet->base16
-		      (md5 (if charset
-			       (filestring ref charset)
-			       (if istext (filestring ref)
-				   (filedata ref)))))))))
+	((string? ref) (file-info ref etag ctype opts encoding))
 	(else (error "Weird GPATH ref" ref))))
 
+(define (file-info ref etag ctype opts encoding)
+  (let* ((ref (abspath ref))
+	 (ctype (or ctype (guess-mimetype (get-namestring ref) #f opts)))
+	 (istext (and ctype (mimetype/text? ctype) (not encoding)))
+	 (charset (and istext (ctype->charset ctype)))
+	 (gpathstring (gpath->string ref))
+	 (hash (md5 (if charset
+			(filestring ref charset)
+			(if istext (filecontent ref)
+			    (filedata ref))))))
+    (frame-create #f
+      'gpath (->gpath ref) 'gpathstring gpathstring
+      'rootpath (gp/rootpath ref)
+      'path gpathstring
+      'content-type (or ctype {})
+      'charset (or charset {})
+      'last-modified (file-modtime ref)
+      'hash (tryif hash hash)
+      'md5 (tryif hash (packet->base16 hash)))))
+
 (define (gp/modified ref)
+  (if (urish? ref) (set! ref (->gpath ref)))
   (cond ((s3loc? ref) (s3/modified ref))
 	((and (compound-type? ref) 
 	      (test gpath-handlers (compound-tag ref)))
 	 (get ((gpath-handler-get (get gpath-handlers (compound-tag ref)))
 	       ref "" #f #f)
-	      'modified))
+	      'last-modified))
 	((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
 	 (if (bound? zip/modtime)
 	     (zip/modtime (car ref) (cdr ref))
@@ -631,14 +749,16 @@
 	((and (pair? ref) (hashtable? (car ref)))
 	 (memfile-modified (get (car ref) (cdr ref))))
 	((and (pair? ref) (hashfs? (car ref)))
-	 (get (hashfs/get+ (car ref) (cdr ref)) 'modified))
+	 (get (hashfs/info (car ref) (cdr ref)) 'last-modified))
+	((and (pair? ref) (zipfs? (car ref)))
+	 (get (zipfs/info (car ref) (cdr ref)) 'last-modified))
 	((and (pair? ref) (pair? (car ref)))
 	 (gp/modified (gp/path (car ref) (cdr ref))))
 	((and (pair? ref) (compound-type? (car ref))
 	      (test gpath-handlers (compound-tag (car ref))))
 	 (get ((gpath-handler-get (get gpath-handlers (compound-tag (car ref))))
 	       (car ref) (cdr ref) #f #f)
-	      'modified))
+	      'last-modified))
 	((and (string? ref) (has-prefix ref "data:")) #T2001-08-16)
 	((and (string? ref)
 	      (exists has-prefix ref {"http:" "https:" "ftp:"}))
@@ -654,6 +774,8 @@
 	(else (error "Invalid GPATH" ref))))
 
 (define (gp/newer ref base)
+  (if (urish? ref) (set! ref (->gpath ref)))
+  (if (urish? base) (set! base (->gpath base)))
   (if (gp/exists? base) 
       (and (gp/exists? ref)
 	   (let ((bmod (gp/modified base))
@@ -675,6 +797,8 @@
 	 (test (car ref) (cdr ref)))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (exists? (hashfs/get+ (car ref) (cdr ref))))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (exists? (zipfs/info (car ref) (cdr ref))))
 	((and (pair? ref) (pair? (car ref)))
 	 (gp/exists? (gp/path (car ref) (cdr ref))))
 	((and (pair? ref) (compound-type? (car ref))
@@ -705,6 +829,8 @@
 	      (md5 (get (car ref) (cdr ref)))))
 	((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
 	 (try (md5 (hashfs/get (car ref) (cdr ref))) #f))
+	((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	 (try (md5 (zipfs/get (car ref) (cdr ref))) #f))
 	((and (pair? ref) (pair? (car ref)))
 	 (gp/etag (gp/path (car ref) (cdr ref)) compute))
 	((pair? ref) (gp/etag (gp/path (car ref) (cdr ref)) compute))
@@ -712,18 +838,83 @@
 	 (let ((response (urlhead ref)))
 	   (and (test response 'response)
 		(<= 200 (get response 'response) 299)
-		(try (get response 'tag)
+		(try (get response 'etag)
 		     (and compute
 			  (begin (set! response (urlget ref))
 			    (and (test response 'response)
 				 (<= 200 (get response 'response) 299)
 				 (try (get response 'etag)
-				      (md5 (get response '%content))))))))))
+				      (packet->string (md5 (get response '%content))
+						      16)))))))))
 	((and (string? ref) (has-prefix ref "s3:"))
 	 (s3/etag (->s3loc ref) compute))
 	((string? ref)
-	 (and (file-exists? ref) compute (md5 (filedata ref))))
+	 (and (file-exists? ref) compute (packet->string (md5 (filedata ref)) 16)))
 	(else (error "Weird GPATH ref" ref))))
+
+(defambda (filter-list matches matcher (prefix #f))
+  (if (not matcher) 
+      matches
+      (filter-choices (match matches)
+	(and
+	 (or (not prefix) (has-prefix (gp/rootpath match) prefix))
+	 (textsearch (qc matcher) (gp/rootpath match))))))
+(defambda (filter-info matches matcher (prefix #f))
+  (if (not matcher) 
+      matches
+      (filter-choices (match matches)
+	(and
+	 (or (not prefix) (has-prefix (gp/rootpath match) prefix))
+	 (textsearch (qc matcher) (gp/rootpath match))))))
+
+(defambda (gp/list ref (matcher #f))
+  (for-choices ref
+    (cond ((s3loc? ref) (filter-list (s3/list ref) matcher))
+	  ((zipfile? ref) (filter-list (zip/getfiles ref) matcher))
+	  ((hashfs? ref) (filter-list (hashfs/list ref) matcher))
+	  ((zipfs? ref) (filter-list (zipfs/list ref) matcher))
+	  ((and (pair? ref) (s3loc? (car ref)) (string? (cdr ref)))
+	   (filter-list (s3/list (s3/mkpath (car ref) (mkpath (cdr ref) "")))
+			matcher (cdr ref)))
+	  ((and (pair? ref) (zipfile? (car ref)) (string? (cdr ref)))
+	   (filter-list (zip/getfiles (car ref)) matcher (cdr ref)))
+	  ((and (pair? ref) (hashtable? (car ref)) (string? (cdr ref)))
+	   (filter-list (getkeys (car ref)) matcher (cdr ref)))
+	  ((and (pair? ref) (hashfs? (car ref)) (string? (cdr ref)))
+	   (filter-list (hashfs/list (car ref)) matcher (cdr ref)))
+	  ((and (pair? ref) (zipfs? (car ref)) (string? (cdr ref)))
+	   (filter-list (zipfs/list (car ref)) matcher (cdr ref)))
+	  ((and (string? ref) (has-prefix ref "s3:"))
+	   (gp/list (->s3loc ref)))
+	  ((and (string? ref) (gp/localpath? ref))
+	   (filter-list (choice (getfiles ref) (mkpath (getdirs ref) ""))
+			matcher))
+	  (else (irritant ref |NoListingMethod| )))))
+
+(defambda (gp/list+ ref (matcher #f))
+  (cond ((s3loc? ref)
+	 (if matcher
+	     (filter-info (s3/list+ ref) matcher)
+	     (s3/list+ ref)))
+	((zipfs? ref)
+	 (if matcher
+	     (zipfs/list+ ref #f matcher)
+	     (zipfs/list+ ref)))
+	((and (pair? ref) (s3loc? (car ref)))
+	 (if matcher
+	     (filter-info (s3/list+ (s3/mkpath (car ref) (cdr ref)))
+			  matcher)
+	     (s3/list+ (s3/mkpath (car ref) (cdr ref)))))
+	((and (pair? ref) (zipfs? (car ref)))
+	 (if matcher
+	     (zipfs/list+ (car ref) (cdr ref) matcher)
+	     (zipfs/list+ (car ref) (cdr ref))))
+	(else (for-choices (item (gp/list ref matcher))
+		(add-relpath (gp/info item) (gp/rootpath ref))))))
+
+(define (add-relpath info prefix)
+  (modify-frame info 'relpath 
+		(strip-prefix (get info 'rootpath) prefix)))
 
 ;;; Recognizing and parsing GPATHs
 
@@ -731,12 +922,13 @@
   (if (pair? val)
       (and (string? (cdr val))
 	   (or (s3loc? (car val)) (zipfile? (car val))
+	       (hashfs? (car val)) (zipfs? (car val))
 	       (and (compound-type? (car val))
 		    (test gpath-handlers (compound-tag (car val))))))
       (if (string? val)
 	  (and (not (position #\newline val))
 	       (has-prefix val {"http:" "https:" "ftp:" "s3:" "/" "~"}))
-	  (or (s3loc? val) (zipfile? val)
+	  (or (s3loc? val) (zipfile? val) (hashfs? val) (zipfs? val)
 	      (and (compound-type? val)
 		   (test gpath-handlers (compound-tag val)))))))
 
@@ -774,6 +966,11 @@
 	      (has-prefix (downcase gpath) (downcase prefixes)))
 	  #f)))
 
+(define (gp/localpath? gpath)
+  (and (string? gpath)
+       (string? (->gpath gpath))
+       (not (has-prefix gpath {"ftp:" "http:" "https:"}))))
+
 (define (gp:config spec) (->gpath spec))
 
 ;;; Opening zip files at GPATHs
@@ -792,7 +989,7 @@
 	(write-file file content)
 	(prog1 (zip/open file)
 	  (store! ziptemps file temporary)))))
-  
+
 (define (zip/gclose zip)
   (let* ((filename (zip/filename zip))
 	 (dir (get ziptemps filename)))
@@ -818,14 +1015,15 @@
   (store! (samplegfs-data gfs) path content)
   (store! (samplegfs-metadata gfs) path
 	  (frame-create #f
-	    'ctype ctype
+	    'content-type ctype
 	    'charset (tryif charset (if (string? charset) charset "utf-8"))
-	    'modified (timestamp) 'length (length content)
+	    'last-modified (timestamp) 'content-length (length content)
+	    'hash (md5 content) 'md5 (packet->base16 (md5 content))
 	    'etag (md5 content))))
 (config! 'gpath:handlers
 	 (gpath/handler 'samplegfs samplegfs-get samplegfs-save))
 
-;;;; Copying/downloads
+;;;; Copying
 
 (define guess-encoding #t)
 (varconfig! gpath:guess-encoding guess-encoding)
@@ -842,7 +1040,7 @@
 			     (gp/mkpath to (gp/basename from))
 			     (->gpath to))
 			 (gp/mkpath (getcwd) (gp/basename from))))
-	       (ctype (getopt opts 'ctype (get fetched 'ctype)))
+	       (ctype (getopt opts 'content-type (get fetched 'content-type)))
 	       (charset (getopt opts 'charset
 				(and (exists? ctype) ctype (has-prefix ctype "text/")
 				     (or (get-charset ctype)
@@ -859,6 +1057,58 @@
        (singleton (get (text->frames charset-patterns content)
 		       'charset))
        "utf-8"))
+
+(define (gp/copy*! from into (opts #f) (prefix #f) (%loglevel) (force))
+  (default! %loglevel (getopt opts 'loglevel %notice%))
+  (default! force (getopt opts 'force #f))
+  (set! from (->gpath from))
+  (set! into (->gpath into))
+  (unless prefix 
+    (lognotice "Copying tree from " 
+      (gpath->string from) " into " (gpath->string into))
+    (set! prefix (gp/rootpath from)))
+  (if force
+      (force-copy*! from into opts prefix %loglevel)
+      (smart-copy*! from into opts prefix %loglevel)))
+
+(define (force-copy*! from into opts prefix %loglevel)
+  (let ((contents (gp/list from)))
+    (loginfo |GP/COPY*/force| 
+      "Copying " (choice-size contents) " items from " (gpath->string from)
+      "\n  into " (gpath->string into)
+      "\n  stripping " prefix)
+    (do-choices (src contents)
+      (if (gp/location? src)
+	  (force-copy*! src into opts prefix %loglevel)
+	  (rel-copy! src into prefix %loglevel)))))
+
+(define (smart-copy*! from into opts prefix %loglevel)
+  (let* ((destroot (gp/mkpath into (strip-prefix (gp/rootpath from) prefix)))
+	 (frominfo (gp/list+ from))
+	 (destinfo (gp/list+ destroot)))
+    (loginfo |GP/COPY*/smart| 
+      "Copying " (choice-size frominfo) " items from " (gpath->string from)
+      "\n  into " (gpath->string into)
+      "\n  stripping " prefix)
+    (do-choices (src frominfo)
+      (if (gp/location? (get src 'gpath))
+	  (smart-copy*! (get src 'gpath) into opts prefix %loglevel)
+	  (let ((toinfo (pick destinfo 'relpath (get src 'relpath))))
+	    (if (and (exists? toinfo) 
+		     (or (test toinfo 'hash (get src 'hash))
+			 (test toinfo 'md5 (get src 'md5))))
+		(logdebug |GP/COPY*/smart| 
+		  "Skipping redundant copy of " (gp>s src) 
+		  "\n  into " (gp>s into))
+		(rel-copy! (get src 'gpath) into prefix %loglevel)))))))
+
+(define (rel-copy! src into prefix %loglevel)
+  (logdebug |GP/COPY*/rel| 
+    "Copying " (gp>s src) 
+    "\n  into " 
+    (gp>s (gp/mkpath into (strip-prefix (gp/rootpath src) prefix)))
+    "\n  stripping " prefix)
+  (gp/copy! src (gp/mkpath into (strip-prefix (gp/rootpath src) prefix))))
 
 ;;;; Writing dtypes to gpaths
 
