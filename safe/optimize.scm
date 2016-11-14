@@ -54,7 +54,9 @@
 (config-def! 'optdowarn optdowarn-config)
 
 (module-export! '{optimize! optimize-procedure! optimize-module!
-		  deoptimize! deoptimize-procedure! deoptimize-module!})
+		  optimize-bindings!
+		  deoptimize! deoptimize-procedure! deoptimize-module!
+		  deoptimize-bindings!})
 
 (define %volatile '{optdowarn useopcodes %loglevel})
 
@@ -425,7 +427,7 @@
   
 (define (deoptimize-procedure! proc)
   (let* ((body (procedure-body proc))
-	 (exprs (pick (elts body) length >=3))
+	 (exprs (->list (pick (pick (elts body) {rail? pair?}) length >= 3)))
 	 (original-body (pick exprs car 'comment cadr '|original|))
 	 (original-args (pick exprs car 'comment cadr '|originalargs|)))
     (cond ((and (singleton? original-body)  (singleton? original-args))
