@@ -9,7 +9,7 @@
 
 (define %loglevel %warn%)
 
-(module-export! '{ec2/data ec2/getrole})
+(module-export! '{ec2/data ec2/getrole ec2/live?})
 
 (define ec2-instance-data-root "http://169.254.169.254/")
 
@@ -21,6 +21,26 @@
      ami ("/meta-data/ami-id" . ,string->lisp)
      id ("/meta-data/instance-id" . ,string->lisp)
      launch-index ("/meta-data/ami-launch-index" . ,string->lisp)])
+
+(define-init ec2live #f)
+(define-init ec2live-checked #f)
+(define-init ec2-probe-url "http://169.254.169.254/metadata/instance-id")
+
+(define (ec2/live? (opts #f))
+  (if ec2live-checked ec2live
+      (onerror (begin
+		 (urlget ec2-probe-url
+			 `#[timeout ,(getopts 'timeout 5)
+			    connect-timeout (/~ (getopts 'timeout 5) 2)])
+		 (set! ec2live #t)
+		 (set! ec2live-checked (timestamp))
+		 #t)
+	(lambda (ex) 
+	  (logwarn |NoEC2|
+	    "Couldn't access EC2 instance data @ " ec2-probe-url)
+	  (set! ec2live #f)
+	  (set! ec2live-checked (timestamp))
+	  #f))))
 
 (define metadata-properties
   {
