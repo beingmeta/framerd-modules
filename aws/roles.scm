@@ -147,10 +147,16 @@
 (config-def! 'aws:role
 	     (lambda (var (value))
 	       (if (bound? value)
-		   (and (not (overlaps? (and value (segment value "|")) (and aws/role (segment aws/role "|"))))
-			(begin (unless (ec2/role! value) 
-				 (logwarn |RoleFailed| "Couldn't set role to " value))
+		   (and (not (overlaps? (and value (elts (segment value "|")))
+					(and aws/role (elts (segment aws/role "|")))))
+			(begin 
+			  (if (ec2/live?)
+			      (unless (ec2/role! value) 
+				(logwarn |RoleFailed| "Couldn't set role to " value))
+			      (begin (logwarn |RoleFailed| "Can't set role outside of EC2")
+				(set! aws/role (car (segment value "|")))))
 			  #t))
 		   aws/role)))
+
 
 
