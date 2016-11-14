@@ -53,7 +53,8 @@
 	  (else (set! optdowarn #f)))))
 (config-def! 'optdowarn optdowarn-config)
 
-(module-export! '{optimize! optimize-procedure! optimize-module!})
+(module-export! '{optimize! optimize-procedure! optimize-module!
+		  deoptimize! deoptimize-procedure! deoptimize-module!})
 
 (define %volatile '{optdowarn useopcodes %loglevel})
 
@@ -113,8 +114,6 @@
   (if n-args
       (add! opcode-map (cons prim n-args) (make-opcode code))
       (add! opcode-map prim (make-opcode code))))
-
-(def-opcode QUOTE      0x00)
 
 (when (bound? make-opcode)
   (def-opcode QUOTE      0x00)
@@ -193,7 +192,6 @@
   )
 
 ;;; The core loop
-
 
 (defambda (dotighten expr env bound opts lexrefs w/rails)
   (logdebug "Optimizing " expr " given " bound)
@@ -369,10 +367,6 @@
 	(if (qchoice? arg) arg
 	    (dotighten arg env bound opts lexrefs w/rails)))
       expr))
-(define (tighten-body body env bound opts lexrefs w/rails)
-  (map (lambda (b)
-	 (dotighten b env bound opts lexrefs w/rails))
-       (->list body)))
 
 (define (optimize-procedure! proc (opts #f) (lexrefs) (w/rails))
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
@@ -384,40 +378,39 @@
 	 (initial (if (pair? body) (car body)
 		      (and (rail? body) (> (length body) 0)
 			   (elt body 0))))
-	 (bound (if (procedure-name proc)
-		    (list (arglist->vars arglist) 
-			  (list (string->symbol (procedure-name proc))))
-		    (list (arglist->vars arglist)))))
-    (let ((new-body `((comment |original| ,@(->list body))
-		      (comment |originalargs| 
-			       ,(if (rail? arglist) (->list arglist) arglist))
-		      ,@(tighten-body body env bound opts lexrefs w/rails))))
-      (when (getopt opts 'argvecs argvecs-dflt)
-	(unless (or (rail? arglist) (not (proper-list? arglist)))
-	  (set-procedure-args! proc (->rail arglist))))
-      (unless (and initial 
-		   (or (and (pair? initial)
-			    (eq? (car initial) 'COMMENT)
-			    (pair? (cdr initial))
-			    (eq? (cadr initial) '|original|))
-		       (and (rail? initial) (> (length initial) 1)
-			    (eq? (elt initial 0) 'COMMENT)
-			    (eq? (elt initial 1) '|original|))))
-	(set-procedure-body! proc 
-			     (if w/rails 
-				 (->rail (cons (->rail (car new-body))
-					       (cdr new-body)))
-				 new-body))
-	(when (pair? arglist)
-	  (let ((optimized-args 
-		 (optimize-arglist arglist env opts lexrefs w/rails)))
-	    (unless (equal? arglist optimized-args)
-	      (set-procedure-args! proc optimized-args))))
-	(when (exists? (threadget 'codewarnings))
-	  (warning "Errors optimizing " proc ": "
-		   (do-choices (warning (threadget 'codewarnings))
-		     (printout "\n\t" warning)))
-	  (threadset! 'codewarnings #{}))))))
+	 (bound (list (arglist->vars arglist)))
+	 (new-body `((comment |original| ,@(->list body))
+		     (comment |originalargs| 
+			      ,(if (rail? arglist) (->list arglist) arglist))
+		     ,@(map (lambda (b)
+			      (dotighten b env bound opts lexrefs w/rails))
+			    (->list body)))))
+    (when (getopt opts 'argvecs argvecs-dflt)
+      (unless (or (rail? arglist) (not (proper-list? arglist)))
+	(set-procedure-args! proc (->rail arglist))))
+    (unless (and initial 
+		 (or (and (pair? initial)
+			  (eq? (car initial) 'COMMENT)
+			  (pair? (cdr initial))
+			  (eq? (cadr initial) '|original|))
+		     (and (rail? initial) (> (length initial) 1)
+			  (eq? (elt initial 0) 'COMMENT)
+			  (eq? (elt initial 1) '|original|))))
+      (set-procedure-body! proc 
+			   (if w/rails 
+			       (->rail (cons (->rail (car new-body))
+					     (cdr new-body)))
+			       new-body))
+      (when (pair? arglist)
+	(let ((optimized-args 
+	       (optimize-arglist arglist env opts lexrefs w/rails)))
+	  (unless (equal? arglist optimized-args)
+	    (set-procedure-args! proc optimized-args))))
+      (when (exists? (threadget 'codewarnings))
+	(warning "Errors optimizing " proc ": "
+		 (do-choices (warning (threadget 'codewarnings))
+		   (printout "\n\t" warning)))
+	(threadset! 'codewarnings #{})))))
 
 (define (optimize-arglist arglist env opts lexrefs w/rails)
   (if (pair? arglist)
@@ -430,6 +423,17 @@
        (optimize-arglist (cdr arglist) env opts lexrefs w/rails))
       arglist))
   
+(define (deoptimize-procedure! proc)
+  (let* ((body (procedure-body proc))
+	 (exprs (pick (elts body) length >=3))
+	 (original-body (pick exprs car 'comment cadr '|original|))
+	 (original-args (pick exprs car 'comment cadr '|originalargs|)))
+    (cond ((and (singleton? original-body)  (singleton? original-args))
+	   (set-procedure-body! proc original-body)
+	   (set-procedure-body! proc original-args)
+	   #t)
+	  (else #f))))
+
 (define (optimize-get-module spec)
   (onerror (get-module spec)
     (lambda (ex) (irritant+ spec |GetModuleFailed| optimize-module
@@ -458,10 +462,26 @@
 	     (unused (difference used-modules referenced-modules standard-modules
 				 (get module '%moduleid))))
 	(when (and check-module-usage (exists? unused))
-	  (logwarn "Module " (try (pick (get module '%moduleid) symbol?)
-				  (get module '%moduleid))
-		   " declares " (choice-size unused) " possibly unused modules: "
-		   (do-choices (um unused i) (printout (if (> i 0) ", ") um))))))
+	  (logwarn |UnusedModules|
+	    "Module " (try (pick (get module '%moduleid) symbol?)
+			   (get module '%moduleid))
+	    " declares " (choice-size unused) " possibly unused modules: "
+	    (do-choices (um unused i)
+	      (printout (if (> i 0) ", ") um))))))
+    count))
+
+(define (deoptimize-module! module)
+  (loginfo "Deoptimizing module " module)
+  (when (symbol? module)
+    (set! module (optimize-get-module module)))
+  (let ((bindings (module-bindings module))
+	(count 0))
+    (do-choices (var bindings)
+      (loginfo "Deoptimizing module binding " var)
+      (let ((value (get module var)))
+	(when (and (exists? value) (compound-procedure? value))
+	  (when (deoptimize-procedure! value)
+	    (set! count (1+ count))))))
     count))
 
 (define (optimize-bindings! bindings (opts #f) (lexrefs) (w/rails))
@@ -479,6 +499,19 @@
 	    (warning var " is unbound"))))
     count))
 
+(define (deoptimize-bindings! bindings (opts #f) (lexrefs) (w/rails))
+  (logdebug "Deoptimizing bindings " bindings)
+  (let ((count 0))
+    (do-choices (var (getkeys bindings))
+      (logdetail "Deoptimizing binding " var)
+      (let ((value (get bindings var)))
+	(if (bound? value)
+	    (when (compound-procedure? value)
+	      (when (deoptimize-procedure! value)
+		(set! count (1+ count))))
+	    (warning var " is unbound"))))
+    count))
+
 (defambda (module-arg? arg)
   (or (fail? arg) (string? arg)
       (and (pair? arg) (eq? (car arg) 'quote))
@@ -488,6 +521,13 @@
   (dolist (arg args)
     (cond ((compound-procedure? arg) (optimize-procedure! arg))
 	  ((table? arg) (optimize-module! arg))
+	  (else (error '|TypeError| 'optimize*
+			 "Invalid optimize argument: " arg)))))
+
+(define (deoptimize*! . args)
+  (dolist (arg args)
+    (cond ((compound-procedure? arg) (deoptimize-procedure! arg))
+	  ((table? arg) (deoptimize-module! arg))
 	  (else (error '|TypeError| 'optimize*
 			 "Invalid optimize argument: " arg)))))
 
@@ -502,6 +542,16 @@
 			 x))
 		   (cdr expr))))))
 
+(define deoptimize!
+  (macro expr
+    (if (null? (cdr expr))
+	`(,deoptimize-bindings! (,%bindings))
+	(cons deoptimize*!
+	      (map (lambda (x)
+		     (if (module-arg? x)
+			 `(,optimize-get-module ,x)
+			 x))
+		   (cdr expr))))))
 
 ;;;; Special form handlers
 
@@ -823,4 +873,3 @@
   (add! special-form-tighteners
 	(choice fileout system)
 	tighten-block))
-
