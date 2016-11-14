@@ -114,6 +114,8 @@
       (add! opcode-map (cons prim n-args) (make-opcode code))
       (add! opcode-map prim (make-opcode code))))
 
+(def-opcode QUOTE      0x00)
+
 (when (bound? make-opcode)
   (def-opcode QUOTE      0x00)
   (def-opcode BEGIN      0x01)
@@ -191,6 +193,7 @@
   )
 
 ;;; The core loop
+
 
 (defambda (dotighten expr env bound opts lexrefs w/rails)
   (logdebug "Optimizing " expr " given " bound)
@@ -366,6 +369,10 @@
 	(if (qchoice? arg) arg
 	    (dotighten arg env bound opts lexrefs w/rails)))
       expr))
+(define (tighten-body body env bound opts lexrefs w/rails)
+  (map (lambda (b)
+	 (dotighten b env bound opts lexrefs w/rails))
+       (->list body)))
 
 (define (optimize-procedure! proc (opts #f) (lexrefs) (w/rails))
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
@@ -377,38 +384,40 @@
 	 (initial (if (pair? body) (car body)
 		      (and (rail? body) (> (length body) 0)
 			   (elt body 0))))
-	 (bound (list (arglist->vars arglist)))
-	 (new-body `((comment |original| ,@(->list body))
-		     (comment |originalargs| 
-			      ,(if (rail? arglist) (->list arglist) arglist))
-		     ,@(map (lambda (b)
-			      (dotighten b env bound opts lexrefs w/rails))
-			    (->list body)))))
-    (when (getopt opts 'argvecs argvecs-dflt)
-      (unless (or (rail? arglist) (not (proper-list? arglist)))
-	(set-procedure-args! proc (->rail arglist))))
-    (unless (and initial 
-		 (or (and (pair? initial)
-			  (eq? (car initial) 'COMMENT)
-			  (pair? (cdr initial))
-			  (eq? (cadr initial) '|original|))
-		     (and (rail? initial) (> (length initial) 1)
-			  (eq? (elt initial 0) 'COMMENT)
-			  (eq? (elt initial 1) '|original|))))
-      (set-procedure-body! proc 
-			   (if w/rails 
-			       (->rail (cons (->rail (car new-body))
-					     (cdr new-body)))
-			       new-body))
-      (when (pair? arglist)
-	(let ((optimized-args (optimize-arglist arglist env opts lexrefs w/rails)))
-	  (unless (equal? arglist optimized-args)
-	    (set-procedure-args! proc optimized-args))))
-      (when (exists? (threadget 'codewarnings))
-	(warning "Errors optimizing " proc ": "
-		 (do-choices (warning (threadget 'codewarnings))
-		   (printout "\n\t" warning)))
-	(threadset! 'codewarnings #{})))))
+	 (bound (if (procedure-name proc)
+		    (list (arglist->vars arglist) 
+			  (list (string->symbol (procedure-name proc))))
+		    (list (arglist->vars arglist)))))
+    (let ((new-body `((comment |original| ,@(->list body))
+		      (comment |originalargs| 
+			       ,(if (rail? arglist) (->list arglist) arglist))
+		      ,@(tighten-body body env bound opts lexrefs w/rails))))
+      (when (getopt opts 'argvecs argvecs-dflt)
+	(unless (or (rail? arglist) (not (proper-list? arglist)))
+	  (set-procedure-args! proc (->rail arglist))))
+      (unless (and initial 
+		   (or (and (pair? initial)
+			    (eq? (car initial) 'COMMENT)
+			    (pair? (cdr initial))
+			    (eq? (cadr initial) '|original|))
+		       (and (rail? initial) (> (length initial) 1)
+			    (eq? (elt initial 0) 'COMMENT)
+			    (eq? (elt initial 1) '|original|))))
+	(set-procedure-body! proc 
+			     (if w/rails 
+				 (->rail (cons (->rail (car new-body))
+					       (cdr new-body)))
+				 new-body))
+	(when (pair? arglist)
+	  (let ((optimized-args 
+		 (optimize-arglist arglist env opts lexrefs w/rails)))
+	    (unless (equal? arglist optimized-args)
+	      (set-procedure-args! proc optimized-args))))
+	(when (exists? (threadget 'codewarnings))
+	  (warning "Errors optimizing " proc ": "
+		   (do-choices (warning (threadget 'codewarnings))
+		     (printout "\n\t" warning)))
+	  (threadset! 'codewarnings #{}))))))
 
 (define (optimize-arglist arglist env opts lexrefs w/rails)
   (if (pair? arglist)
@@ -814,3 +823,4 @@
   (add! special-form-tighteners
 	(choice fileout system)
 	tighten-block))
+
