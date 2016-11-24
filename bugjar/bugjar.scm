@@ -11,8 +11,8 @@
 
 (define-init %loglevel %notice%)
 
-(define bugjar-css (get-component "bugjar.css"))
-(define bugjar-js (get-component "bugjar.js"))
+(define bugjar-css (get-component "websrc/bugjar.css"))
+(define bugjar-js (get-component "websrc/bugjar.js"))
 
 (define datetime markup*fn)
 
