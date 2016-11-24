@@ -21,7 +21,7 @@
 ;;; Top level functions
 
 (define sensecathints
-  (file->dtype (get-component "sensecathints.table")))
+  (file->dtype (get-component "data/sensecathints.table")))
 
 (define (get-dterm concept (language default-language) (norm #f) (tryhard #f))
   (or

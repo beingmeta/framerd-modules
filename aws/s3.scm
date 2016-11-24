@@ -1197,7 +1197,8 @@
 
 ;;; Manipulating policies
 
-(define policy-template (filestring (get-component "s3policy.json")))
+(define policy-template 
+  (filestring (get-component "templates/s3policy.json")))
 
 (define (generate-policy template loc (account aws:account)
 			 (id (uuid->string (getuuid))))

@@ -87,12 +87,12 @@
 
 ;;; Common tables
 
-(define all-languages (file->dtype (get-component "languages.dtype")))
-(define language-map (file->dtype (get-component "langmap.table")))
-(define norm-map (file->dtype (get-component "normmap.table")))
-(define gloss-map (file->dtype (get-component "glossmap.table")))
-(define index-map (file->dtype (get-component "indexmap.table")))
-(define frag-map (file->dtype (get-component "fragmap.table")))
+(define all-languages (file->dtype (get-component "data/languages.dtype")))
+(define language-map (file->dtype (get-component "data/langmap.table")))
+(define norm-map (file->dtype (get-component "data/normmap.table")))
+(define gloss-map (file->dtype (get-component "data/glossmap.table")))
+(define index-map (file->dtype (get-component "data/indexmap.table")))
+(define frag-map (file->dtype (get-component "data/fragmap.table")))
 
 (define all-languages (get language-map (getkeys language-map)))
 (define all-norms (get norm-map (getkeys norm-map)))
