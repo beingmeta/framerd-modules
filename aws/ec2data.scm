@@ -29,9 +29,10 @@
 
 (define (ec2/live? (opts #f))
   (if ec2live-checked ec2live
-      (onerror (let ((timeout (getopts opts 'timeout 5)))
-		 (urlget ec2-probe-url
-			 `#[timeout ,timeout connect-timeout ,(/~ timeout 5)])
+      (onerror (let* ((timeout (getopt opts 'timeout 5))
+		      (ctimeout (getopt opts 'connect-timeout
+					(/~ timeout 5))))
+		 (urlget ec2-probe-url `#[timeout ,timeout connect-timeout ,ctimeout])
 		 (set! ec2live #t)
 		 (set! ec2live-checked (timestamp))
 		 #t)
