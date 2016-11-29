@@ -24,7 +24,8 @@
 
 (define-init ec2live #f)
 (define-init ec2live-checked #f)
-(define-init ec2-probe-url "http://169.254.169.254/metadata/instance-id")
+(define-init ec2-probe-url
+  "http://169.254.169.254/latest/meta-data/instance-id")
 
 (define (ec2/live? (opts #f))
   (if ec2live-checked ec2live
