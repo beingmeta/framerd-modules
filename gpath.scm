@@ -514,7 +514,7 @@
 	  'etag (get response 'etag) 
 	  'hash hash 'md5 (packet->base16 hash)
 	  'content-encoding  (get response 'content-encoding)
-	  'content (get response 'content))
+	  'content (get response '%content))
 	(if (<= 300 (get response 'response) 399)
 	    (if (and (number? max-redirects) (> max-redirects 0))
 		(gp/urlfetch (get response 'location)
