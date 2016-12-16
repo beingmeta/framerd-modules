@@ -35,20 +35,38 @@
 	(string-append (make-string padlen #\0) s)
 	s)))
 
+;;; Remainders for inexact numbers
+
+(define (quotient~ num den)
+  (if (and (exact? num) (exact? den))
+      (quotient num den)
+      ((if (< (* num den) 0) ceiling floor)
+       (inexact->exact (/~ num den)))))
+
+(define (rem~ num den)
+  (if (and (exact? num) (exact? den))
+      (remainder num den)
+      (- num (* den (floor (/~ num den))))))
+
 ;;; Numbers with commas
 
 ;; This should default this from the locale
 (define printnum-sep ",")
 
-(define (printnum num (pad #f) (sep printnum-sep))
-  (cond ((inexact? num) (number->string num))
+(define (printnum num (prec #f) (pad #f) (sep printnum-sep))
+  (cond ((< num 0) (printout "-" (printnum num prec sep)))
 	((>= num 1000)
-	 (printnum (quotient num 1000) (>= num 1000000) sep)
-	 (printout sep (printnum (remainder num 1000) #t)))
-	((>= num 100) (printout num))
-	((>= num 10) (printout (if pad "0") num))
-	((>= num 0) (printout (if pad "00") num))
-	(else (printout "-" (printnum (- num))))))
+	 (printnum (quotient~ num 1000) prec (>= num 1000000) sep)
+	 (printout sep (printnum (rem~ num 1000) prec #t)))
+	(else 
+	 (printout (if pad (getpad num))
+	   (if (and prec (inexact? num))
+	       (inexact->string num prec)
+	       num)))))
+
+(define (getpad num)
+  (if (> num 100) ""
+      (if (> num 10) "0" "00")))
 
 (define (numstring . args) (stringout (apply printnum args)))
 
@@ -74,13 +92,12 @@
 ;; Temporal intervals
 
 (define (interval-string secs (precise #t))
-  (let* ((days (inexact->exact (floor (/ secs (* 3600 24)))))
-	 (hours (inexact->exact
-		 (floor (/ (- secs (* days 3600 24))
-			   3600))))
+  (let* ((days (inexact->exact (/ secs (* 3600 24))))
+	 (hours (inexact->exact (/ (- secs (* days 3600 24))
+				   3600)))
 	 (minutes (inexact->exact
-		   (floor (/ (- secs (* days 3600 24) (* hours 3600))
-			     60))))
+		   (/ (- secs (* days 3600 24) (* hours 3600))
+		      60)))
 	 (seconds (- secs (* days 3600 24) (* hours 3600) (* minutes 60))))
     (stringout
 	(cond ((= days 1) "one day, ")
@@ -106,13 +123,12 @@
 		       ((< secs 10) (inexact->string secs 3))
 		       (else (inexact->string secs 2)))
 		 " secs")
-      (let* ((days (inexact->exact (floor (/ secs (* 3600 24)))))
-	     (hours (inexact->exact
-		     (floor (/ (- secs (* days 3600 24))
-			       3600))))
+      (let* ((days (inexact->exact (/ secs (* 3600 24))))
+	     (hours (inexact->exact (/ (- secs (* days 3600 24))
+				       3600)))
 	     (minutes (inexact->exact
-		       (floor (/ (- secs (* days 3600 24) (* hours 3600))
-				 60))))
+		       (/ (- secs (* days 3600 24) (* hours 3600))
+			  60)))
 	     (raw-seconds (- secs (* days 3600 24)
 			     (* hours 3600)
 			     (* minutes 60)))
