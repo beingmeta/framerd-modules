@@ -29,8 +29,6 @@
 		  mt/custom-progress})
 
 (define default-threadcount 1.0)
-(varconfig! mt:threadcount default-threadcount)
-(varconfig! mtt:threadcount default-threadcount)
 
 ;;; Utility functions
 
@@ -56,7 +54,7 @@
   (cond ((not arg) ncpus)
 	((and (equal? arg default-threadcount)
 	      (or (not (number? default-threadcount))
-		  (complex? default-threadcount)
+		  (not (zero? (imag-part default-threadcount)))
 		  (<= default-threadcount 0))))
 	((and (symbol? arg) (not (number? (config arg))))
 	 (logwarn |BadThreadcount| 
@@ -74,6 +72,16 @@
     "The argument " arg " can't be used as a threadcount. "
     "Using the default threadcount " default-threadcount " instead.")
   (mt/threadcount default-threadcount))
+
+(define (check-threadcount arg)
+  (if (and (singleton? arg) (number? arg)
+	   (zero? (imag-part arg)) (> arg 0))
+      arg
+      (if (not arg) arg
+	  (irritant arg |InvalidThreadcount| 
+		    "This value cannot be used as a default threadcount."))))
+(varconfig! mt:threadcount default-threadcount check-threadcount)
+(varconfig! mtt:threadcount default-threadcount check-threadcount)
 
 ;;;; Primary functions
 
