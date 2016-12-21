@@ -8,7 +8,7 @@
 ;;; prefetch/execute cycles which can improve performance on many
 ;;; database-intensive operations. 
 
-(use-module '{reflection stringfmts varconfig})
+(use-module '{reflection stringfmts varconfig logger})
 
 (module-export! '{mt/threadcount
 		  mt-apply
@@ -65,10 +65,8 @@
 	 (mt/threadcount default-threadcount))
 	((symbol? arg) (mt/threadcount (config arg)))
 	((and (fixnum? arg) (> arg 0))  arg)
-	((complex? arg) (bad-threadcount arg))
-	((and (number? arg) (> arg 0)) 
+	((and (number? arg) (zero? (imag-part arg)) (> arg 0)) 
 	 (->exact (ceiling (* arg ncpus))))
-	((eq? arg default-threadcount))
 	(else (bad-threadcount arg))))
 
 (define (bad-threadcount arg)
