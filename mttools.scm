@@ -8,10 +8,10 @@
 ;;; prefetch/execute cycles which can improve performance on many
 ;;; database-intensive operations. 
 
-(use-module 'reflection)
-(use-module 'stringfmts)
+(use-module '{reflection stringfmts varconfig})
 
-(module-export! '{mt-apply
+(module-export! '{mt/threadcount
+		  mt-apply
 		  do-choices-mt
 		  do-vector-mt
 		  interval-string
@@ -27,6 +27,10 @@
 		  mt/default-progress
 		  mt/noprogress mt/no-progress
 		  mt/custom-progress})
+
+(define default-threadcount 1.0)
+(varconfig! mt:threadcount default-threadcount)
+(varconfig! mtt:threadcount default-threadcount)
 
 ;;; Utility functions
 
@@ -47,6 +51,31 @@
 	    (set! counter (1+ c))
 	    c)
 	  (fail)))))
+
+(define (mt/threadcount (arg #f) (ncpus (get (rusage) 'ncpus)))
+  (cond ((not arg) ncpus)
+	((and (equal? arg default-threadcount)
+	      (or (not (number? default-threadcount))
+		  (complex? default-threadcount)
+		  (<= default-threadcount 0))))
+	((and (symbol? arg) (not (number? (config arg))))
+	 (logwarn |BadThreadcount| 
+	   "The config value of " arg " is not a number, "
+	   "trying default threadcount " default-threadcount)
+	 (mt/threadcount default-threadcount))
+	((symbol? arg) (mt/threadcount (config arg)))
+	((and (fixnum? arg) (> arg 0))  arg)
+	((complex? arg) (bad-threadcount arg))
+	((and (number? arg) (> arg 0)) 
+	 (->exact (ceiling (* arg ncpus))))
+	((eq? arg default-threadcount))
+	(else (bad-threadcount arg))))
+
+(define (bad-threadcount arg)
+  (logwarn |BadThreadcount|
+    "The argument " arg " can't be used as a threadcount. "
+    "Using the default threadcount " default-threadcount " instead.")
+  (mt/threadcount default-threadcount))
 
 ;;;; Primary functions
 
