@@ -54,7 +54,7 @@
 (config-def! 'optdowarn optdowarn-config)
 
 (module-export! '{optimize! optimize-procedure! optimize-module!
-		  optimize-bindings!
+		  reoptimize! optimize-bindings!
 		  deoptimize! deoptimize-procedure! deoptimize-module!
 		  deoptimize-bindings!})
 
@@ -554,6 +554,10 @@
 			 `(,optimize-get-module ,x)
 			 x))
 		   (cdr expr))))))
+
+(defambda (reoptimize! modules)
+  (reload-module modules)
+  (optimize-module! (get-module modules)))
 
 ;;;; Special form handlers
 
