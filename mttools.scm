@@ -14,6 +14,7 @@
 		  mt-apply
 		  do-choices-mt
 		  do-vector-mt
+		  for-choices-mt
 		  interval-string
 		  short-interval-string
 		  mt/fetchoids
@@ -104,14 +105,15 @@
 
 ;;; The main macros
 
+
 (define do-choices-mt
   (macro expr
     (let* ((control-spec (get-arg expr 1))
 	   (arg (get-arg control-spec 0))
 	   (choice-generator (get-arg control-spec 1))
-	   (n-threads (get-arg control-spec 2 10)))
+	   (n-threads-arg (get-arg control-spec 2 #f)))
       (if (<= (length control-spec) 3)
-	  `(,mt-apply ,n-threads
+	  `(,mt-apply (,mt/threadcount ,n-threads-arg)
 		      (lambda (,arg) ,@(cdr (cdr expr)))
 		      (qc ,choice-generator))
 	  (let ((blockproc (get-arg control-spec 3 #f))
@@ -122,7 +124,7 @@
 		   (_blockproc (,legacy-blockproc ,blockproc))
 		   (_progressfn (,getprogressfn ,progressfn))
 		   (_bodyproc (lambda (,arg) ,@(cdr (cdr expr))))
-		   (_nthreads ,n-threads)
+		   (_nthreads (,mt/threadcount ,n-threads-arg))
 		   (_start (elapsed-time))
 		   (_startu (rusage))
 		   (_prep_time 0)
@@ -193,9 +195,9 @@
     (let* ((control-spec (get-arg expr 1))
 	   (arg (get-arg control-spec 0))
 	   (vec-generator (get-arg control-spec 1))
-	   (n-threads (get-arg control-spec 2 10)))
+	   (n-threads-arg (get-arg control-spec 2 #f)))
       (if (<= (length control-spec) 3)
-	  `(,mt-apply ,n-threads
+	  `(,mt-apply (,mt/threadcount ,n-threads-arg)
 		      (lambda (,arg) ,@(cdr (cdr expr)))
 		      (qc (elts (,vec-generator))))
 	  (let ((blockproc (get-arg control-spec 3 #f))
@@ -208,7 +210,7 @@
 		   (_blockproc (,legacy-blockproc ,blockproc))
 		   (_progressfn (,getprogressfn ,progressfn))
 		   (_bodyproc (lambda (,arg) ,@(cdr (cdr expr))))
-		   (_nthreads ,n-threads)
+		   (_nthreads (,mt/threadcount ,n-threads-arg))
 		   (_start (elapsed-time))
 		   (_startu (rusage))
 		   (_prep_time 0)
@@ -276,6 +278,94 @@
 		   _startu #f
 		  (elapsed-time _start) _prep_time _post_time 
 		  #f #f #f))))))))
+
+(define for-choices-mt
+  (macro expr
+    (let* ((control-spec (get-arg expr 1))
+	   (arg (get-arg control-spec 0))
+	   (choice-generator (get-arg control-spec 1))
+	   (n-threads-arg (get-arg control-spec 2 #f)))
+      (if (<= (length control-spec) 3)
+	  `(let ((_result {}))
+	     (,mt-apply (,mt/threadcount ,n-threads-arg)
+			(lambda (,arg) (set+! _result ,@(cdr (cdr expr))))
+			(qc ,choice-generator))
+	     _result)
+	  (let ((blockproc (get-arg control-spec 3 #f))
+		(blocksize (get-arg control-spec 4 #f))
+		(progressfn (get-arg control-spec 5 (get-default-progressfn))))
+	    `(let ((_choice ,choice-generator)
+		   (_blocksize ,blocksize)
+		   (_blockproc (,legacy-blockproc ,blockproc))
+		   (_progressfn (,getprogressfn ,progressfn))
+		   (_bodyproc (lambda (,arg) ,@(cdr (cdr expr))))
+		   (_nthreads (,mt/threadcount ,n-threads-arg))
+		   (_start (elapsed-time))
+		   (_startu (rusage))
+		   (_prep_time 0)
+		   (_post_time 0)
+		   (_result {}))
+	       (do-subsets (_block _choice _blocksize _blockno)
+		 (let ((_blockstart (elapsed-time))
+		       (_phaseu #f)
+		       (_prep_done #f)
+		       (_core_done #f)
+		       (_post_done #f))
+		   (when _progressfn
+		     (_progressfn
+		      (* _blockno _blocksize) (choice-size _block)
+		      (choice-size _choice) _nthreads _startu _phaseu
+		      (elapsed-time _start) _prep_time _post_time #f #f #f))
+		   (set! _phaseu (rusage))
+		   (cond ((not _blockproc))
+			 ((,procedure? _blockproc) (_blockproc (qc _block) #f))
+			 ((and (vector? _blockproc) (> (length _blockproc) 0)
+			       (,procedure? (elt _blockproc 0)))
+			  ((elt _blockproc 0) (qc _block))))
+		   (set! _prep_done (elapsed-time))
+		   (when (and _progressfn _blockproc)
+		     (_progressfn
+		      (* _blockno _blocksize) (choice-size _block)
+		      (choice-size _choice) _nthreads _startu _phaseu
+		      (elapsed-time _start) _prep_time _post_time 
+		      (- _prep_done _blockstart) #f #f))
+		   (when _blockproc (set! _phaseu (rusage)))
+		   (set+! _result (,mt-apply _nthreads _bodyproc (qc _block)))
+		   (set! _core_done (elapsed-time))
+		   (when _progressfn
+		     (_progressfn
+		      (* _blockno _blocksize) (choice-size _block)
+		      (choice-size _choice) _nthreads _startu _phaseu
+		      (elapsed-time _start) _prep_time _post_time 
+		      (- _prep_done _blockstart)
+		      (- _core_done _prep_done) #f))
+		   (when _blockproc (set! _phaseu (rusage)))
+		   (cond ((not _blockproc))
+			 ((,procedure? _blockproc) (_blockproc (qc _block) #t))
+			 ((and (vector? _blockproc) (> (length _blockproc) 1)
+			       (,procedure? (elt _blockproc 1)))
+			  ((elt _blockproc 1) (qc _block))))
+		   (set! _post_done (elapsed-time))
+		   (when (and _blockproc _progressfn)
+		     (_progressfn
+		      (* _blockno _blocksize) (choice-size _block)
+		      (choice-size _choice) _nthreads _startu _phaseu
+		      (elapsed-time _start) _prep_time _post_time 
+		      (- _prep_done _blockstart) (- _core_done _prep_done)
+		      (- _post_done _core_done)))
+		   (set! _prep_time (+ _prep_time (- _prep_done _blockstart)))
+		   (set! _post_time (+ _post_time (- _post_done _core_done)))))
+	       (cond ((not _blockproc))
+		     ((,procedure? _blockproc) (_blockproc (qc) #t))
+		     ((and (vector? _blockproc) (> (length _blockproc) 1)
+			   (,procedure? (elt _blockproc 1)))
+		      ((elt _blockproc 1) (qc) #t)))
+	       (when _progressfn
+		 (_progressfn
+		  (choice-size _choice) 0 (choice-size _choice) _nthreads _startu #f
+		  (elapsed-time _start) _prep_time _post_time 
+		  #f #f #f))
+	       _result))))))
 
 ;;; Progress reports
 
