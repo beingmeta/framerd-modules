@@ -3,9 +3,10 @@
 
 (in-module 'ezstats)
 
-(module-export! '{mean avg stddev median 
+(module-export! '{mean avg stddev median gmean hmean
 		  arithmetic-variance variance
-		  arithmetic-mean harmonic-mean}) 
+		  arithmetic-mean harmonic-mean
+		  standard-deviation}) 
 
 ;;; Most common functions
 
@@ -21,21 +22,26 @@
 				     (choice->vector x))))))
 ;;; Arithmetic functions
 
+(define (arithmetic-mean vec (weights #f) (inexact #t))
+  (if weights
+      (if (= (length vec) (length weights))
+	  (arithmetic-mean (map * vec weights) #f inexact)
+	  (irritant weights |LengthMismatch|
+	    "Data length (" (length vec) ") != "
+	    "weight length (" (length weights) ")"))
+      (if inexact
+	  (/~ (reduce + vec) (length vec))
+	  (/ (reduce + vec) (length vec)))))
+(define avg arithmetic-mean)
 
-(define (arithmetic-mean vec (inexact #t))
-  (if inexact
-      (/~ (reduce + vec) (length vec))
-      (/ (reduce + vec) (length vec))))
-(define avg mean)
-
-(define (arithmetic-variance vec)
-  (let ((avg (mean vec)))
+(define (arithmetic-variance vec (weights #f))
+  (let ((avg (arithmetic-mean vec weights)))
     (/~ (reduce + (map (lambda (x) (* (- x avg) (- x avg))) vec))
 	(length vec))))
 (define variance arithmetic-variance)
 
-(define (standard-deviation vec)
-  (sqrt (arithmetic-variance vec)))
+(define (standard-deviation vec (weights #f))
+  (sqrt (arithmetic-variance vec weights)))
 
 ;;; Utilities
 
@@ -65,6 +71,11 @@
 		      exact-root
 		      root))))
 	  (irritant vec |MixedNegativePositiveElements|))))
+(defambda (gmean x (fn #f)) 
+  (if (and (singleton? x) (or (vector? x) (list? x)))
+      (geometric-mean (if fn (map fn (->vector x)) (->vector x)))
+      (geometric-mean (if fn (map fn (choice->vector x))
+			  (choice->vector x)))))
 
 (define (harmonic-mean vec (weights #f) (drop-zeros #f) (inexact #f))
   (if (some? zero? vec)
@@ -83,6 +94,11 @@
 	  (if inexact
 	      (/~ (length vec) (reduce + (map /~ vec)))
 	      (/ (length vec) (reduce + (map / vec)))))))
+(defambda (hmean x (fn #f)) 
+  (if (and (singleton? x) (or (vector? x) (list? x)))
+      (harmonic-mean (if fn (map fn (->vector x)) (->vector x)))
+      (harmonic-mean (if fn (map fn (choice->vector x))
+			 (choice->vector x)))))
 
 (define (median vec)
   (let* ((vec (sortvec vec)) 
