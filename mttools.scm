@@ -31,8 +31,10 @@
 	   proc)))
 
 (define (mt/nrange start end)
-  (if (>= start end) (fail)
-      (choice start (mt/nrange (1+ start) end))))
+  (let ((range {}))
+    (dotimes (i (- end start))
+      (set+! range (+ start i)))
+    range))
 
 (define (mt/counter maxval)
   (let ((counter 0))
