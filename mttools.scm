@@ -10,23 +10,14 @@
 
 (use-module '{reflection stringfmts varconfig logger})
 
-(module-export! '{mt/threadcount
-		  mt-apply
-		  do-choices-mt
-		  do-vector-mt
-		  for-choices-mt
-		  interval-string
-		  short-interval-string
-		  mt/fetchoids
-		  mt/lockoids
-		  mt/save/fetch
-		  mt/save/swap/fetch
-		  mt/save/lock/fetch
+(module-export! '{mt-apply mt/threadcount mt/nrange mt/counter
+		  do-choices-mt do-vector-mt for-choices-mt
+		  interval-string short-interval-string
+		  mt/fetchoids mt/lockoids
+		  mt/save/fetch mt/save/swap/fetch mt/save/lock/fetch 
 		  mt/save/fetchkeys
-		  mt/detailed-progress
-		  mt/sparse-progress
-		  mt/default-progress
-		  mt/noprogress mt/no-progress
+		  mt/detailed-progress mt/sparse-progress
+		  mt/default-progress mt/noprogress mt/no-progress
 		  mt/custom-progress})
 
 (define default-threadcount 1.0)
@@ -39,33 +30,39 @@
 	   (lambda (args done) (unless done (proc (qc args))))
 	   proc)))
 
-(define (nrange start end)
+(define (mt/nrange start end)
   (if (>= start end) (fail)
-      (choice start (nrange (1+ start) end))))
-(define (make-counter max)
-  (let ((counter 0))
-    (slambda ()
-      (if (< counter max)
-	  (let ((c counter))
-	    (set! counter (1+ c))
-	    c)
-	  (fail)))))
+      (choice start (mt/nrange (1+ start) end))))
 
-(define (mt/threadcount (arg #f) (ncpus (get (rusage) 'ncpus)))
-  (cond ((not arg) ncpus)
+(define (mt/counter maxval)
+  (let ((counter 0))
+    (slambda ((arg 1))
+      (if (eq? arg 'stop)
+	  (begin (set! counter) (fail))
+	  (if (and maxval counter (< counter maxval))
+	      (let ((c counter))
+		(set! counter (1+ c))
+		c)
+	      (fail))))))
+
+(define (mt/threadcount (arg #f) (maxval #f)
+			(ncpus (get (rusage) 'ncpus)))
+  (cond ((not arg) (max ncpus (or maxval 0)))
 	((and (equal? arg default-threadcount)
 	      (or (not (number? default-threadcount))
 		  (not (zero? (imag-part default-threadcount)))
-		  (<= default-threadcount 0))))
+		  (<= default-threadcount 0)))
+	 (irritant default-threadcount |BadThreadcount|
+		   "The default threadcount  " default-threadcount " is not valid."))
 	((and (symbol? arg) (not (number? (config arg))))
 	 (logwarn |BadThreadcount| 
 	   "The config value of " arg " is not a number, "
 	   "trying default threadcount " default-threadcount)
-	 (mt/threadcount default-threadcount))
-	((symbol? arg) (mt/threadcount (config arg)))
-	((and (fixnum? arg) (> arg 0))  arg)
+	 (mt/threadcount default-threadcount maxval))
+	((symbol? arg) (mt/threadcount (config arg) maxval))
+	((and (fixnum? arg) (> arg 0))  (max arg (or maxval 0)))
 	((and (number? arg) (zero? (imag-part arg)) (> arg 0)) 
-	 (->exact (ceiling (* arg ncpus))))
+	 (max (->exact (ceiling (* arg ncpus))) (or maxval 0)))
 	(else (bad-threadcount arg))))
 
 (define (bad-threadcount arg)
@@ -95,27 +92,28 @@
 (define (mt-apply n-threads proc choices)
   (if (<= n-threads 1)
       (let* ((vec (choice->vector choices))
-	     (counter (make-counter (length vec))))
+	     (counter (mt/counter (length vec))))
 	(threadfcn 0 proc vec counter))
       (let* ((vec (choice->vector choices))
-	     (counter (make-counter (length vec)))
-	     (ids (nrange 0 n-threads)))
+	     (counter (mt/counter (length vec)))
+	     (ids (mt/nrange 0 n-threads)))
 	(threadjoin
 	 (threadcall threadfcn ids proc vec counter)))))
 
 ;;; The main macros
-
 
 (define do-choices-mt
   (macro expr
     (let* ((control-spec (get-arg expr 1))
 	   (arg (get-arg control-spec 0))
 	   (choice-generator (get-arg control-spec 1))
-	   (n-threads-arg (get-arg control-spec 2 #f)))
+	   (n-threads-arg (get-arg control-spec 2 #f))
+	   (body (cdr (cdr expr))))
       (if (<= (length control-spec) 3)
-	  `(,mt-apply (,mt/threadcount ,n-threads-arg)
-		      (lambda (,arg) ,@(cdr (cdr expr)))
-		      (qc ,choice-generator))
+	  `(,mt-apply 
+	    (,mt/threadcount ,n-threads-arg)
+	    (lambda (,arg) ,@body)
+	    (qc ,choice-generator))
 	  (let ((blockproc (get-arg control-spec 3 #f))
 		(blocksize (get-arg control-spec 4 #f))
 		(progressfn (get-arg control-spec 5 (get-default-progressfn))))
@@ -123,7 +121,7 @@
 		   (_blocksize ,blocksize)
 		   (_blockproc (,legacy-blockproc ,blockproc))
 		   (_progressfn (,getprogressfn ,progressfn))
-		   (_bodyproc (lambda (,arg) ,@(cdr (cdr expr))))
+		   (_bodyproc (lambda (,arg) ,@body))
 		   (_nthreads (,mt/threadcount ,n-threads-arg))
 		   (_start (elapsed-time))
 		   (_startu (rusage))
