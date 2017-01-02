@@ -13,7 +13,7 @@
 (module-export! '{mt-apply mt/threadcount mt/nrange mt/counter
 		  do-choices-mt do-vector-mt for-choices-mt
 		  interval-string short-interval-string
-		  mt/fetchoids mt/lockoids
+		  mt/fetchoids mt/lockoids mt/save/swap
 		  mt/save/fetch mt/save/swap/fetch mt/save/lock/fetch 
 		  mt/save/fetchkeys
 		  mt/detailed-progress mt/sparse-progress
@@ -601,6 +601,8 @@
 
 ;;; Utility prefetchers
 
+(define (mt/save/swap args done)
+  (commit) (swapout))
 (define (mt/save/swap/fetch oids done)
   (when done (commit) (swapout))
   (unless done (prefetch-oids! oids)))
