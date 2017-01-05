@@ -3,9 +3,9 @@ LOCAL_MODULES = $(shell fdconfig local_modules)
 LOCAL_SAFE_MODULES = $(shell fdconfig local_safe_modules)
 ROOT_DIR = $(shell pwd)
 
-TAGS: $(SCHEME_FILES)
+TAGS: $(SCHEME_FILES) makefile
 	etags *.scm
-	find . -name "*.scm" -exec etags -o TAGS -a {} \;
+	find . -name "*.scm" -type f -exec etags -o TAGS -a {} \;
 
 optall:
 	fdexec optall.scm
