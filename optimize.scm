@@ -205,31 +205,37 @@
 	((symbol? expr)
 	 (let ((lexref (get-lexref expr bound 0)))
 	   (debug%watch "DOTIGHTEN/SYMBOL" expr lexref env bound)
-	   (if lexref (if lexrefs lexref expr)
-	       (let ((module (wherefrom expr env)))
-		 (debug%watch "DOTIGHTEN/SYMBOL/module" expr module env bound)
+	   (if lexref
+	       (if lexrefs lexref expr)
+	       (let* ((srcenv (wherefrom expr env))
+		      (module (and srcenv (module? srcenv) srcenv)))
+		 (debug%watch "DOTIGHTEN/SYMBOL/module" 
+		   expr module srcenv env bound)
 		 (when (and module (module? env))
 		   (add! env '%free_vars expr)
 		   (when (and module (table? module))
 		     (add! env '%used_modules
 			   (pick (get module '%moduleid) symbol?))))
 		 (if module
-		     (cond ((%test module '%nosubst expr) expr)
-			   ((%test module '%constants expr)
-			    (let ((v (%get module expr)))
+		     (cond ((not srcenv)
+			    (codewarning (cons* 'UNBOUND expr bound))
+			    (when env
+			      (add! env '%warnings (cons* 'UNBOUND expr bound)))
+			    (when optdowarn
+			      (warning "The symbol " expr
+				       " appears to be unbound given bindings "
+				       (apply append bound)))
+			    expr)
+			   ((%test srcenv '%nosubst expr) expr)
+			   ((%test srcenv '%constants expr)
+			    (let ((v (%get srcenv expr)))
 			      (if (or (pair? v) (symbol? v) (ambiguous? v))
 				  (list 'quote (qc v))
 				  v)))
+			   ((not module) expr)
 			   (w/rails (->rail `(,%modref ,module ,expr)))
 			   (else `(,%modref ,module ,expr)))
 		     (begin
-		       (when optdowarn
-			 (codewarning (cons* 'UNBOUND expr bound))
-			 (when env
-			   (add! env '%warnings (cons* 'UNBOUND expr bound)))
-			 (warning "The symbol " expr
-				  " appears to be unbound given bindings "
-				  (apply append bound)))
 		       expr))))))
 	((not (pair? expr)) expr)
 	;; This will break when the ambiguous head includes
@@ -378,10 +384,10 @@
   (let* ((env (procedure-env proc))
 	 (arglist (procedure-args proc))
 	 (body (procedure-body proc))
+	 (bound (list (arglist->vars arglist)))
 	 (initial (if (pair? body) (car body)
 		      (and (rail? body) (> (length body) 0)
 			   (elt body 0))))
-	 (bound (list (arglist->vars arglist)))
 	 (new-body `((comment |original| ,@(->list body))
 		     (comment |originalargs| 
 			      ,(if (rail? arglist) (->list arglist) arglist))
