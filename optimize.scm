@@ -53,7 +53,8 @@
 	  (else (set! optdowarn #f)))))
 (config-def! 'optdowarn optdowarn-config)
 
-(module-export! '{optimize! optimize-procedure! optimize-module!
+(module-export! '{optimize! optimized optimized?
+		  optimize-procedure! optimize-module!
 		  reoptimize! optimize-bindings!
 		  deoptimize! deoptimize-procedure! deoptimize-module!
 		  deoptimize-bindings!})
@@ -436,6 +437,22 @@
 	   #t)
 	  (else #f))))
 
+(define (optimized? arg)
+  (if (compound-procedure? arg)
+      (let* ((body (procedure-body arg))
+	     (exprs (->list (pick (pick (elts body) {rail? pair?}) length >= 3)))
+	     (original-body (pick exprs car 'comment cadr '|original|))
+	     (original-args (pick exprs car 'comment cadr '|originalargs|)))
+	(and (exists? original-body) (exists? original-args)))
+      (and (or (hashtable? arg) (slotmap? arg) (schemap? arg)
+	       (environment? arg))
+	   (some? (lambda (var)
+		    (and (test arg var) 
+			 (exists compound-procedure? (get arg var))
+			 (exists optimized?
+				 (pick (get arg var) compound-procedure?))))
+		  (choice->vector (getkeys arg))))))
+
 (define (optimize-get-module spec)
   (onerror (get-module spec)
     (lambda (ex) (irritant+ spec |GetModuleFailed| optimize-module
@@ -490,8 +507,11 @@
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
   (default! w/rails (getopt opts 'rails rails-dflt))
   (logdebug "Optimizing bindings " bindings)
-  (let ((count 0))
-    (do-choices (var (getkeys bindings))
+  (let ((count 0)
+	(skip (getopt opts 'dont-optimize
+		      (tryif (test bindings '%dont-optimize)
+			(get bindings '%dont-optimize)))))
+    (do-choices (var (difference (getkeys bindings) skip '%dont-optimize))
       (logdebug "Optimizing binding " var)
       (let ((value (get bindings var)))
 	(if (bound? value)
@@ -558,6 +578,15 @@
 (defambda (reoptimize! modules)
   (reload-module modules)
   (optimize-module! (get-module modules)))
+
+(define (optimized arg)
+  (cond ((compound-procedure? arg) (optimize-procedure! arg))
+	((or (hashtable? arg) (slotmap? arg) (schemap? arg)
+	     (environment? arg))
+	 (optimize-module! arg))
+	(else (irritant arg |TypeError| OPTIMIZED
+			"Not a compound procedure, environment, or module")))
+  arg)
 
 ;;;; Special form handlers
 
