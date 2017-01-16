@@ -59,6 +59,20 @@
     (get date 'isobasicdate) "/" region "/" service "/aws4_request\n"
     (downcase (packet->base16 (sha256 creq)))))
 
+(define (add-header! curl header . args)
+  ((if (curl-handle? curl) curlsetopt! add!) 
+   curl 'header (apply glom header ": " args)))
+
+(define (urlop op url curl (payload #f) (payload-mimetype #f))
+  (cond ((equal? op "GET") (urlget url curl))
+	((equal? op "HEAD") (urlhead url curl))
+	((equal? op "POST") (urlpost url curl (or payload "")))
+	((equal? op "PUT") 
+	 (urlput url (or payload "") 
+		 payload-mimetype
+		 curl))
+	(else (urlget url curl))))
+
 ;;; Doing a GET with AWS4 authentication
 
 (define (aws/v4/get req endpoint (opts #f)
@@ -122,7 +136,7 @@
 
 (define (aws/v4/op req op endpoint (opts #f)
 		   (args #[]) (headers #[])
-		   (payload #f) (ptype #f)
+		   (payload #f) (payload-mimetype #f)
 		   (date (gmtimestamp 'seconds))
 		   (curl (getcurl))
 		   (token) (hdrset (make-hashset)))
@@ -171,19 +185,15 @@
   ;; (add! args "SignatureMethod" "AWS-HMAC-SHA256")
   (set! req  (aws/v4/prepare req op endpoint opts
 			     (if (equal? op "GET") (or payload "") payload)
-			     ptype))
+			     payload-mimetype))
   (when payload
-    ((if (curl-handle? curl) curlsetopt! add!)
-     curl 'header
-     (glom "x-amz-content-sha256: "
-       (if payload (downcase (packet->base16 (sha256 payload)))
-	   "UNSIGNED-PAYLOAD"))))
-  ((if (curl-handle? curl) curlsetopt! add!)
-   curl 'header
-   (glom "Authorization: AWS4-HMAC-SHA256 Credential="
-     (getopt req 'credential) ", "
-     "SignedHeaders=" (signed-headers req) ", "
-     "Signature=" (downcase (packet->base16 (getopt req 'signature)))))
+    (add-header! curl "x-amz-content-sha256"
+		 (downcase (packet->base16 (sha256 payload)))))
+  (add-header! curl "Authorization" 
+	       "AWS4-HMAC-SHA256 Credential="
+	       (getopt req 'credential) ", "
+	       "SignedHeaders=" (signed-headers req) ", "
+	       "Signature=" (downcase (packet->base16 (getopt req 'signature))))
   (let* ((escaped (if (position #\% endpoint) endpoint
 		      (encode-uri endpoint)))
 	 (url (scripturl+ escaped args)))
@@ -192,19 +202,10 @@
 	     (if (and payload (> (length payload) 0))
 		 (printout (length payload)
 		   (if (packet? payload) " bytes" " characters")
-		   " of " (or ptype "stuff"))
+		   " of " (or payload-mimetype "stuff"))
 		 "no payload")
 	     "\n  url: " url "\n  curl: " curl)
-    (let* ((result
-	    (if (equal? op "GET")
-		(urlget url curl)
-		(if (equal? op "HEAD")
-		    (urlhead url curl)
-		    (if (equal? op "POST")
-			(urlpost url curl (or payload ""))
-			(if (equal? op "PUT")
-			    (urlput url (or payload "") ptype curl)
-			    (urlget url curl))))))
+    (let* ((result (urlop op url curl payload payload-mimetype))
 	   (err (not (getopt req 'noerr #f)))
 	   (status (get result 'response)))
       (if (and err status 
