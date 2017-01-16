@@ -69,8 +69,9 @@
 	      (add! combined key (get field key))))
 	  combined))))
 
-(define (handle-sqs-error method queue irritant)
-  (newerr+ irritant (glom "SQS/" method "/Failed") queue
+(define (handle-sqs-error ex method queue)
+  (newerr+ (and (error-irritant? ex) (error-irritant ex)) 
+	   (glom "SQS/" method "/Failed") queue
 	   "Received from " (getopt irritant 'effective-url)))
 
 (define (get-queue-opts (queue #f) (opts #[]) (qopts))
@@ -87,8 +88,7 @@
       (handle-sqs-response 
        (aws/v4/op (get-queue-opts queue opts)
 		  "GET" queue opts args))
-    (lambda (ex)
-      (handle-sqs-error (error-irritant ex) '|ReceiveMessage| queue))))
+    (lambda (ex) (handle-sqs-error ex '|ReceiveMessage| queue))))
 
 (define (sqs/send queue msg (opts #[]) (args `#["Action" "SendMessage"]))
   (store! args "MessageBody" msg)
@@ -96,16 +96,14 @@
   (onerror
       (handle-sqs-response 
        (aws/v4/get (get-queue-opts queue opts) queue opts args))
-    (lambda (ex)
-      (handle-sqs-error (error-irritant ex) '|SendMessage| queue))))
+    (lambda (ex) (handle-sqs-error ex '|SendMessage| queue))))
 
 (define (sqs/list (prefix #f) (args #["Action" "ListQueues"]) (opts #[]))
   (when prefix (set! args `#["Action" "ListQueues" "QueueNamePrefix" ,prefix]))
   (onerror
       (handle-sqs-response 
        (aws/v4/get (get-queue-opts #f opts) sqs-endpoint opts args))
-    (lambda (ex)
-      (handle-sqs-error (error-irritant ex) '|ListQueues| #f))))
+    (lambda (ex) (handle-sqs-error ex '|ListQueues| #f))))
 
 (define (sqs/info queue
 		  (args #["Action" "GetQueueAttributes" "AttributeName.1" "All"])
@@ -114,8 +112,7 @@
       (handle-sqs-response
        (aws/v4/get (get-queue-opts queue opts) queue opts args)
        (qc sqs-info-fields))
-    (lambda (ex)
-      (handle-sqs-error (error-irritant ex) '|GetQueueAttributes| queue))))
+    (lambda (ex) (handle-sqs-error ex '|GetQueueAttributes| queue))))
 
 (define (sqs/delete message (opts #[]))
   (onerror
@@ -123,8 +120,7 @@
        (aws/v4/get (get-queue-opts (get message 'queue))
 		   (get message 'queue) opts
 		   `#["Action" "DeleteMessage" "ReceiptHandle" ,(get message 'handle)]))
-    (lambda (ex)
-      (handle-sqs-error (error-irritant ex) '|DeleteMessage| (get message 'queue)))))
+    (lambda (ex) (handle-sqs-error ex '|DeleteMessage| (get message 'queue)))))
 
 (define (sqs/extend message secs (opts #[]))
   (onerror
@@ -134,9 +130,7 @@
 		   `#["Action" "ChangeMessageVisibility"
 		      "ReceiptHandle" ,(get message 'handle)
 		      "VisibilityTimeout" ,secs]))
-    (lambda (ex)
-      (handle-sqs-error (error-irritant ex) '|ExtendMessage|
-			(get message 'queue)))))
+    (lambda (ex) (handle-sqs-error ex '|ExtendMessage| (get message 'queue)))))
 
 (define reqvar '_sqs)
 (define default-extension 60)
