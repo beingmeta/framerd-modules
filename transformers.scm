@@ -1,9 +1,9 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2005-2017 beingmeta, inc.  All rights reserved.
 
-(in-module 'index2table)
+(in-module 'transformers)
 
-(module-export! '{index2table})
+(module-export! '{index2table copy-index2table})
 
 (define (index2table index (prefetch #t))
   (when (string? index) (set! index (open-index index)))
@@ -13,5 +13,18 @@
     (do-choices (key keys)
       (store! table key (get index key)))
     table))
+
+(define (copy-index2table indexfile dtypefile)
+  (let* ((index (open-index indexfile))
+	 (table (index2table index)))
+    (if (has-suffix dtypefile {".ztype"})
+	(dtype->zfile table dtypefile)
+	(dtype->file table dtypefile))
+    table))
+
+
+  
+
+
 
 
