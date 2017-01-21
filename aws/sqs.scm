@@ -70,7 +70,7 @@
 	  combined))))
 
 (define (handle-sqs-error ex method queue)
-  (newerr+ (and (error-irritant? ex) (error-irritant ex)) 
+  (newerr+ (and (error-irritant? ex) (error-irritant ex))
 	   (glom "SQS/" method "/Failed") queue
 	   "Received from " (getopt irritant 'effective-url)))
 
@@ -96,14 +96,16 @@
   (onerror
       (handle-sqs-response 
        (aws/v4/get (get-queue-opts queue opts) queue opts args))
-    (lambda (ex) (handle-sqs-error ex '|SendMessage| queue))))
+    (lambda (ex)
+      (handle-sqs-error ex '|SendMessage| queue))))
 
 (define (sqs/list (prefix #f) (args #["Action" "ListQueues"]) (opts #[]))
   (when prefix (set! args `#["Action" "ListQueues" "QueueNamePrefix" ,prefix]))
   (onerror
       (handle-sqs-response 
        (aws/v4/get (get-queue-opts #f opts) sqs-endpoint opts args))
-    (lambda (ex) (handle-sqs-error ex '|ListQueues| #f))))
+    (lambda (ex)
+      (handle-sqs-error ex '|ListQueues| #f))))
 
 (define (sqs/info queue
 		  (args #["Action" "GetQueueAttributes" "AttributeName.1" "All"])
@@ -112,7 +114,8 @@
       (handle-sqs-response
        (aws/v4/get (get-queue-opts queue opts) queue opts args)
        (qc sqs-info-fields))
-    (lambda (ex) (handle-sqs-error ex '|GetQueueAttributes| queue))))
+    (lambda (ex)
+      (handle-sqs-error ex '|GetQueueAttributes| queue))))
 
 (define (sqs/delete message (opts #[]))
   (onerror
@@ -120,7 +123,8 @@
        (aws/v4/get (get-queue-opts (get message 'queue))
 		   (get message 'queue) opts
 		   `#["Action" "DeleteMessage" "ReceiptHandle" ,(get message 'handle)]))
-    (lambda (ex) (handle-sqs-error ex '|DeleteMessage| (get message 'queue)))))
+    (lambda (ex)
+      (handle-sqs-error ex '|DeleteMessage| (get message 'queue)))))
 
 (define (sqs/extend message secs (opts #[]))
   (onerror
@@ -130,7 +134,8 @@
 		   `#["Action" "ChangeMessageVisibility"
 		      "ReceiptHandle" ,(get message 'handle)
 		      "VisibilityTimeout" ,secs]))
-    (lambda (ex) (handle-sqs-error ex '|ExtendMessage| (get message 'queue)))))
+    (lambda (ex)
+      (handle-sqs-error ex '|ExtendMessage| (get message 'queue)))))
 
 (define reqvar '_sqs)
 (define default-extension 60)
