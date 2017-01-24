@@ -27,10 +27,12 @@
 (define-init rails-dflt #f)
 (define-init argvecs-dflt #f)
 (define-init bindvecs-dflt #f)
+(define-init fix-modules #f)
 (varconfig! optimize:lexrefs lexrefs-dflt)
 (varconfig! optimize:rails rails-dflt)
 (varconfig! optimize:argvecs argvecs-dflt)
 (varconfig! optimize:bindvecs bindvecs-dflt)
+(varconfig! optimize:fixmodules fix-modules)
 
 (defslambda (codewarning warning)
   (debug%watch "CODEWARNING" warning)
@@ -62,6 +64,13 @@
 (define %volatile '{optdowarn useopcodes %loglevel})
 
 (varconfig! optimize:checkusage check-module-usage)
+
+(define module-fixer (and (bound? fix-module!) fix-module!))
+(define (fix! module)
+  (when module-fixer 
+    (if (symbol? module)
+	(module-fixer (get-module module))
+	(module-fixer module))))
 
 ;;; Utility functions
 
@@ -461,8 +470,9 @@
 
 (define (optimize-get-module spec)
   (onerror (get-module spec)
-    (lambda (ex) (irritant+ spec |GetModuleFailed| optimize-module
-			    "Couldn't load module " spec))))
+    (lambda (ex) 
+      (irritant+ spec |GetModuleFailed| optimize-module
+		 "Couldn't load module " spec))))
 
 (define (optimize-module! module (opts) (lexrefs) (w/rails))
   (loginfo "Optimizing module " module)
@@ -471,6 +481,7 @@
   (default! opts (try (get module '%optimize_options) #f))
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
   (default! w/rails (getopt opts 'rails rails-dflt))
+  (when (getopt opts 'fixmodules fix-modules) (fix! module))
   (let ((bindings (module-bindings module))
 	(count 0))
     (do-choices (var bindings)
