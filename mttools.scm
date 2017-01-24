@@ -205,7 +205,7 @@
       (if (<= (length control-spec) 3)
 	  `(,mt-apply (,mt/threadcount ,n-threads-arg)
 		      (lambda (,arg) ,@body)
-		      (qc (elts (,vec-generator))))
+		      (qc (elts ,vec-generator)))
 	  (let ((blockproc (get-arg control-spec 3 #f))
 		(blocksize (get-arg control-spec 4 #f))
 		(progressfn (get-arg control-spec 5 (get-default-progressfn))))
