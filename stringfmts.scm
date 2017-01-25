@@ -9,7 +9,10 @@
 		       interval-string short-interval-string
 		       minimal-interval-string
 		       padnum printnum numstring
-		       $count $num $size})
+		       $count $countstring
+		       $num $numstring
+		       $size $sizestring
+		       $bytes $bytestring})
 
 ;; Percentages
 
@@ -69,6 +72,7 @@
       (if (> num 10) "0" "00")))
 
 (define (numstring . args) (stringout (apply printnum args)))
+(define ($numstring . args) (stringout (apply printnum args)))
 
 (define $num printnum)
 
@@ -85,9 +89,30 @@
       (printout " "
 		(if (= n 1) singular
 		    (or plural (string-append singular "s")))))))
+(define ($countstring n (singular #f) (plural #f) (spellout #t))
+  (stringout (apply $count n singular plural spellout)))
 
 (defambda ($size values (word #f) (plural #f))
   ($count (choice-size values) word plural))
+
+;;; Byte sizes
+
+(define ($bytes bytes)
+  (if (<= bytes 4096)
+      (printout bytes " bytes")
+      (if (< bytes (* 1024 1024))
+	  (printout (printnum (/~ bytes 1024) 0) "KB")
+	  (printout (printnum (/~ bytes (* 1024 1024)) 1)
+	    "MB"))))
+
+(define ($bytestring bytes)
+  (stringout
+    (if (<= bytes 4096)
+	(printout bytes " bytes")
+	(if (< bytes (* 1024 1024))
+	    (printout (printnum (/~ bytes 1024) 0) "KB")
+	    (printout (printnum (/~ bytes (* 1024 1024)) 1)
+	      "MB")))))
 
 ;; Temporal intervals
 
