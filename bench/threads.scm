@@ -25,9 +25,9 @@
 		    count))
 	  (before (rusage))
 	  (thread-results #f))
-      (logwarn |ThreadBenchStart| 
+      (logwarn |Starting| 
 	"With " (or threadcount "no") " threads for " (secs->string (difftime end))
-	" load=" (get before 'load) " mem=" (get before 'memusage))
+	": load=" (get before 'load) ", mem=" ($bytes (get before 'memusage)))
       (if threadcount
 	  (let ((threads {}))
 	    (dotimes (i threadcount)
@@ -46,13 +46,17 @@
 	    (printnum total-calls) " calls in " (secs->string clocktime) " "
 	    "(" (printnum (/~ total-calls clocktime) 2) " calls/sec) "
 	    "using " (secs->string cputime) " cputime")
-	  (logwarn |CPU%|
-	    (show% cputime clocktime) 
-	    (when (and nthreads (> nthreads 1))
+	  (logwarn |Resource| 
+	    "user: " (secs->string utime) "; "
+	    "system: " (secs->string stime) "; "
+	    "mem: " ($bytes (get after 'memusage)))
+	  (logwarn |Performance|
+	    "CPU=" (show% cputime clocktime) 
+	    (when (and threadcount (> threadcount 1))
 	      (printout " (" 
 		(show% (/ cputime threadcount) clocktime)
-		" * " nthreads ") "))
-	    " memdiff=" (bytesize memdiff)))))))
+		" * " threadcount ") "))
+	    "; memdiff=" ($bytes memdiff)))))))
 
 (define (print-slots table slots (width 3) (count 0))
   (doseq (slot slots)
@@ -60,11 +64,3 @@
       (set! count (1+ count))
       (when (zero? (remainder count width)) (printout "\n   "))
       (printout (downcase slot) "=" (get table slot) " "))))
-
-(define (bytesize bytes)
-  (if (<= bytes 4096)
-      (printout bytes " bytes")
-      (if (< bytes (* 1024 1024))
-	  (printout (/~ bytes 1024) "KB")
-	  (printout (printnum (/~ bytes (* 1024 1024)) 2)
-	    "MB"))))
