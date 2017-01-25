@@ -47,24 +47,22 @@
 		c)
 	      (fail))))))
 
-(define (mt/threadcount (arg #f) (maxval #f)
-			(ncpus (get (rusage) 'ncpus)))
-  (cond ((not arg) (max ncpus (or maxval 0)))
+(define (mt/threadcount (arg default-threadcount) (maxval #f)
+			(ncpus (get (rusage) 'ncpus))
+			(maxcount))
+  (set! maxval (or (mt/threadcount maxval) 0))
+  (cond ((not arg) #f)
+	((eq? arg #t) (max ncpus maxval))
 	((and (equal? arg default-threadcount)
-	      (or (not (number? default-threadcount))
-		  (not (zero? (imag-part default-threadcount)))
+	      (or (not (number? arg))
+		  (not (zero? (imag-part arg)))
 		  (<= default-threadcount 0)))
 	 (irritant default-threadcount |BadThreadcount|
 	   "The default threadcount  " default-threadcount " is not valid."))
-	((and (symbol? arg) (not (number? (config arg))))
-	 (logwarn |BadThreadcount| 
-	   "The config value of " arg " is not a number, "
-	   "trying default threadcount " default-threadcount)
-	 (mt/threadcount default-threadcount maxval))
 	((symbol? arg) (mt/threadcount (config arg) maxval))
 	((and (fixnum? arg) (> arg 0))  (max arg (or maxval 0)))
 	((and (number? arg) (zero? (imag-part arg)) (> arg 0)) 
-	 (max (->exact (ceiling (* arg ncpus))) (or maxval 0)))
+	 (max (->exact (ceiling (* arg ncpus))) maxval))
 	(else (bad-threadcount arg))))
 
 (define (bad-threadcount arg)
