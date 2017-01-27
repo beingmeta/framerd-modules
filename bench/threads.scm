@@ -7,7 +7,15 @@
 
 (module-export! '{tbench})
 
-(define (tbench nthreads limit proc per-thread . args)
+(config! 'thread:logexit #f)
+
+(define (get-thread-state arg)
+  (and arg
+       (if (applicable? arg) 
+	   (arg)
+	   (deep-copy arg))))
+
+(define (tbench nthreads limit thread-state proc . args)
   (let ((end (if (timestamp? limit) limit 
 		 (if (and (number? limit) (> limit 0))
 		     (timestamp+ limit)
@@ -15,26 +23,33 @@
 	(threadcount (mt/threadcount nthreads))
 	;; Run these once here to catch any superficial bugs before
 	;; the benchmark begins
-	(looptest (apply proc (and per-thread (per-thread)) args)))
-    (when (config 'optimize #f)
-      (optimize-procedure! proc)) ;; { loopfn} Can't optimize a lexically bound procedure
-    (let ((loopfn (lambda (threadno thread-data (count 0))
+	(thread-test-data (get-thread-state thread-state)))
+    (logwarn |Testing| "Testing thread proc " proc)
+    (if thread-state
+	(apply proc thread-test-data args)
+	(apply proc args))
+    (let ((loopfn (lambda (threadno (thread-data #f) (count 0))
 		    (until (past? end)
-		      (apply proc thread-data args)
+		      (if thread-state
+			  (apply proc thread-data args)
+			  (apply proc args))
 		      (set! count (1+ count)))
 		    count))
 	  (before (rusage))
 	  (thread-results #f))
       (logwarn |Starting| 
-	"With " (or threadcount "no") " threads for " (secs->string (difftime end))
+	"With " (or threadcount "no") " threads for "
+	(secs->string (difftime end))
 	": load=" (get before 'load) ", mem=" ($bytes (get before 'memusage)))
       (if threadcount
 	  (let ((threads {}))
 	    (dotimes (i threadcount)
-	      (set+! threads (threadcall loopfn i (and per-thread (per-thread)))))
+	      (set+! threads 
+		     (threadcall loopfn i (get-thread-state thread-state))))
 	    (threadjoin threads)
 	    (set! thread-results (map thread/result (choice->vector threads))))
-	  (set! thread-results (vector (loopfn #f (and per-thread (per-thread))))))
+	  (set! thread-results
+		(vector (loopfn #f (get-thread-state thread-state)))))
       (let ((after (rusage)))
 	(let* ((clocktime (- (get after 'clock) (get before 'clock)))
 	       (stime (- (get after 'stime) (get before 'stime)))
