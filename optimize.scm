@@ -33,7 +33,7 @@
 (varconfig! optimize:rails rails-dflt)
 (varconfig! optimize:argvecs argvecs-dflt)
 (varconfig! optimize:bindvecs bindvecs-dflt)
-(varconfig! optimize:wrapfns fix-modules)
+(varconfig! optimize:sealfns fix-modules)
 (varconfig! optimize:staticfns static-modules)
 
 (defslambda (codewarning warning)
@@ -71,14 +71,16 @@
 (define module-leaker (and (bound? static-module!) static-module!))
 
 (define (dereference! module (static #t))
-  (cond ((and static module-leaker)
-	 (if (symbol? module)
-	     (module-leaker (get-module module))
-	     (module-leaker module)))
-	(module-fixer 
-	 (if (symbol? module)
-	     (module-fixer (get-module module))
-	     (module-fixer module)))))
+  (when module-leaker
+    (if (symbol? module)
+	(module-leaker (get-module module))
+	(module-leaker module))))
+
+(define (pptrize! module (static #t))
+  (when module-fixer 
+    (if (symbol? module)
+	(module-fixer (get-module module))
+	(module-fixer module))))
 
 ;;; Utility functions
 
@@ -489,9 +491,10 @@
   (default! opts (try (get module '%optimize_options) #f))
   (default! lexrefs (getopt opts 'lexrefs lexrefs-dflt))
   (default! w/rails (getopt opts 'rails rails-dflt))
-  (when (or (getopt opts 'fixmodules fix-modules)  
-	    (getopt opts 'staticmodules static-modules)) 
-    (dereference! module (getopt opts 'staticmodules static-modules)))
+  (when (getopt opts 'staticmodules static-modules) 
+    (dereference! module))
+  (when (getopt opts 'staticmodules static-modules) 
+    (pptrize! module (getopt opts 'staticmodules static-modules)))
   (let ((bindings (module-bindings module))
 	(count 0))
     (do-choices (var bindings)
