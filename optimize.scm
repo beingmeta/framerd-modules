@@ -392,7 +392,8 @@
 (defambda (tighten-args expr env bound opts lexrefs w/rails)
   (if (pair? expr)
       (forseq (arg expr)
-	(if (qchoice? arg) arg
+	(if (or (qchoice? arg) (fail? arg)) 
+	    arg
 	    (dotighten arg env bound opts lexrefs w/rails)))
       expr))
 
