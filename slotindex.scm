@@ -25,6 +25,7 @@
 (defambda (slotindex/make dir (opts (cons #[] default-opts))
 			  . slots)
   (let ((prefix #f))
+    (unless (position #\/ dir) (set! dir (mkpath rootdir dir)))
     (when (and (not (file-directory? dir))
 	       (has-prefix dir "/")
 	       (file-directory? (dirname dir)))
@@ -51,7 +52,8 @@
 			    (mkpath dir (getopt opts 'basename
 						(glom prefix (downcase slot) ".index")))))
 	      (index #f))
-	 (when (and (config 'slotindex:restart #t) (file-exists? path))
+	 (when (and (config 'slotindex:restart #f)
+		    (file-exists? path))
 	   (remove-file path))
 	 (unless (file-exists? path)
 	   (lognotice |NewIndex|
@@ -94,3 +96,5 @@
 			  (printout (if (> i 0) ", ") slot)))
 	   (thread/join (thread/call commit indices))))
 	(else)))
+
+
