@@ -9,7 +9,7 @@
 		  slot->index slot/index!
 		  slotindex/save!})
 
-(define %loglevel %notice)
+(define %loglevel %notice%)
 
 ;;; This provides a very simple form of compound index
 
