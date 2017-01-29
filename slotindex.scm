@@ -24,16 +24,24 @@
 
 (defambda (slotindex/make dir (opts (cons #[] default-opts))
 			  . slots)
-  (let ((base (frame-create #f  
-		'slotindex 'slotindex 'directory dir
-		'opts opts)))
-    (do-choices (slot (pick (elts slots) symbol?))
-      (slotindex/setup base slot))
-    base))
+  (let ((prefix #f))
+    (when (and (not (file-directory? dir))
+	       (has-prefix dir "/")
+	       (file-directory? (dirname dir)))
+      (set! prefix (basename dir))
+      (set! dir (dirname dir)))
+    (let* ((base (frame-create #f  
+		   'slotindex 'slotindex 
+		   'directory dir 'prefix prefix
+		   'opts opts)))
+      (do-choices (slot (pick (elts slots) symbol?))
+	(slotindex/setup base slot))
+      base)))
 
 (defslambda (slotindex/setup base slot)
   (try (get base slot)
        (let* ((dir (try (get base 'directory) rootdir))
+	      (prefix (try (get base 'prefix) prefix))
 	      (indexopts (try (get base 'opts) (cons #[] default-opts)))
 	      (custom (try (get (getopt indexopts 'custom {}) slot)
 			   (get (getopt default-opts 'custom {}) slot)
@@ -41,7 +49,7 @@
 	      (opts (cons custom indexopts))
 	      (path (getopt opts 'fullpath
 			    (mkpath dir (getopt opts 'basename
-						(glom (downcase slot) ".index")))))
+						(glom prefix (downcase slot) ".index")))))
 	      (index #f))
 	 (when (and (config 'slotindex:restart #t) (file-exists? path))
 	   (remove-file path))
