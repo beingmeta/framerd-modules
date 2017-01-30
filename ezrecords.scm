@@ -8,26 +8,28 @@
 
 (define xref-opcode (make-opcode 0xA2))
 
-(define (make-xref-generator off tag)
-  (lambda (expr) `(,xref-opcode ,(cadr expr) ,off ',tag)))
+(define (make-xref-generator off tag-expr)
+  (lambda (expr) `(,xref-opcode ,(cadr expr) ,off ,tag-expr)))
 
-(define (make-accessor-def field tag prefix fields)
+(define (make-accessor-def name field tag-expr prefix fields)
   (let* ((field-name (if (pair? field) (car field) field))
 	 (get-method-name (string->symbol (stringout prefix "-" field-name))))
-    `(define (,get-method-name ,tag)
-       (,xref-opcode ,tag ,(position field fields) ',tag))))
-(define (make-modifier-def field tag prefix fields)
+    `(define (,get-method-name ,name)
+       (,xref-opcode ,name ,(position field fields) ,tag-expr))))
+(define (make-modifier-def name field tag-expr prefix fields)
   (let* ((field-name (if (pair? field) (car field) field))
 	 (set-method-name
 	  (string->symbol (stringout "SET-" prefix "-" field-name "!"))))
-    `(defambda (,set-method-name ,tag _value)
-       (,compound-set! ,tag ,(position field fields) _value ',tag))))
-(define (make-accessor-subst field tag prefix fields)
+    `(defambda (,set-method-name ,name _value)
+       (,compound-set! ,name ,(position field fields) _value ,tag-expr))))
+(define (make-accessor-subst name field tag-expr prefix fields)
   (let* ((field-name (if (pair? field) (car field) field))
 	 (get-method-name (string->symbol (stringout prefix "-" field-name))))
     `(set+! %rewrite
 	    (cons ',get-method-name
-		  (,make-xref-generator ,(position field fields) ',tag)))))
+		  (,make-xref-generator 
+		   ,(position field fields)
+		   ,tag-expr)))))
 
 (define (fieldname x)
   (if (pair? x) (car x) x))
@@ -36,10 +38,13 @@
 (define defrecord
   (macro expr
     (let* ((defspec (cadr expr))
-	   (tag (if (symbol? defspec) defspec
-		    (if (pair? defspec) (car defspec)
-			(get defspec 'tag))))
-	   (prefix (or (getopt defspec 'prefix) tag))
+	   (name (if (symbol? defspec) defspec
+		     (if (and (pair? defspec) (symbol? (car defspec)))
+			 (car defspec)
+			 (getopt defspec 'name
+				 (irritant defspec |NoName|)))))
+	   (tag-expr (getopt defspec 'tag `',name))
+	   (prefix (getopt defspec 'prefix name))
 	   (ismutable (or (and (pair? defspec) (position 'mutable defspec))
 			  (testopt defspec 'mutable)))
 	   (isopaque (or (and (pair? defspec) (position 'opaque defspec))
@@ -49,27 +54,30 @@
 	   (stringfn (getopt defspec 'stringfn))
 	   (fields (cddr expr))
 	   (field-names (map fieldname fields))
-	   (cons-method-name (string->symbol (stringout "CONS-" tag)))
-	   (predicate-method-name (string->symbol (stringout tag "?"))))
+	   (cons-method-name (string->symbol (stringout "CONS-" name)))
+	   (predicate-method-name (string->symbol (stringout name "?"))))
       `(begin (bind-default! %rewrite {})
 	 (defambda (,cons-method-name ,@fields)
 	   (,(if ismutable
 		 (if isopaque make-opaque-mutable-compound make-mutable-compound)
 		 (if isopaque make-opaque-compound make-compound))
-	    ',tag ,@field-names))
-	 (define (,predicate-method-name ,tag)
-	   (,compound-type? ,tag ',tag))
-	 ,@(map (lambda (field) (make-accessor-def field tag prefix fields))
+	    ,tag-expr ,@field-names))
+	 (define (,predicate-method-name ,name)
+	   (,compound-type? ,name ,tag-expr))
+	 ,@(map (lambda (field) 
+		  (make-accessor-def name field tag-expr prefix fields))
 		fields)
-	 ,@(map (lambda (field) (make-accessor-subst field tag prefix fields))
+	 ,@(map (lambda (field)
+		  (make-accessor-subst name field tag-expr prefix fields))
 		fields)
 	 ,@(if ismutable
-	       (map (lambda (field) (make-modifier-def field tag prefix fields))
+	       (map (lambda (field) 
+		      (make-modifier-def name field tag-expr prefix fields))
 		    fields)
 	       '())
-	 ,@(if corelen `((compound-set-corelen! ',tag ,corelen)) '())
-	 ,@(if consfn `((compound-set-consfn! ',tag ,consfn)) '())
-	 ,@(if stringfn `((compound-set-stringfn! ',tag ,stringfn)) '())))))
+	 ,@(if corelen `((compound-set-corelen! ,tag-expr ,corelen)) '())
+	 ,@(if consfn `((compound-set-consfn! ,tag-expr ,consfn)) '())
+	 ,@(if stringfn `((compound-set-stringfn! ,tag-expr ,stringfn)) '())))))
 
 (module-export! '{defrecord})
 
