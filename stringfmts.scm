@@ -12,7 +12,8 @@
 		       $count $countstring
 		       $num $numstring
 		       $size $sizestring
-		       $bytes $bytestring})
+		       $bytes $bytestring
+		       $bytes/sec})
 
 ;; Percentages
 
@@ -97,22 +98,48 @@
 
 ;;; Byte sizes
 
-(define ($bytes bytes)
+(define ($bytes bytes (space " "))
+  (if (not space) (set! space ""))
   (if (<= bytes 4096)
-      (printout bytes " bytes")
+      (printout bytes space "bytes")
       (if (< bytes (* 1024 1024))
-	  (printout (printnum (/~ bytes 1024) 0) "KB")
-	  (printout (printnum (/~ bytes (* 1024 1024)) 1)
-	    "MB"))))
+	  (printout (printnum (/~ bytes 1024) 0) space "KiB")
+	  (if (< bytes (* 10 1024 1024 1024))
+	      (printout (printnum (/~ bytes (* 1024 1024)) 1)
+		space "MiB")
+	      (if (< bytes (* 10 1024 1024 1024 1024))	      
+		  (printout (printnum (/~ bytes (* 1024 1024 1024)) 1)
+		    space "GiB")
+		  (if (< bytes (* 10 1024 1024 1024 1024 1024))	      
+		      (printout (printnum (/~ bytes (* 1024 1024 1024 1024)) 1)
+			space "TiB")
+		      (printout 
+			(printnum (/~ bytes (* 1024 1024 1024 1024 1024)) 1)
+			space "PiB")))))))
 
-(define ($bytestring bytes)
-  (stringout
-    (if (<= bytes 4096)
-	(printout bytes " bytes")
-	(if (< bytes (* 1024 1024))
-	    (printout (printnum (/~ bytes 1024) 0) "KB")
-	    (printout (printnum (/~ bytes (* 1024 1024)) 1)
-	      "MB")))))
+(define ($bytestring bytes (space ""))
+  (stringout ($bytes bytes space)))
+
+(define ($bytes/sec bytes (secs #f) (rate))
+  (if secs 
+      (set! rate (/~ bytes secs))
+      (set! rate bytes))
+  (if (< rate 10000)
+      (printout (printnum rate 0) " bytes/sec")
+      (if (< rate (* 10 1024 1024))
+	  (printout (printnum (/~ rate 1024) 1) " KiB/sec")
+	  (if (< rate (* 10 1024 1024 1024))
+	      (printout (printnum (/~ bytes (* 1024 1024)) 1) 
+		" MiB/sec")
+	      (if (< rate (* 10 1024 1024 1024 1024))
+		  (printout (printnum (/~ bytes (* 1024 1024 1024)) 1)
+		    " GiB/sec")
+		  (if (< rate (* 10 1024 1024 1024 1024 1024))
+		      (printout (printnum (/~ bytes (* 1024 1024 1024 1024)) 1)
+			" TiB/sec")
+		      (printout 
+			(printnum (/~ bytes (* 1024 1024 1024 1024 1024)) 1)
+			" PiB/sec")))))))
 
 ;; Temporal intervals
 
