@@ -48,11 +48,12 @@
 			   (get (getopt default-opts 'custom {}) slot)
 			   #[]))
 	      (opts (cons custom indexopts))
-	      (path (getopt opts 'fullpath
-			    (mkpath dir (getopt opts 'basename
-						(glom prefix (downcase slot) ".index")))))
+	      (default-name (glom prefix (downcase slot) ".index"))
+	      (basefile (getopt opts 'basename default-name))
+	      (path (getopt opts 'fullpath (mkpath dir basefile)))
 	      (index #f))
-	 (when (and (config 'slotindex:restart #f)
+	 (when (and (getopt opts 'initialize 
+			    (config:boolean (config 'slotindex:initialize #f))) 
 		    (file-exists? path))
 	   (remove-file path))
 	 (unless (file-exists? path)
