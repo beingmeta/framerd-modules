@@ -104,19 +104,21 @@
 (define TiB (* 1024 1024 1024 1024))
 (define PiB (* 1024 1024 1024 1024 1024))
 
-(define ($bytes bytes (space " "))
+(define ($bytes bytes (space " ") (sign ""))
   (if (not space) (set! space ""))
+  (when (< bytes 0)
+    (set! sign "-") (set! bytes (- bytes)))
   (if (<= bytes 4096)
-      (printout bytes space "bytes")
+      (printout sign bytes space "bytes")
       (if (< bytes MiB)
-	  (printout (printnum (/~ bytes 1024) 1) space "KiB")
+	  (printout sign (printnum (/~ bytes 1024) 1) space "KiB")
 	  (if (< bytes (* 2 GiB))
-	      (printout (printnum (/~ bytes MiB) 1) space "MiB")
+	      (printout sign (printnum (/~ bytes MiB) 1) space "MiB")
 	      (if (< bytes (* 2 TiB))	      
-		  (printout (printnum (/~ bytes GiB) 1) space "GiB")
+		  (printout sign (printnum (/~ bytes GiB) 1) space "GiB")
 		  (if (< bytes (* 2 PiB))	      
-		      (printout (printnum (/~ bytes TiB) 1) space "TiB")
-		      (printout 
+		      (printout sign (printnum (/~ bytes TiB) 1) space "TiB")
+		      (printout  sign
 			(printnum (/~ bytes PiB) 1) space "PiB")))))))
 
 (define ($bytestring bytes (space ""))
