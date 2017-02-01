@@ -200,8 +200,8 @@
 	       (* 0.000000001 (try (get parses 'nanoseconds) 0))
 	       (* 0.000000000001 (try (get parses 'picoseconds) 0))
 	       )))
-      (if (number? val) va
-	  l
+      (if (number? val) 
+	  val
 	  (if (timestamp? val)
 	      (let ((dt (difftime val)))
 		(if (< dt 0) (- dt) dt))
