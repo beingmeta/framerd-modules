@@ -56,9 +56,10 @@
 			    (config:boolean (config 'slotindex:initialize #f))) 
 		    (file-exists? path))
 	   (remove-file path))
+	 (when (file-exists? path)
+	   (lognotice |UsingIndex| "Using the index at " path " for " slot))
 	 (unless (file-exists? path)
-	   (lognotice |NewIndex|
-	     "Creating new index for " slot " at " path)
+	   (lognotice |NewIndex| "Creating new index for " slot " at " path)
 	   (make-hash-index path (getopt opts 'size)
 			    (getopt opts 'flags '()) slot 
 			    (qc (getopt opts 'baseoids {})
