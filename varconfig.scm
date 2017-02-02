@@ -6,7 +6,8 @@
 (use-module '{logger reflection texttools})
 
 (module-export! '{varconfigfn varconfig! optconfigfn optconfig!})
-(module-export! '{config:boolean config:boolean+ config:boolean+parse
+(module-export! '{config:boolean config:boolean/not
+		  config:boolean+ config:boolean+parse
 		  config:number config:loglevel config:bytes config:interval
 		  config:goodstring config:symbol config:oneof
 		  config:boolset config:fnset})
@@ -79,6 +80,8 @@
 	((has-prefix (downcase val) "n") #f)
 	(else (begin (logwarn "Odd config:boolean specifier " (write val))
 		(fail)))))
+(define (config:boolean/not val)
+  (not (config:boolean val)))
 (define (config:boolean+ val)
   (cond ((not val) #f)
 	((and (not (string? val))
