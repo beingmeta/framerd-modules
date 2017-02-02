@@ -58,7 +58,7 @@
 (define printnum-sep ",")
 
 (define (printnum num (prec #f) (pad #f) (sep printnum-sep))
-  (cond ((< num 0) (printout "-" (printnum num prec sep)))
+  (cond ((< num 0) (printout "-" (printnum (- num) prec sep)))
 	((>= num 1000)
 	 (printnum (quotient~ num 1000) prec (>= num 1000000) sep)
 	 (printout sep (printnum (rem~ num 1000) prec #t)))
