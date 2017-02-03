@@ -376,7 +376,7 @@
       (cons head tail)))
 
 (define (ident x) x)
-(define (->rail x) (apply make-rail x))
+(define (->rail x) (apply make-rail (map qc x)))
 
 (defambda (tighten-call expr env bound opts lexrefs w/rails)
   (if (pair? expr)
@@ -390,7 +390,7 @@
 	   (tighten-args expr env bound opts lexrefs w/rails)))
       expr))
 (defambda (tighten-args expr env bound opts lexrefs w/rails)
-  (if (pair? expr)
+  (if (or (pair? expr) (rail? expr))
       (forseq (arg expr)
 	(if (or (qchoice? arg) (fail? arg)) 
 	    arg
@@ -712,22 +712,23 @@
 		      (cddr expr)))))
 
 (define (tighten-cond handler expr env bound opts lexrefs w/rails)
-  (cons handler (map (lambda (clause)
-		       (cond ((eq? (car clause) 'else)
-			      `(ELSE
-				,@(map (lambda (x)
-					 (dotighten x env bound opts lexrefs w/rails))
-				       (cdr clause))))
-			     ((and (pair? (cdr clause)) (eq? (cadr clause) '=>))
-			      `(,(dotighten (car clause) env bound opts lexrefs w/rails)
-				=>
-				,@(map (lambda (x)
-					 (dotighten x env bound opts lexrefs w/rails))
-				       (cddr clause))))
-			     (else (map (lambda (x)
-					  (dotighten x env bound opts lexrefs w/rails))
-					clause))))
-		     (cdr expr))))
+  (cons handler 
+	(map (lambda (clause)
+	       (cond ((eq? (car clause) 'else)
+		      `(ELSE
+			,@(map (lambda (x)
+				 (dotighten x env bound opts lexrefs w/rails))
+			       (cdr clause))))
+		     ((and (pair? (cdr clause)) (eq? (cadr clause) '=>))
+		      `(,(dotighten (car clause) env bound opts lexrefs w/rails)
+			=>
+			,@(map (lambda (x)
+				 (dotighten x env bound opts lexrefs w/rails))
+			       (cddr clause))))
+		     (else (map (lambda (x)
+				  (dotighten x env bound opts lexrefs w/rails))
+				clause))))
+	     (cdr expr))))
 
 (define (tighten-case handler expr env bound opts lexrefs w/rails)
   `(,handler ,(dotighten (cadr expr) env bound opts lexrefs w/rails)
