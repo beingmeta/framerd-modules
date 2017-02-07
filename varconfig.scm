@@ -166,8 +166,9 @@
 	     (* 1024 1024 1024 1024
 		(string->number (strip-suffix val  {"t" "tb" "tib"})))))
       (if (number? val) val
-	  (begin (logwarn "Odd config:bytes specifier " (write val))
-	    (fail)))))
+	  (if (not val) val
+	      (begin (logwarn "Odd config:bytes specifier " (write val))
+		(fail))))))
 
 (define interval-pats
   {#((label seconds #((isdigit+) (opt #("." (isdigit+)))) #t)
@@ -208,8 +209,9 @@
 	  (if (timestamp? val)
 	      (let ((dt (difftime val)))
 		(if (< dt 0) (- dt) dt))
-	      (begin (logwarn "Odd config:interval specifier " (write val))
-		(fail))))))
+	      (if (not val) val
+		  (begin (logwarn "Odd config:interval specifier " (write val))
+		    (fail)))))))
 
 (define (config:oneof . options)
   (let ((combined (for-choices (option (elts options))
