@@ -44,7 +44,7 @@
 (defambda (nstore! table slot value)
   (unless (fail? value) (store! table slot value)))
 
-(define (batch/read-state file . defaults)
+(defambda (batch/read-state file . defaults)
   (let* ((init-state (if (and file (file-exists? file))
 			 (file->dtype file)
 			 (apply frame-create #f defaults)))
