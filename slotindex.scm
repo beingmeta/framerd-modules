@@ -6,6 +6,7 @@
 (use-module '{logger varconfig})
 
 (module-export! '{slotindex/make slotindex/setup 
+		  slotindex/init slotindex/add!
 		  slot->index slot/index!
 		  slotindex/save!})
 
@@ -24,6 +25,9 @@
 
 (defambda (slotindex/make dir (opts (cons #[] default-opts))
 			  . slots)
+  (unless (pair? opts) 
+    (set! opts (cons opts default-opts)))
+
   (let ((prefix #f))
     (unless (position #\/ dir) (set! dir (mkpath rootdir dir)))
     (when (and (not (file-directory? dir))
@@ -34,15 +38,56 @@
     (let* ((base (frame-create #f  
 		   'slotindex 'slotindex 
 		   'directory dir 'prefix prefix
+		   'pools (use-pool (getopt opts 'pools))
+		   'custom #[]
 		   'opts opts)))
-      (do-choices (slot (pick (elts slots) symbol?))
-	(slotindex/setup base slot))
+      (do-choices (slot slots)
+	(if (or (symbol? slot) (oid? slot))
+	    (slotindex/setup base slot)
+	    (if (and (table? slot) (test slot 'slot))
+		(begin (store! (get base 'custom) 
+			       (get slot 'slot)
+			       slot)
+		  (slotindex/setup base slot))
+		(logwarn |SlotIndex/BadSlotSpec|
+		  "Couldn't handle " slot))
+	    (slotindex/setup base slot )))
       base)))
+
+(define (get-baseoids pool)
+  (let* ((oidbucket-size (config 'OIDBUCKETSIZE (* 1024 1024)))
+	 (base (pool-base pool))
+	 (capacity (pool-capacity pool))
+	 (n-buckets (quotient capacity oidbucket-size))
+	 (baseoids {}))
+    (dotimes (i n-buckets)
+      (set+! baseoids (oid-plus base (* i oidbucket-size))))
+    baseoids))
+
+(defambda (slotindex/init index)
+  (if (test index 'slots)
+      (let* ((copy (frame-create #f 
+		     'slotindex 'slotindex
+		     'directory (get index 'directory)
+		     'prefix (get index 'prefix)
+		     'opts (get index 'opts)
+		     'custom (get index 'custom))))
+	(do-choices (slot (get index 'slots))
+	  (slotindex/setup copy slot))
+	copy)
+      (irritant index |NotSlotIndex|)))
+
+(define (poolref spec dir)
+  (if (pool? spec) pool
+      (if (or (position #\@ spec) (position #\: spec)
+	      (has-prefix spec "/"))
+	  (use-pool spec)
+	  (use-pool (mkpath dir spec)))))
 
 (defslambda (slotindex/setup base slot)
   (try (get base slot)
        (let* ((dir (try (get base 'directory) rootdir))
-	      (prefix (try (get base 'prefix) prefix))
+	      (prefix (try (get base 'prefix) "slix_"))
 	      (indexopts (try (get base 'opts) (cons #[] default-opts)))
 	      (custom (try (get (getopt indexopts 'custom {}) slot)
 			   (get (getopt default-opts 'custom {}) slot)
@@ -50,6 +95,8 @@
 	      (opts (cons custom indexopts))
 	      (default-name (glom prefix (downcase slot) ".index"))
 	      (basefile (getopt opts 'basename default-name))
+	      (pools (poolref (choice (get base 'pools)
+				      (getopt opts 'pools {})) dir))
 	      (path (getopt opts 'fullpath (mkpath dir basefile)))
 	      (index #f))
 	 (when (and (getopt opts 'initialize 
@@ -63,11 +110,21 @@
 	   (make-hash-index path (getopt opts 'size)
 			    (getopt opts 'flags '()) slot 
 			    (qc (getopt opts 'baseoids {})
-				(pool-base (getopt opts 'pools {})))))
+				(get-baseoids pools))))
 	 (set! index (open-index path))
 	 (store! base slot index)
 	 (add! base 'slots slot)
 	 index)))
+
+(define (slotindex/add! index slot (opts #f))
+  (cond ((test index 'slots slot))
+	((index? opts)
+	 (add! index 'slots slot)
+	 (store! index slot index))
+	(opts
+	 (store! (get index 'custom) slot opts)
+	 (slotindex/setup index slot))
+	(else (slotindex/setup index slot))))
 
 (define (slot->index meta-index slot)
   (try (get meta-index slot)
@@ -86,17 +143,42 @@
 
 (define (slotindex/save! index)
   (cond ((index? index)
-	 (logwarn |IndexSave| "Saving " index))
+	 (logwarn |IndexSave| "Saving index as slotindex: " index)
+	 index)
 	((test index 'slotindex 'slotindex)
 	 (let* ((slots (get index 'slots))
 		(indices (get index (get index 'slots)))
-		(tosave (pick indices modified?)))
-	   (logwarn |IndexSave| 
-	     "Saving indices for " 
-	     (choice-size tosave) "/" (choice-size indices)
-	     " slots: " (do-choices (slot (pick slots index tosave) i)
-			  (printout (if (> i 0) ", ") slot)))
-	   (thread/join (thread/call commit indices))))
-	(else)))
+		(tosave (pick indices modified?))
+		(started (elapsed-time)))
+	   (when (fail? tosave)
+	     (logwarn |IndexSave| 
+	       "No modified indices for slots: " 
+	       (do-choices (slot slots i) 
+		 (printout (if (> i 0) ", ") slot))))
+	   (when (exists? tosave)
+	     (logwarn |IndexSave| "Saving " 
+		      (choice-size tosave) "/" (choice-size indices) 
+		      " indices for slots: "
+		      (do-choices (slot (pick slots index tosave) i)
+			(printout (if (> i 0) ", ") slot)))
+	     (let ((threads (thread/call commit tosave)))
+	       (logwarn |IndexSave| "Waiting for " 
+			(choice-size threads) " threads")
+	       (thread/join threads)
+	       (logwarn |IndexSave| 
+		 "Saved " (choice-size tosave) " indices in "
+		 (secs->string (elapsed-time started)))))
+	   (let ((export
+		  (frame-create #f
+		    'slotindex slotindex 'slots slots
+		    'custom (get index 'custom)
+		    'pools (choice (pickstrings (get index 'pools))
+				   (pool-source (pick (get index 'pools) pool?)))
+		    'opts (get index 'opts)
+		    'saved (gmtimestamp))))
+	     (do-choices (slot slots)
+	       (store! export slot (index-source (get index slot))))
+	     export)))
+	(else (irritant index '|NotSlotIndex|))))
 
 
