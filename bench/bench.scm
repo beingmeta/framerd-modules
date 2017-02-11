@@ -5,12 +5,12 @@
 
 (use-module 'optimize)
 
-(define (bench benchmark-name benchmark-thunk)
+(define (bench benchmark-name benchmark-thunk (repeat 5))
   (let ((start (timestamp)))
-    (dotimes (i 5) (benchmark-thunk))
+    (dotimes (i repeat) (benchmark-thunk))
     (let ((time (difftime (timestamp) start)))
-      (lineout "Benchmark " benchmark-name
-	       " took " time " seconds"))))
+      (lineout "Benchmark " benchmark-name 
+	" (" repeat " cylces) took " time " seconds"))))
 
 (module-export! '{bench})
 
