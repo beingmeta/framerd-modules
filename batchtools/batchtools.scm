@@ -5,6 +5,11 @@
 
 (use-module '{logger stringfmts varconfig slotindex})
 
+(define %volatile '{maxtime maxmem maxvmem maxload maxcount 
+		    saving last-save save-frequency
+		    pre-save post-save
+		    task-state init-state})
+
 (define start-time (elapsed-time))
 
 (define-init maxtime #f)
@@ -22,11 +27,11 @@
 (define-init maxcount #f)
 (varconfig! maxcount maxcount)
 
-(define-init lastlog (elapsed-time))
+(define-init last-log (elapsed-time))
 (define-init log-frequency 60)
 (varconfig! logfreq log-frequency config:interval)
 
-(define-init saving #f)
+(define-init saving 300)
 (define-init last-save (elapsed-time))
 (define-init save-frequency #f)
 (varconfig! savefreq save-frequency config:interval)
@@ -84,11 +89,12 @@
 
 (define (batch/finished? (state task-state))
   (or finished
-      (exists batch/threshtest "Time" (elapsed-time start) maxtime secs->string)
+      (exists batch/threshtest "Time" 
+	      (elapsed-time start-time) maxtime secs->string)
       (exists batch/threshtest "Memory" (memusage) maxmem $bytes)
       (exists batch/threshtest "VMEM" (vmemusage) maxvmem $bytes)
-      (exists batch/threshtest "LOAD" (get (rusage) 'load) maxload)
       (exists batch/threshtest "Progress" (get state 'progress) maxcount)
+      (exists batch/threshtest "LOAD" (get (rusage) 'load) maxload)
       (exists test-limit state tasklimits)))
 
 (define-init finished #f)
@@ -116,6 +122,7 @@
 ;;; Regular checkins
 
 (defslambda (batch/checkin delta (state task-state))
+  (warn%watch "BATCH/CHECKIN" delta)
   (if (table? delta)
       (do-choices (key (getkeys delta))
 	(let ((dv (get delta key)))
@@ -129,10 +136,11 @@
   (unless finished
     (when (batch/finished? task-state)
       (set! finished #t))
-    (when (and logfreq (> (elapsed-time last-log) logfreq))
+    (when (and log-frequency (> (elapsed-time last-log) log-frequency))
       (batch/log! state))
-    (when (and savefreq (not saving) (not (zero? savefreq))
-	       (> (elapsed-time last-save) savefreq) 
+    (when (and save-frequency (not saving) 
+	       (not (zero? save-frequency))
+	       (> (elapsed-time last-save) save-frequency) 
 	       (getsavelock))
       (batch/save! state))))
 
