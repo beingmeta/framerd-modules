@@ -24,7 +24,6 @@
 (define-init useopcodes #t)
 (define-init optdowarn #t)
 (define-init lexrefs-dflt #t)
-(define-init static-modules #f)
 (varconfig! optimize:lexrefs lexrefs-dflt)
 
 (defslambda (codewarning warning)
@@ -305,8 +304,7 @@
 					     `(,%modref ,from ,head))
 					    (else value))
 				      n-exprs))
-				 (tighten-args (cdr expr) env bound opts lexrefs)
-				))
+				 (tighten-args (cdr expr) env bound opts lexrefs)))
 		      ((and (singleton? value) (applicable? value))
 		       (cons value (cdr (->list expr))))
 		      ((ambiguous? value)
