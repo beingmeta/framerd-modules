@@ -25,7 +25,7 @@
 (define-init optdowarn #t)
 (define-init lexrefs-dflt #t)
 (define-init staticfns-default #f)
-(define-init fcnrefs-default #f)
+(define-init fcnrefs-default #t)
 (varconfig! optimize:lexrefs lexrefs-dflt)
 (varconfig! optimize:staticfns staticfns-default)
 (varconfig! optimize:fcnrefs fcnrefs-default)
