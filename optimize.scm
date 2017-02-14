@@ -24,8 +24,11 @@
 (define-init useopcodes #t)
 (define-init optdowarn #t)
 (define-init lexrefs-dflt #t)
-(define-init static-modules #f)
+(define-init staticfns-dflt #f)
+(define-init usefcnids-dflt #f)
 (varconfig! optimize:lexrefs lexrefs-dflt)
+(varconfig! optimize:staticfns staticfns-dflt)
+(varconfig! optimize:fcnids usefcnids-dflt)
 
 (defslambda (codewarning warning)
   (debug%watch "CODEWARNING" warning)
@@ -48,6 +51,10 @@
 	  (val (set! optdowarn #t))
 	  (else (set! optdowarn #f)))))
 (config-def! 'optdowarn optdowarn-config)
+
+(define-init static-refs (make-hashtable))
+
+(define-init fcnids (make-hashtable))
 
 (module-export! '{optimize! optimized optimized?
 		  optimize-procedure! optimize-module!
@@ -88,6 +95,44 @@
 	      (isbound? var (cdr bindlist))
 	      (or (eq? (car bindlist) var)
 		  (isbound? var (cdr bindlist)))))))
+
+;;; Converting non-lexical function references
+
+(define (fcnref value sym env opts)
+  (if (and (applicable? value) (cons? value))
+      (let ((usevalue
+	     (if (getopt opts 'staticfns staticfns-dflt)
+		 (static-ref value)
+		 value)))
+	(if (and (symbol? sym) 
+		 (test env sym value)
+		 (getopt opts 'fcnids usefcnids-dflt))
+	    (try (get fcnids (cons sym env))
+		 (add-fcnid sym env value))
+	    value))
+      value))
+
+(defslambda (add-fcnid sym env value)
+  (try (get fcnids (cons sym env))
+       (let ((newid (fcnid/register value)))
+	 (store! fcnids (cons sym env) newid)
+	 newid)))
+
+(define (static-ref ref)
+  (if (static? ref) ref
+      (try (get static-refs ref)
+	   (make-static-ref ref))))
+
+(defslambda (make-static-ref ref)
+  (try (get static-refs ref)
+       (let ((copy (static-copy ref)))
+	 (if (eq? copy ref) ref
+	     (begin (store! static-refs ref copy)
+	       copy)))))
+
+(defslambda (update-fcnid! var env value)
+  (when (test env var value)
+    (let ((id (try (get ) (fcnid/register)))))))
 
 ;;; Opcode mapping
 
@@ -297,14 +342,16 @@
 			   (codewarning (list 'TOOMANYARGS expr value))
 			   (warning "The call to " expr " provides too many "
 				    "arguments (" n-exprs ") for " value)))
-		       (callcons (qc (map-opcode
-				      (cond ((not from) (try value head))
-					    ((fail? value) `(,%modref ,from ,head))
-					    ((test from '%nosubst head) head)
-					    ((test from '%volatile head)
-					     `(,%modref ,from ,head))
-					    (else value))
-				      n-exprs))
+		       (callcons (qc (fcnref
+				      (map-opcode
+				       (cond ((not from) (try value head))
+					     ((fail? value) `(,%modref ,from ,head))
+					     ((test from '%nosubst head) head)
+					     ((test from '%volatile head)
+					      `(,%modref ,from ,head))
+					     (else value))
+				       n-exprs)
+				      head from opts))
 				 (tighten-args (cdr expr) env bound opts lexrefs)
 				))
 		      ((and (singleton? value) (applicable? value))
@@ -444,7 +491,9 @@
       (let ((value (get module var)))
 	(when (and (exists? value) (compound-procedure? value))
 	  (set! count (1+ count))
-	  (optimize-procedure! value opts lexrefs))))
+	  (optimize-procedure! value opts lexrefs))
+	(when (and (exists? value) (applicable? value))
+	  (add-fcnid var module value))))
     (when (exists symbol? (get module '%moduleid))
       (let* ((referenced-modules (get module '%used_modules))
 	     (used-modules
