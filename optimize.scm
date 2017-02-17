@@ -741,7 +741,7 @@
 
 (define (optimize-case handler expr env bound opts lexrefs)
   `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
-	     ,@(forseq (clause (caddr expr))
+	     ,@(forseq (clause (cddr expr))
 		 (cons (car clause)
 		       (forseq (x (cdr clause))
 			 (optimize x env bound opts lexrefs))))))
