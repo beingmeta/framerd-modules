@@ -78,7 +78,7 @@
       (irritant index |NotSlotIndex|)))
 
 (define (poolref spec dir)
-  (if (pool? spec) pool
+  (if (pool? spec) spec
       (if (or (position #\@ spec) (position #\: spec)
 	      (has-prefix spec "/"))
 	  (use-pool spec)
@@ -172,7 +172,7 @@
 		 (secs->string (elapsed-time started)))))
 	   (let ((export
 		  (frame-create #f
-		    'slotindex slotindex 'slots slots
+		    'slotindex 'slotindex 'slots slots
 		    'custom (get index 'custom)
 		    'pools (choice (pickstrings (get index 'pools))
 				   (pool-source (pick (get index 'pools) pool?)))
