@@ -10,6 +10,8 @@
 		    pre-save post-save
 		    task-state init-state})
 
+(define %loglevel %notice%)
+
 (define start-time (elapsed-time))
 
 (define-init maxtime #f)
@@ -122,7 +124,7 @@
 ;;; Regular checkins
 
 (defslambda (batch/checkin delta (state task-state))
-  (warn%watch "BATCH/CHECKIN" delta)
+  (info%watch "BATCH/CHECKIN" delta)
   (if (table? delta)
       (do-choices (key (getkeys delta))
 	(let ((dv (get delta key)))
