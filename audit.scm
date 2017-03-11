@@ -4,7 +4,7 @@
 (in-module 'audit)
 
 ;;; This provides for both audited edits and for assertions and
-;;; retractions which respects audited values.
+;;; retractions which respect audited values.
 
 (use-module '{brico brico/indexing logger})
 
@@ -106,7 +106,7 @@
   (notify "Generating audit index for " (write file))
   (let ((v (file->dtype file))
 	(ai (frame-create #f)))
-    (when (and (test v 'pools) (test v 'indices))
+    (when (and (test v 'pools) (test v 'indexes))
       (notify "Assuming " file " is a USEDB database description")
       (do-choices (poolspec (get v 'pools))
 	(add! ai '%pools
@@ -115,7 +115,7 @@
 		      (use-pool poolspec)
 		      (use-pool (get-component poolspec file)))
 		  (tryif (pool? poolspec) poolspec))))
-      (do-choices (ixspec (get v 'indices))
+      (do-choices (ixspec (get v 'indexes))
 	(when (and (string? ixspec) (not (position #\@ ixspec)))
 	  (let ((ix (if (has-prefix ixspec "/")
 			(open-index ixspec)

@@ -59,7 +59,7 @@
     (store! state 'init init-state)
     (when file (store! state 'statefile file))
     (nstore! state 'pools (use-pool (get state 'pools)))
-    (nstore! state 'indices (open-index (get state 'indices)))
+    (nstore! state 'indexes (open-index (get state 'indexes)))
     (nstore! state 'objects
 	     (for-choices (obj (get state 'objects))
 	       (if (and (string? obj) (file-exists? obj))
@@ -160,7 +160,7 @@
 		  (choice
 		   (for-choices (pool (get state 'pools))
 		     (threadcall commit-pool pool))
-		   (for-choices (index (get state 'indices))
+		   (for-choices (index (get state 'indexes))
 		     (threadcall commit index))
 		   (for-choices (file.object (get state 'objects))
 		     (threadcall dtype->file 
@@ -175,8 +175,8 @@
 	     (let ((state-copy (deep-copy state)))
 	       (store! state-copy 'pools
 		       (pool-source (get state-copy 'pools)))
-	       (store! state-copy 'indices
-		       (index-source (get state-copy 'indices)))
+	       (store! state-copy 'indexes
+		       (index-source (get state-copy 'indexes)))
 	       (store! state-copy 'objects (car (get state-copy 'objects)))
 	       (store! state-copy 'elapsed 
 		       (+ (elapsed-time start-time) 

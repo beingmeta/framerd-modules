@@ -5,7 +5,7 @@
 
 ;;; This provides a layer for accessing database configurations.
 ;;;  Currently, it just allows for configurations specifying pools
-;;;  and indices, but the intent is to keep information relevant to
+;;;  and indexes, but the intent is to keep information relevant to
 ;;;  journalling and syncing in this same data structure.
 
 (module-export! 'usedb)
@@ -47,18 +47,22 @@
 		  (let ((dbdata (file->dtype dbname)))
 		    (do-choices (pool (get dbdata 'pools))
 		      (add! dbdata '%pools (use-component use-pool pool dbname)))
-		    (do-choices (index (get dbdata 'indices))
-		      (add! dbdata '%indices (use-component use-index index dbname)))
+		    (do-choices (index (get dbdata '{indexes indices}))
+		      (add! dbdata '%indexes 
+			    (use-component use-index index dbname)))
 		    (do-choices (config (get dbdata 'configs))
 		      (cond ((not (pair? config)))
-			    ((and (pair? (cdr config)) (eq? (cadr config) 'FILE))
-			     (config! (car config) (get-component (third config) dbname)))
+			    ((and (pair? (cdr config))
+				  (eq? (cadr config) 'FILE))
+			     (config! (car config)
+				      (get-component (third config) dbname)))
 			    (else (config! (car config) (cdr config)))))
 		    (let ((mi (get dbdata 'metaindex))
 			  (rmi (make-hashtable)))
 		      (do-choices (slotid (getkeys mi))
 			(let ((index (get mi slotid)))
-			  (add! rmi slotid (use-component open-index index dbname #f))))
+			  (add! rmi slotid
+				(use-component open-index index dbname #f))))
 		      (add! dbdata '%metaindex rmi))
 		    dbdata))
 	     dbname))))
@@ -68,7 +72,7 @@
   (use-pool (stringout name ".pool"))
   (use-index (stringout name ".index"))
   `#[POOLS ,(use-pool (stringout name ".pool"))
-     INDICES ,(open-index (stringout name ".index"))])
+     INDEXES ,(open-index (stringout name ".index"))])
 
   
 

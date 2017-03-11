@@ -47,7 +47,7 @@
 		    (file-exists? (string-append val ".db"))))
 	   (set! bricosource val)
 	   (set! brico.db (usedb val))
-	   (set! brico-index (get brico.db '%indices))
+	   (set! brico-index (get brico.db '%indexes))
 	   (set! brico-pool (name->pool "brico.framerd.org"))
 	   (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
 	   (set! names-pool (name->pool "namedb.beingmeta.com"))
@@ -107,7 +107,7 @@
    (store! gloss-map (get l 'key) l))
  (do-choices (l (?? 'type 'norm))
    (store! norm-map (get l 'key) l))
- (do-choices (l (?? 'type 'indices))
+ (do-choices (l (?? 'type 'indexes))
    (store! index-map (get l 'key) l))
  (do-choices (l (?? 'type 'fragments))
    (store! index-map (get l 'key) l)))
@@ -400,7 +400,7 @@
 
 (define (prefetch-slots!)
   "Prefetches all known slot OIDs.  This is helpful for prefetch testing."
-  (prefetch-oids! (?? 'type '{slot language gloss indices})))
+  (prefetch-oids! (?? 'type '{slot language gloss indexes})))
 
 ;;; Display an expansion string for a concept in a language
 
