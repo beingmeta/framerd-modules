@@ -14,7 +14,7 @@
  '{knodule/ref get-knodule
    kno/dterm kno/dref kno/ref kno/probe knodule?
    kno/add! kno/drop! kno/replace! kno/onadd! kno/ondrop! kno/find
-   kno/index-string kno/string-indices
+   kno/index-string kno/string-indexes
    kno/phrasemap
    kno/slotid kno/slotids kno/slotnames kno/relcodes
    knodule-name knodule-opts knodule-language
@@ -22,7 +22,7 @@
    knodule-alldterms knodule-allterms knodule-dterms knodule-drules
    knodule-prime
    default-knodule knodules kno/set-dterm!
-   knodule:pool knodule:index knodule:indices
+   knodule:pool knodule:index knodule:indexes
    knodule! ->knodule iadd!
    kno/restore kno/dump 
    kno/dumper kno/undumper
@@ -55,12 +55,12 @@
 	      (cond ((string? val) (open-index val))
 		    ((index? val) val)
 		    (else (make-hashtable))))
-	(set+! knodule:indices knodule:index))
+	(set+! knodule:indexes knodule:index))
       knodule:index))
 (config-def! 'KNO:INDEX knodule-index-config)
 
-(define-init knodule:indices knodule:index)
-(varconfig! KNO:INDICES knodule:indices open-index choice)
+(define-init knodule:indexes knodule:index)
+(varconfig! KNO:INDEXES knodule:indexes open-index choice)
 
 (define-init knodule:language 'en)
 (varconfig! KNO:LANG knodule:language)
@@ -163,7 +163,7 @@
 	 (drules (knodule-drules new))
 	 (kdterms (knodule-dterms new)))
     (store! knodules (choice oid name) new)
-    (let ((dterms (find-frames knodule:indices 'knodule oid)))
+    (let ((dterms (find-frames knodule:indexes 'knodule oid)))
       (prefetch-oids! dterms)
       (hashset-add! (knodule-alldterms new) dterms)
       (do-choices (dterm dterms)
@@ -180,7 +180,7 @@
 (define (knodule/ref name (pool knodule:pool) (opts #{}))
   (try (tryif (knodule? name) name)
        (get knodules name)
-       (let ((existing (find-frames knodule:indices 'knoname name)))
+       (let ((existing (find-frames knodule:indexes 'knoname name)))
 	 (if (exists? existing)
 	     (restore-knodule existing)
 	     (new-knodule name pool (qc opts))))))
@@ -197,7 +197,7 @@
 	 (get knodules (get object 'knodule)))
        (get knodules object)
        (restore-knodule
-	(find-frames knodule:indices 'knoname object))))
+	(find-frames knodule:indexes 'knoname object))))
 
 ;;; Creating and referencing dterms
 
@@ -405,7 +405,7 @@
 	    (textsubst string
 		       #((subst "." "") {(spaces) (eos) (eol)})))))
 
-(defambda (kno/string-indices value (phonetic #f))
+(defambda (kno/string-indexes value (phonetic #f))
   (let* ((values (stdspace value))
 	 (expvalues (choice values (basestring values) ))
 	 (normvalues (capitalize (pick expvalues somecap?)))
@@ -419,7 +419,7 @@
   (default! value (get f slotid))
   (default! knodule (get knodules (get f 'knodule)))
   (default! index (knodule-index knodule))
-  (add! index (cons slotid (kno/string-indices value)) f))
+  (add! index (cons slotid (kno/string-indexes value)) f))
 
 ;;; Find and edit operations on dterms
 
@@ -589,7 +589,7 @@
   (let* ((knodule (get knodules (get frame 'knodule)))
 	 (index (knodule-index knodule)))
     ;; Index expanded vales (including metaphone hashes)
-    (add! index (cons slotid (kno/string-indices value)) frame)
+    (add! index (cons slotid (kno/string-indexes value)) frame)
     ;; Update the phrasemap
     (when (compound? value)
       (let ((wordv (words->vector value))
@@ -601,8 +601,8 @@
 
 (defambda (drop-phrase! frame slotid value (mirror))
   (let* ((knodule (get knodules (get frame 'knodule)))
-	 (excur (kno/string-indices (get frame slotid)))
-	 (exdrop (kno/string-indices value))
+	 (excur (kno/string-indexes (get frame slotid)))
+	 (exdrop (kno/string-indexes value))
 	 (index (knodule-index knodule)))
     ;; Update the index, noting that some expanded values
     ;;  may still apply after the drop

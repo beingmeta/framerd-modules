@@ -22,8 +22,8 @@
 	 (stringout base "(" i ")")))))
 
 (define (brico->kno bf knodule (create #f))
-  (try (find-frames knodule:indices 'oid bf)
-       (find-frames knodule:indices
+  (try (find-frames knodule:indexes 'oid bf)
+       (find-frames knodule:indexes
 	 'oid bf 'knodule (knodule-oid knodule))
        (tryif create
 	 (let* ((language (knodule-language knodule))

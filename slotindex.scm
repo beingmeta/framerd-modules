@@ -149,18 +149,18 @@
 	 index)
 	((test index 'slotindex 'slotindex)
 	 (let* ((slots (get index 'slots))
-		(indices (get index (get index 'slots)))
-		(tosave (pick indices modified?))
+		(indexes (get index (get index 'slots)))
+		(tosave (pick indexes modified?))
 		(started (elapsed-time)))
 	   (when (fail? tosave)
 	     (logwarn |IndexSave| 
-	       "No modified indices for slots: " 
+	       "No modified indexes for slots: " 
 	       (do-choices (slot slots i) 
 		 (printout (if (> i 0) ", ") slot))))
 	   (when (exists? tosave)
 	     (logwarn |IndexSave| "Saving " 
-		      (choice-size tosave) "/" (choice-size indices) 
-		      " indices for slots: "
+		      (choice-size tosave) "/" (choice-size indexes) 
+		      " indexes for slots: "
 		      (do-choices (slot (pick slots index tosave) i)
 			(printout (if (> i 0) ", ") slot)))
 	     (let ((threads (thread/call commit tosave)))
@@ -168,7 +168,7 @@
 			(choice-size threads) " threads")
 	       (thread/join threads)
 	       (logwarn |IndexSave| 
-		 "Saved " (choice-size tosave) " indices in "
+		 "Saved " (choice-size tosave) " indexes in "
 		 (secs->string (elapsed-time started)))))
 	   (let ((export
 		  (frame-create #f

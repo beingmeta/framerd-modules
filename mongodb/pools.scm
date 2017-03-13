@@ -159,22 +159,22 @@
 
 ;;; Defining adjunct slots of various kinds
 
-(define-init adjunct-indices (make-hashtable))
+(define-init adjunct-indexes (make-hashtable))
 
 (define (mgo/adjslot pool slot qcoll query (extract '_id))
-  (let ((spec (get adjunct-indices (vector pool slot))))
-    (debug%watch "MGO/ADJSLOT" spec pool slot (test adjunct-indices spec))
+  (let ((spec (get adjunct-indexes (vector pool slot))))
+    (debug%watch "MGO/ADJSLOT" spec pool slot (test adjunct-indexes spec))
     (if (and (exists? spec)
 	     (equal? spec (vector pool slot qcoll query extract))
-	     (test adjunct-indices spec))
-	(get adjunct-indices spec)
+	     (test adjunct-indexes spec))
+	(get adjunct-indexes spec)
 	(let ((adjunct (make-adjslot pool slot qcoll query extract)))
 	  (when (exists? spec)
 	    (logwarn |AdjunctRedefine| "Redefining the adjunct slot " 
 		     slot " of " pool " with difference parameters:"
 		     "\n old: " spec
-		     "\n new: " (get adjunct-indices (vector pool slot)))
-	    (drop! adjunct-indices spec))
+		     "\n new: " (get adjunct-indexes (vector pool slot)))
+	    (drop! adjunct-indexes spec))
 	  adjunct))))
 
 (define (make-adjslot pool slot qcoll query extract)
@@ -192,8 +192,8 @@
 	      (glom (pool-id pool) "/" slot)))
 	 (adjunct (cons-extindex name fetchfn #f qcoll #t)))
     (info%watch "MAKE-ADJSLOT/setup" adjunct name coll fetchfn)
-    (store! adjunct-indices (vector pool slot qcoll query extract) adjunct)
-    (store! adjunct-indices (vector pool slot) 
+    (store! adjunct-indexes (vector pool slot qcoll query extract) adjunct)
+    (store! adjunct-indexes (vector pool slot) 
 	    (vector pool slot qcoll query extract))
     (use-adjunct adjunct slot pool)
     adjunct))

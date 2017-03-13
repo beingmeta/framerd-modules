@@ -2,7 +2,7 @@
 ;;; Copyright (C) 2005-2017 beingmeta, inc.  All rights reserved.
 
 (in-module 'brico/indexing)
-;;; Functions for generating BRICO indices
+;;; Functions for generating BRICO indexes
 
 (use-module '{brico texttools})
 
@@ -25,7 +25,7 @@
 ;;; Indexing functions
 
 ;;; This optionally takes a slotmap as an index, where the slotmap
-;;;  maps slot values to indices.
+;;;  maps slot values to indexes.
 (defambda (doindex index frame slotids (values) (inverse #f))
   (if (index? index)
       (if (bound? values)
@@ -268,7 +268,7 @@
   (do-choices (xlation (get concept '%norm))
     (let ((lang (get norm-map (car xlation))))
       (index-string index concept lang (cdr xlation))))
-  (do-choices (xlation (get concept '%indices))
+  (do-choices (xlation (get concept '%indexes))
     (let ((lang (get index-map (car xlation))))
       (index-string index concept lang (cdr xlation)))))
 

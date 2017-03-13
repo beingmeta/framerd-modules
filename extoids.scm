@@ -21,13 +21,13 @@
 (define-init store-procs (make-hashtable))
 (define-init add-procs (make-hashtable))
 (define-init drop-procs (make-hashtable))
-(define-init get-indices (make-hashtable))
+(define-init get-indexes (make-hashtable))
 (define-init typefns (make-hashtable))
 (store! typefns 'boolean true?)
 
 (define (xo/decache! oid (slotid #f))
   (if slotid
-      (extindex-decache! (get get-indices (cons (getpool oid) slotid))
+      (extindex-decache! (get get-indexes (cons (getpool oid) slotid))
 			 oid)
       (swapout oid)))
 
@@ -45,7 +45,7 @@
 		    (irritant method |EXTOID method|
 			      "Invalid STORE method for " oid " and " slotid))
 		(store-with-edits oid slotid value))
-	  (extindex-decache! (get get-indices (cons (getpool oid) slotid))
+	  (extindex-decache! (get get-indexes (cons (getpool oid) slotid))
 			     oid)))))
   (store! (oid-value oid) slotid value))
 (defambda (xo/add! oid slotid value)
@@ -62,7 +62,7 @@
 		  (irritant method |EXTOID method|
 			    "Invalid ADD method for " oid " and " slotid))
 	      (add-with-store oid slotid value)))
-	(extindex-decache! (get get-indices (cons (getpool oid) slotid))
+	(extindex-decache! (get get-indexes (cons (getpool oid) slotid))
 			   oid))))
   (add! (oid-value oid) slotid value))
 (defambda (xo/drop! oid slotid (value))
@@ -82,7 +82,7 @@
 	    (if (bound? value)
 		(drop-with-store oid slotid value)
 		(xo/store! oid slotid {}))))
-      (extindex-decache! (get get-indices (cons (getpool oid) slotid))
+      (extindex-decache! (get get-indexes (cons (getpool oid) slotid))
 			 oid)))
   (if (bound? value)
       (drop! (oid-value oid) slotid value)
@@ -195,7 +195,7 @@
 					      (cons #[%merge #t] sqlmap))
 					  (pool-base pool))
 			      cache)))
-    (store! get-indices (cons pool slotid) index)
+    (store! get-indexes (cons pool slotid) index)
     (use-adjunct index slotid pool)))
 
 #|
@@ -219,17 +219,17 @@
 			(lambda (x) (get normalize (rawgetter x))))
 		       (else rawgetter)))
 	 (index (cons-extindex (stringout slotid) getter #f #f cache)))
-    (store! get-indices (cons pool slotid) index)
+    (store! get-indexes (cons pool slotid) index)
     (use-adjunct index slotid pool)))
 |#
 
 (defambda (xo/defgetstore pool slotid index)
-  (store! get-indices (cons pool slotid) index))
+  (store! get-indexes (cons pool slotid) index))
 
 (defambda (xo/defget! slotid methods (pool #f))
   (let ((index (cons-extindex (stringout slotid) methods #f)))
     (do-choices slotid
       (do-choices pool
-	(store! get-indices (cons pool slotid) index)
+	(store! get-indexes (cons pool slotid) index)
 	(use-adjunct index slotid pool)))))
 
