@@ -120,7 +120,7 @@
 	  (let ((ix (if (has-prefix ixspec "/")
 			(open-index ixspec)
 			(open-index (get-component ixspec file)))))
-	    (add! ai (elts (onerror (hash-index-slotids ix) {})) ix)))))
+	    (add! ai (elts (onerror (index-slotids ix) {})) ix)))))
     ai))
 
 (define (config-auditindex var (val))
