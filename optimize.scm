@@ -173,19 +173,6 @@
       (add! opcode-map prim (make-opcode code))))
 
 (when (bound? make-opcode)
-  (def-opcode QUOTE      0x00)
-  (def-opcode BEGIN      0x01)
-  (def-opcode AND        0x02)
-  (def-opcode OR         0x03)
-  (def-opcode NOT        0x04)
-  (def-opcode FAIL       0x05)
-  (def-opcode %MODREF    0x06)
-  (def-opcode COMMENT    0x07)
-
-  (def-opcode IF         0x10)
-  (def-opcode WHEN       0x11)
-  (def-opcode UNLESS     0x12)
-  (def-opcode IFELSE     0x13)
 
   (def-opcode AMBIGUOUS? 0x20 1)
   (def-opcode SINGLETON? 0x21 1)
