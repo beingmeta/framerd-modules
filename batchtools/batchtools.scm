@@ -30,12 +30,12 @@
 (varconfig! maxcount maxcount)
 
 (define-init last-log (elapsed-time))
-(define-init log-frequency 60)
+(define-init log-frequency 30)
 (varconfig! logfreq log-frequency config:interval)
 
-(define-init saving 300)
+(define-init saving #f)
 (define-init last-save (elapsed-time))
-(define-init save-frequency #f)
+(define-init save-frequency 300)
 (varconfig! savefreq save-frequency config:interval)
 
 (define-init pre-save #f)
@@ -73,7 +73,10 @@
     (nstore! state 'slotindex
 	     (slotindex/init (get state 'slotindex)))
     (unless (test state 'begun) (store! state 'begun (timestamp)))
-    (store! state 'process-count (1+ (try (get state 'process-count) 0)))
+    (store! state 'count (1+ (try (get state 'count) 0)))
+    (store! state 'words (1+ (try (get state 'words) 0)))
+    (store! state 'sentences (1+ (try (get state 'sentences) 0)))
+    (unless (file-exists? file) (dtype->file init-state file))
     state))
 
 (define (batch/start! (state task-state) . defaults)
@@ -139,6 +142,7 @@
     (when (batch/finished? task-state)
       (set! finished #t))
     (when (and log-frequency (> (elapsed-time last-log) log-frequency))
+      (set! last-log (elapsed-time))
       (batch/log! state))
     (when (and save-frequency (not saving) 
 	       (not (zero? save-frequency))
@@ -162,6 +166,9 @@
 		     (threadcall commit-pool pool))
 		   (for-choices (index (get state 'indexes))
 		     (threadcall commit index))
+		   (for-choices (index (get (get state 'slotindex)
+					    (get (get state 'slotindex) 'slots)))
+		     (threadcall commit index))
 		   (for-choices (file.object (get state 'objects))
 		     (threadcall dtype->file 
 				 (deep-copy (cdr file.object))
@@ -181,6 +188,8 @@
 	       (store! state-copy 'elapsed 
 		       (+ (elapsed-time start-time) 
 			  (try (get state 'elapsed) 0)))
+	       (drop! (get state-copy 'slotindex)
+		      (get (get state-copy 'slotindex) 'slots))
 	       (dtype->file state-copy (get state-copy 'statefile)))))))
 
 (defslambda (getsavelock)
