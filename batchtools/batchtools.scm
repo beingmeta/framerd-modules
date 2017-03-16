@@ -164,6 +164,7 @@
 	 (set! saving #f))
 	(else
 	 (lognotice |BatchSave| "Saving task databases")
+	 (set! last-save (elapsed-time))
 	 (let ((threads
 		(choice
 		 (for-choices (pool (get state 'pools))
@@ -194,7 +195,8 @@
 			(try (get state 'elapsed) 0)))
 	     (drop! (get state-copy 'slotindex)
 		    (get (get state-copy 'slotindex) 'slots))
-	     (dtype->file state-copy (get state-copy 'statefile)))))))
+	     (dtype->file state-copy (get state-copy 'statefile)))
+	   (set! saving #f)))))
 
 (defslambda (batch/finish! (state batch-state) (sleep-for 4))
   (while saving
