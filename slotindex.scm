@@ -7,6 +7,7 @@
 
 (module-export! '{slotindex/make slotindex/setup 
 		  slotindex/init slotindex/add!
+		  slotindex/branch slotindex/merge!
 		  slot->index slot/index!
 		  slotindex/save!})
 
@@ -86,6 +87,7 @@
 
 (defslambda (slotindex/setup base slot)
   (try (pick (get base slot) index?)
+       (pick (get base slot) hashtable?)
        (let* ((dir (try (get base 'directory) rootdir))
 	      (prefix (try (get base 'prefix) "slix_"))
 	      (indexopts (try (get base 'opts) (cons #[] default-opts)))
@@ -114,7 +116,7 @@
 			    offtype ,(getopt opts 'offtype 'b40)
 			    slotids #(,slot)])
 		   (baseoids {(getopt opts 'baseoids {})
-			       (get-baseoids pools)}))
+			      (get-baseoids pools)}))
 	       (lognotice |NewIndex| "Creating new index for " slot " at " path)
 	       (when (exists? baseoids) (store! opts 'baseoids baseoids))
 	       (set! index (make-index path opts))))
@@ -134,7 +136,9 @@
 
 (define (slot->index meta-index slot)
   (try (get meta-index slot)
-       (slotindex/setup meta-index slot)))
+       (if (get meta-index 'root)
+	   (setup-branch-index meta-index slot)
+	   (slotindex/setup meta-index slot))))
 
 (defambda (slot/index! index frames slots (values))
   (if (index? index)
@@ -187,4 +191,40 @@
 	     export)))
 	(else (irritant index '|NotSlotIndex|))))
 
+(define (slotindex/branch slotindex)
+  (let ((branch (frame-create #f 
+		  'slotindex 'slotindex
+		  'slots (get slotindex 'slots)
+		  'root slotindex)))
+    (do-choices (slot (get slotindex 'slots))
+      (let ((index (slot->index slotindex slot)))
+	(store! branch slot (make-hashtable))))
+    branch))
 
+(defslambda (setup-branch-index branch-index slot)
+  (try
+   (get branch-index slot)
+   (begin (slot->index (get branch-index 'root) slot)
+     (store! branch-index slot (make-hashtable))
+     (get branch-index slot))))
+
+(define (slotindex/merge! branch (parallel #f) (root) (count 0))
+  (when (and (test branch 'slotindex 'slotindex)
+	     (test branch 'root)
+	     (test (get branch 'root) 'slotindex 'slotindex))
+    (set! root (get branch 'root))
+    (if parallel
+	(choice-size
+	 (threadjoin
+	  (for-choices (slot (get branch 'slots))
+	    (let ((table (get branch slot)))
+	      (tryif (modified? table)
+		(begin (store! branch slot (make-hashtable))
+		  (threadcall index-merge! (get root slot) table)))))))
+	(begin (do-choices (slot (get branch 'slots))
+		 (let ((table (get branch slot)))
+		   (when (modified? table)
+		     (store! branch slot (make-hashtable))
+		     (index-merge! (get root slot) table)
+		     (set! count (1+ count)))))
+	  count))))
