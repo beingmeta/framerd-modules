@@ -8,7 +8,7 @@
 (define %volatile '{maxtime maxmem maxvmem maxload maxcount 
 		    saving last-save save-frequency
 		    pre-save post-save
-		    task-state init-state})
+		    batch-state init-state})
 
 (define %loglevel %notice%)
 
@@ -45,18 +45,18 @@
 
 (define %nosusbt '{pre-save post-save})
 
-(define task-state #[])
+(define batch-state #[])
 (define init-state #f)
 
 (defambda (nstore! table slot value)
   (unless (fail? value) (store! table slot value)))
 
 (defambda (batch/read-state file . defaults)
-  (let* ((init-state (if (and file (file-exists? file))
-			 (file->dtype file)
-			 (apply frame-create #f defaults)))
-	 (state (deep-copy init-state)))
-    (store! state 'init init-state)
+  (let* ((init (if (and file (file-exists? file))
+		   (file->dtype file)
+		   (apply frame-create #f defaults)))
+	 (state (deep-copy init)))
+    (store! state 'init init)
     (when file (store! state 'statefile file))
     (nstore! state 'pools (use-pool (get state 'pools)))
     (nstore! state 'indexes (open-index (get state 'indexes)))
@@ -76,23 +76,25 @@
     (store! state 'count (1+ (try (get state 'count) 0)))
     (store! state 'words (1+ (try (get state 'words) 0)))
     (store! state 'sentences (1+ (try (get state 'sentences) 0)))
-    (unless (file-exists? file) (dtype->file init-state file))
+    (unless (file-exists? file) (dtype->file init file))
     state))
 
-(define (batch/start! (state task-state) . defaults)
+(define (batch/start! (state batch-state) . defaults)
   (when (string? state) 
-    (set! state (apply batch/read-state state defaults)))
+    (set! state (batch/read-state state defaults)))
+  (unless init-state 
+    (set! init-state (try (get state 'init) (deep-copy state))))
+  (set! batch-state state)
   (set! start-time (elapsed-time))
   (store! state 'cycle-count (1+ (try (get state 'cycle-count) 0)))
-  (unless init-state (set! init-state (deep-copy state)))
   (unless (test state 'begun)
     (store! state 'begun (gmtimestamp 'seconds))))
 
-(module-export! '{batch/read-state batch/start!})
+(module-export! '{batch/read-state batch/start! batch-state})
 
 ;;; Are we done yet?
 
-(define (batch/finished? (state task-state))
+(define (batch/finished? (state batch-state))
   (or finished
       (exists batch/threshtest "Time" 
 	      (elapsed-time start-time) maxtime secs->string)
@@ -126,8 +128,8 @@
 
 ;;; Regular checkins
 
-(defslambda (batch/checkin delta (state task-state))
-  (info%watch "BATCH/CHECKIN" delta)
+(defslambda (batch/checkin delta (state batch-state))
+  (info%watch "BATCH/CHECKIN" delta state)
   (if (table? delta)
       (do-choices (key (getkeys delta))
 	(let ((dv (get delta key)))
@@ -138,8 +140,9 @@
 	  (store! state 'progress 
 		  (+ delta (try (get state 'progress) 0)))
 	  (add! state 'checkins delta)))
+  (info%watch "BATCH/CHECKIN/changed" state)
   (unless finished
-    (when (batch/finished? task-state)
+    (when (batch/finished? batch-state)
       (set! finished #t))
     (when (and log-frequency (> (elapsed-time last-log) log-frequency))
       (set! last-log (elapsed-time))
@@ -154,43 +157,92 @@
 
 ;;; Checkpointing
 
-(defslambda (batch/save! (state task-state))
-  (and saving
-       (if (and pre-save (not (pre-save)))
-	   (begin 
-	     (logwarn |BatchSaveAbort| "PRESAVE function aborted save")
-	     (set! saving #f))
-	   (let ((threads
-		  (choice
-		   (for-choices (pool (get state 'pools))
-		     (threadcall commit-pool pool))
-		   (for-choices (index (get state 'indexes))
-		     (threadcall commit index))
-		   (for-choices (index (get (get state 'slotindex)
-					    (get (get state 'slotindex) 'slots)))
-		     (threadcall commit index))
-		   (for-choices (file.object (get state 'objects))
-		     (threadcall dtype->file 
-				 (deep-copy (cdr file.object))
-				 (car file.object))))))
-	     (lognotice |BatchSave| 
-	       "Saving state using " (choice-size threads) " threads")
-	     (thread/join threads)
-	     (lognotice |BatchSave| 
-	       "Writing out processing state to " (get state 'statefile))
-	     (when post-save (post-save state-copy))
-	     (let ((state-copy (deep-copy state)))
-	       (store! state-copy 'pools
-		       (pool-source (get state-copy 'pools)))
-	       (store! state-copy 'indexes
-		       (index-source (get state-copy 'indexes)))
-	       (store! state-copy 'objects (car (get state-copy 'objects)))
-	       (store! state-copy 'elapsed 
-		       (+ (elapsed-time start-time) 
-			  (try (get state 'elapsed) 0)))
-	       (drop! (get state-copy 'slotindex)
-		      (get (get state-copy 'slotindex) 'slots))
-	       (dtype->file state-copy (get state-copy 'statefile)))))))
+(defslambda (batch/save! (state batch-state))
+  (cond ((not saving))
+	((and pre-save (not (pre-save)))
+	 (logwarn |BatchSaveAbort| "PRESAVE function aborted save")
+	 (set! saving #f))
+	(else
+	 (lognotice |BatchSave| "Saving task databases")
+	 (let ((threads
+		(choice
+		 (for-choices (pool (get state 'pools))
+		   (threadcall commit-pool pool))
+		 (for-choices (index (get state 'indexes))
+		   (threadcall commit index))
+		 (for-choices (index (get (get state 'slotindex)
+					  (get (get state 'slotindex) 'slots)))
+		   (threadcall commit index))
+		 (for-choices (file.object (get state 'objects))
+		   (threadcall dtype->file 
+			       (deep-copy (cdr file.object))
+			       (car file.object))))))
+	   (lognotice |BatchSave| 
+	     "Using " (choice-size threads) " threads to commit task state")
+	   (thread/join threads)
+	   (lognotice |BatchSave| 
+	     "Writing out processing state to " (get state 'statefile))
+	   (when post-save (post-save state-copy))
+	   (let ((state-copy (deep-copy state)))
+	     (store! state-copy 'pools
+		     (pool-source (get state-copy 'pools)))
+	     (store! state-copy 'indexes
+		     (index-source (get state-copy 'indexes)))
+	     (store! state-copy 'objects (car (get state-copy 'objects)))
+	     (store! state-copy 'elapsed 
+		     (+ (elapsed-time start-time) 
+			(try (get state 'elapsed) 0)))
+	     (drop! (get state-copy 'slotindex)
+		    (get (get state-copy 'slotindex) 'slots))
+	     (dtype->file state-copy (get state-copy 'statefile)))))))
+
+(defslambda (batch/finish! (state batch-state) (sleep-for 4))
+  (while saving
+    (sleep sleep-for)
+    (logwarn |BatchFinished| "Waiting for current commit to clear")
+    (set! sleep-for (+ sleep-for 4)))
+  (when pre-save
+    (unless (pre-save)
+      (logwarn |BatchSaveAbort| "PRESAVE function would have aborted")
+      (set! saving #f)))
+  (logwarn |BatchFinished| "Starting to save databases")
+  (let ((threads
+	 (choice
+	  (for-choices (pool (get state 'pools))
+	    (threadcall commit-pool pool))
+	  (for-choices (index (get state 'indexes))
+	    (threadcall commit index))
+	  (for-choices (index (get (get state 'slotindex)
+				   (get (get state 'slotindex) 'slots)))
+	    (threadcall commit index))
+	  (for-choices (file.object (get state 'objects))
+	    (threadcall dtype->file 
+			(deep-copy (cdr file.object))
+			(car file.object))))))
+    (logwarn |BatchSave| 
+      "Saving state using " (choice-size threads) " threads")
+    (thread/join threads)
+    (logwarn |BatchSave| 
+      "Writing out processing state to " (get state 'statefile))
+    (when post-save (post-save state-copy))
+    (do-choices (slot (getkeys (get state 'totals)))
+      (when (test state slot)
+	(store! (get state 'totals) slot 
+		(+ (get (get state 'totals) slot)
+		   (get state slot)))
+	(store! state slot 0)))
+    (let ((state-copy (deep-copy state)))
+      (store! state-copy 'pools
+	      (pool-source (get state-copy 'pools)))
+      (store! state-copy 'indexes
+	      (index-source (get state-copy 'indexes)))
+      (store! state-copy 'objects (car (get state-copy 'objects)))
+      (store! state-copy 'elapsed 
+	      (+ (elapsed-time start-time) 
+		 (try (get state 'elapsed) 0)))
+      (drop! (get state-copy 'slotindex)
+	     (get (get state-copy 'slotindex) 'slots))
+      (dtype->file state-copy (get state-copy 'statefile)))))
 
 (defslambda (getsavelock)
   (and (not saving) 
@@ -199,14 +251,16 @@
 (define (batch/savelock)
   (and (not saving) (getsavelock)))
 
-(module-export! '{batch/save! batch/savelock})
+(module-export! '{batch/save! batch/finish! batch/savelock})
 
 ;;; Logging
 
-(define (batch/log! (state task-state))
+(define (batch/log! (state batch-state))
   (lognotice |#| (make-string 120 #\#))
   (lognotice |Batch|
-    "After " (secs->string (elapsed-time start-time)) ", " 
+    "After " (secs->string (elapsed-time start-time)) 
+    (if (and (test state 'logging) (test state (get state 'logging)))
+	": ") 
     (do-choices (log (get state 'logging))
       (if (symbol? log)
 	  (when (test state log)
@@ -216,13 +270,23 @@
 		   (applicable? (cdr log)))
 	      (printout " " (car log) "=" 
 		((cdr log) (get state (car log))))))))
-  (when (test state 'rates)
+  (when (test state 'logcounts)
     (let ((elapsed (elapsed-time start-time)))
       (lognotice |Progress|
-	(do-choices (rate (get state 'rates) i)
+	(do-choices (count (get state 'logcounts) i)
+	  (let ((slot (if (symbol? count) count (if (pair? count) (car count) #f))))
+	    (when (and slot (test state slot))
+	      (when (> i 0) (printout "; "))
+	      (printout ($num (get state slot)) " " (downcase slot))
+	      (when (pair? count)
+		(printout " (" (show% (get state slot) (cdr count)) ")"))))))))
+  (when (test state 'logrates)
+    (let ((elapsed (elapsed-time start-time)))
+      (lognotice |Progress|
+	(do-choices (rate (get state 'logrates) i)
 	  (when (test state rate)
-	    (printout (printnum (/ (get state rate) elapsed) 1)
-	      (downcase rate) "/sec;"))))))
+	    (printout (printnum (/ (get state rate) elapsed) 1) " "
+	      (downcase rate) "/sec; "))))))
   (let ((u (rusage)))
     (lognotice |Resources|
       "CPU=" (printnum (get u 'cpu%) 2) 
