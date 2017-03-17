@@ -10,15 +10,22 @@
 		  config:boolean+ config:boolean+parse
 		  config:number config:loglevel config:bytes config:interval
 		  config:goodstring config:symbol config:oneof
-		  config:boolset config:fnset})
+		  config:boolset config:fnset
+		  config:replace config:push})
 
 (define varconfigfn
   (macro expr
     (let ((varname (cadr expr))
 	  (convertfn (and (> (length expr) 2) (third expr)))
 	  (combinefn (and (> (length expr) 3) (fourth expr))))
-      `(let ((_convert ,convertfn)
-	     (_combine ,combinefn))
+      `(let ((_convert ,(and convertfn
+			     (if (applicable? convertfn)
+				 convertfn
+				 string2lisp)))
+	     (_combine ,(and combinefn
+			     (if (applicable? combinefn)
+				 combinefn
+				 choice))))
 	 (lambda (var (val))
 	   (if (bound? val)
 	       (set! ,varname
@@ -30,6 +37,15 @@
 			     `(_combine val ,varname))
 			    (else 'val)))
 	       ,varname))))))
+
+(define (string2lisp arg)
+  (if (string? arg)
+      (if (has-prefix arg {":" "(" "#" "{"}) 
+	  (parse-arg arg)
+	  (if (textsearch '(isspace) arg)
+	      (parse-arg arg)
+	      (intern (upcase arg))))
+      arg))
 
 (define varconfig!
   (macro expr
@@ -238,5 +254,11 @@
 		  new)
 	  (choice cur new))))
 
-
+(defambda (config:replace new old) new)
+(defambda (config:push new old)
+  (if (not old)
+      (list new)
+      (if (empty-list? old)
+	  (list new)
+	  (list new old))))
 
