@@ -195,6 +195,7 @@
 			(try (get state 'elapsed) 0)))
 	     (drop! (get state-copy 'slotindex)
 		    (get (get state-copy 'slotindex) 'slots))
+	     (drop! state-copy 'init)
 	     (dtype->file state-copy (get state-copy 'statefile)))
 	   (set! saving #f)))))
 
@@ -244,6 +245,7 @@
 		 (try (get state 'elapsed) 0)))
       (drop! (get state-copy 'slotindex)
 	     (get (get state-copy 'slotindex) 'slots))
+      (drop! state-copy 'init)
       (dtype->file state-copy (get state-copy 'statefile)))))
 
 (defslambda (getsavelock)
