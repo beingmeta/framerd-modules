@@ -59,7 +59,9 @@
 (module-export! '{optimize! optimized optimized?
 		  optimize-procedure! optimize-module!
 		  reoptimize! optimize-bindings!
-		  deoptimize! deoptimize-procedure! deoptimize-module!
+		  deoptimize! 
+		  deoptimize-procedure!
+		  deoptimize-module!
 		  deoptimize-bindings!})
 
 (define %volatile '{optdowarn useopcodes %loglevel})
@@ -469,8 +471,8 @@
 	 (original-body (pick exprs car 'comment cadr '|original|))
 	 (original-args (pick exprs car 'comment cadr '|originalargs|)))
     (cond ((and (singleton? original-body)  (singleton? original-args))
-	   (set-procedure-body! proc (cdr original-body))
-	   (set-procedure-body! proc (cadr original-args))
+	   (set-procedure-body! proc (cddr original-body))
+	   (set-procedure-args! proc (caddr original-args))
 	   #t)
 	  (else #f))))
 
