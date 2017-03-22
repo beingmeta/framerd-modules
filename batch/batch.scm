@@ -197,7 +197,7 @@
 	     (drop! (get state-copy 'slotindex)
 		    (get (get state-copy 'slotindex) 'slots))
 	     (do-choices (slot (getkeys totals))
-	       (store! totals key
+	       (store! totals slot
 		       (try (+ (get state slot )(get totals slot))
 			    (get totals slot)
 			    (get state slot))))
