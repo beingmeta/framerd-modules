@@ -184,7 +184,8 @@
 	   (lognotice |BatchSave| 
 	     "Writing out processing state to " (get state 'statefile))
 	   (when post-save (post-save state-copy))
-	   (let ((state-copy (deep-copy state)))
+	   (let* ((state-copy (deep-copy state))
+		  (totals (get state-copy 'totals)))
 	     (store! state-copy 'pools
 		     (pool-source (get state-copy 'pools)))
 	     (store! state-copy 'indexes
@@ -195,6 +196,11 @@
 			(try (get state 'elapsed) 0)))
 	     (drop! (get state-copy 'slotindex)
 		    (get (get state-copy 'slotindex) 'slots))
+	     (do-choices (slot (getkeys totals))
+	       (store! totals key
+		       (try (+ (get state slot )(get totals slot))
+			    (get totals slot)
+			    (get state slot))))
 	     (drop! state-copy 'init)
 	     (dtype->file state-copy (get state-copy 'statefile)))
 	   (set! saving #f)))))
@@ -260,7 +266,7 @@
 ;;; Logging
 
 (define (batch/log! (state batch-state))
-  (lognotice |#| (make-string 120 #\#))
+  (lognotice |#| (make-string 120 #\■))
   (lognotice |Batch|
     "After " (secs->string (elapsed-time start-time)) 
     (if (and (test state 'logging) (test state (get state 'logging)))
@@ -298,13 +304,15 @@
       " * " (get u 'ncpus) " cpus) "
       (when (test state 'nthreads)
 	(printout " (" (printnum (/~ (get u 'cpu%) (get state 'nthreads)) 2) " * "
-	  (get state 'nthreads) " threads) ")))
+	  (get state 'nthreads) " threads) "))
+      " load=" (let ((load (loadavg)))
+		 (first load) " ⋯ " (second load) " ⋯ " (third load)))
     (lognotice |Resources|
       "MEM=" ($bytes (get u 'memusage)) 
       ", VMEM=" ($bytes (get u 'vmemusage))
       (when maxmem (printout ", MAXMEM=" ($bytes maxmem)))
       (when maxvmem (printout ", MAXMEM=" ($bytes maxvmem)))
       ", PHYSMEM=" ($bytes (get u 'physical-memory))))
-  (lognotice |#| (make-string 120 #\-)))
+  (lognotice |#| (make-string 120 #\#)))
 
 (module-export! '{batch/log!})
