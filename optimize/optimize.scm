@@ -465,10 +465,10 @@
   (when (reflect/get proc 'optimized)
     (reflect/drop! proc 'optimized)
     (when (reflect/get proc 'original_body)
-      (set-procedure-body! proc (procedure-get proc 'original_body))
+      (set-procedure-body! proc (reflect/get proc 'original_body))
       (reflect/drop! proc 'original_body))
     (when (reflect/get proc 'original_args)
-      (set-procedure-args! proc (procedure-get proc 'original_args))
+      (set-procedure-args! proc (reflect/get proc 'original_args))
       (reflect/drop! proc 'original_args))))
 
 (define (procedure-optimized? arg)
