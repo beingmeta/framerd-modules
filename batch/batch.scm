@@ -305,8 +305,9 @@
       (when (test state 'nthreads)
 	(printout " (" (printnum (/~ (get u 'cpu%) (get state 'nthreads)) 2) " * "
 	  (get state 'nthreads) " threads) "))
-      " load=" (let ((load (loadavg)))
-		 (first load) " ⋯ " (second load) " ⋯ " (third load)))
+      " load= "
+      (let ((load (loadavg)))
+	(printout (first load) " ⋯ " (second load) " ⋯ " (third load))))
     (lognotice |Resources|
       "MEM=" ($bytes (get u 'memusage)) 
       ", VMEM=" ($bytes (get u 'vmemusage))
