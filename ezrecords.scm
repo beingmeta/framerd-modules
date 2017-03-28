@@ -6,16 +6,14 @@
 ;;; This provides a dead simple RECORDS implementation 
 ;;;  building on FramerD's built-in compounds.
 
-(define xref-opcode (make-opcode 0xA2))
-
 (define (make-xref-generator off tag-expr)
-  (lambda (expr) `(,xref-opcode ,(cadr expr) ,off ,tag-expr)))
+  (lambda (expr) `(,compound-ref ,(cadr expr) ,off ',tag-expr)))
 
 (define (make-accessor-def name field tag-expr prefix fields)
   (let* ((field-name (if (pair? field) (car field) field))
 	 (get-method-name (string->symbol (stringout prefix "-" field-name))))
     `(define (,get-method-name ,name)
-       (,xref-opcode ,name ,(position field fields) ,tag-expr))))
+       (,compound-ref ,name ,(position field fields) ,tag-expr))))
 (define (make-modifier-def name field tag-expr prefix fields)
   (let* ((field-name (if (pair? field) (car field) field))
 	 (set-method-name
