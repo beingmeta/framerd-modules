@@ -3,14 +3,25 @@
 
 (in-module 'bench)
 
-(use-module 'optimize)
+(use-module '{optimize varconfig})
 
-(define (bench benchmark-name benchmark-thunk (repeat 5))
+(define default-repeat 100)
+(varconfig! repeat default-repeat)
+
+(define (benchn repeat benchmark-name fn . args)
   (let ((start (timestamp)))
-    (dotimes (i repeat) (benchmark-thunk))
+    (dotimes (i repeat) (apply fn args))
     (let ((time (difftime (timestamp) start)))
       (lineout "Benchmark " benchmark-name 
 	" (" repeat " cylces) took " time " seconds"))))
 
-(module-export! '{bench})
+(define (bench benchmark-name fn . args)
+  (let ((repeat (config 'repeat 5))
+	(start (timestamp)))
+    (dotimes (i default-repeat) (apply fn args))
+    (let ((time (difftime (timestamp) start)))
+      (lineout "Benchmark " benchmark-name 
+	" (" repeat " cycles) took " time " seconds"))))
+
+(module-export! '{bench benchn})
 

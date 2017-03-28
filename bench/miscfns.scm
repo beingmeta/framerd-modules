@@ -6,6 +6,7 @@
 ;;; This provides various sample functions for testing and benchmarking
 
 (module-export! '{fibr fibi fibix fibflt factr facti slowfib})
+(module-export! '{fibr/random fibi/random fibix/random fibflt/random})
 (module-export! '{ack tak takflt})
 (module-export! 'spectral-norm)
 (module-export! 'square)
@@ -20,6 +21,7 @@
 (define (fibi n)
   (if (= n 0) 0 (fib-iter n 1 0)))
 
+;; This is fibi all in one (no fib-iter) using defaults
 (define (fibix i (cur 1) (prev 0))
   (if (> i 1) (fibix (-1+ i) (+ cur prev) cur)
       (if (= i 1) cur 0)))
@@ -27,6 +29,15 @@
 (define (fibflt n)
   (cond ((< n 2.0) 1.0)
 	(else (+ (fibflt (- n 2.0)) (fibflt (- n 1.0))))))
+
+(define (fibr/random n)
+  (fibr (+ 1 (quotient n 2) (random (quotient n 2)))))
+(define (fibi/random n)
+  (fibi (+ 1 (quotient n 2) (random (quotient n 2)))))
+(define (fibix/random n)
+  (fibix (+ 1 (quotient n 2) (random (quotient n 2)))))
+(define (fibflt/random n)
+  (fibflt (+ 1 (quotient n 2) (random (quotient n 2)))))
 
 ;;; Factorial
 
