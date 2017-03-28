@@ -239,7 +239,7 @@
   (def-opcode INTERSECTION 0xC4)
   (def-opcode DIFFERENCE   0xC5)
 
-  (define if-opcode (make-opcode 0x10))
+  (define branch-opcode (make-opcode 0x10))
   (define not-opcode (make-opcode 0x11))
   (define until-opcode (make-opcode 0x12))
   (define begin-opcode (make-opcode 0x13))
@@ -699,52 +699,52 @@
 
 (define (optimize-if handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      (cons if-opcode
+      (cons branch-opcode
 	    (forseq (x (cdr expr))
 	      (optimize x env bound opts lexrefs)))
       (optimize-block handler expr env bound opts lexrefs)))
 
 (define (optimize-not handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      `(,not-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs))
+      `(,not-opcode . ,(optimize (get-arg expr 1) env bound opts lexrefs))
       (optimize-block handler expr env bound opts lexrefs)))
 
 (define (optimize-when handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      `(,if-opcode
+      `(,branch-opcode
 	,(optimize (cadr x) env bound opts lexrefs)
 	(,begin-opcode
 	 ,@(forseq (x (caddr expr))
-	     (optimize x env bound opts lexrefs)))
-	,void-opcode)
+	     (optimize x env bound opts lexrefs))
+	 (,void-opcode)))
       (optimize-block handler expr env bound opts lexrefs)))
 (define (optimize-unless handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      `(,if-opcode
-	(,not-opcode ,(optimize (cadr x) env bound opts lexrefs))
+      `(,branch-opcode
+	`(,not-opcode . ,(optimize (cadr x) env bound opts lexrefs))
 	(,begin-opcode
 	 ,@(forseq (x (caddr expr))
-	     (optimize x env bound opts lexrefs)))
-	,void-opcode)
+	     (optimize x env bound opts lexrefs))
+	 (,void-opcode)))
       (optimize-block handler expr env bound opts lexrefs)))
 
 (define (optimize-until handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      `(,until-opcode
-	,(optimize (cadr expr) env bound opts lexrefs)
-	(,begin-opcode
-	 ,@(forseq (x (cddr expr))
-	     (optimize x env bound opts lexrefs))
-	 (,void-opcode)))
+      `(,begin-opcode
+	(,until-opcode
+	 (,(optimize (cadr expr) env bound opts lexrefs)
+	  ,@(forseq (x (cddr expr))
+	      (optimize x env bound opts lexrefs))))
+	(,void-opcode))
       (optimize-block handler expr env bound opts lexrefs)))
 (define (optimize-while handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      `(,until-opcode
-	(,not-opcode ,(optimize (cadr expr) env bound opts lexrefs))
-	(,begin-opcode
+      `(,begin-opcode
+	(,until-opcode
+	 (,not-opcode . ,(optimize (cadr expr) env bound opts lexrefs))
 	 ,@(forseq (x (cddr expr))
-	     (optimize x env bound opts lexrefs))
-	 (,void-opcode)))
+	     (optimize x env bound opts lexrefs)))
+	(,void-opcode))
       (optimize-block handler expr env bound opts lexrefs)))
 
 (define (optimize-let handler expr env bound opts lexrefs)
