@@ -671,7 +671,7 @@
 		     ,off-arg ,(cadr type-arg)))
     (tryif (and (pair? type-arg) (eq? (car type-arg) quote-opcode))
       `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs)
-		     ,off-arg ,(cdr type-arg)))
+		     ,off-arg ,(cadr type-arg)))
     (tryif (and (pair? type-arg) (not type-arg))
       `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs)
 		     ,off-arg))))
@@ -687,7 +687,7 @@
 
 (define (optimize-quote handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      (cons quote-opcode (get-arg expr 1))
+      (list quote-opcode (get-arg expr 1))
       expr))
 
 (define (optimize-begin handler expr env bound opts lexrefs)
@@ -706,7 +706,7 @@
 
 (define (optimize-not handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
-      `(,not-opcode . ,(optimize (get-arg expr 1) env bound opts lexrefs))
+      `(,not-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs))
       (optimize-block handler expr env bound opts lexrefs)))
 
 (define (optimize-when handler expr env bound opts lexrefs)
@@ -721,7 +721,7 @@
 (define (optimize-unless handler expr env bound opts lexrefs)
   (if (getopt opts 'optspecial special-default)
       `(,branch-opcode
-	(,not-opcode . ,(optimize (cadr expr) env bound opts lexrefs))
+	(,not-opcode ,(optimize (cadr expr) env bound opts lexrefs))
 	(,begin-opcode
 	 ,@(forseq (x (cddr expr))
 	     (optimize x env bound opts lexrefs))
@@ -741,7 +741,7 @@
   (if (getopt opts 'optspecial special-default)
       `(,begin-opcode
 	(,until-opcode
-	 (,not-opcode . ,(optimize (cadr expr) env bound opts lexrefs))
+	 (,not-opcode ,(optimize (cadr expr) env bound opts lexrefs))
 	 ,@(forseq (x (cddr expr))
 	     (optimize x env bound opts lexrefs)))
 	(,void-opcode))
