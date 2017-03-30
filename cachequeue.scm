@@ -73,7 +73,7 @@
    is a meltcache."
   (when (string? cache)
     (unless (or (position #\@ cache) (file-exists? cache))
-      (make-hash-index cache 1000))
+      (make-index cache #[type hashindex slots 1000]))
     (set! cache (open-index cache)))
   (let ((cq (cons-cachequeue
 	     cache (make-fifo) (make-condvar)

@@ -258,7 +258,7 @@
 (defambda (config:push new old)
   (if (not old)
       (list new)
-      (if (empty-list? old)
+      (if (null? old)
 	  (list new)
 	  (list new old))))
 
