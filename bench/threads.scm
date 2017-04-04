@@ -37,7 +37,7 @@
 			  (apply proc thread-data args)
 			  (apply proc args))
 		      (set! count (1+ count)))
-		    (when (test thread-data 'cleanup)
+		    (when (and thread-data (test thread-data 'cleanup))
 		      ((get thread-data 'cleanup)))
 		    (when (and (applicable? thread-state)
 			       (> (procedure-arity thread-state) 0))
@@ -67,7 +67,7 @@
 	       (cputime (+ stime utime))
 	       (memdiff (- (get after 'memusage) (get before 'memusage)))
 	       (total-calls (reduce + thread-results 0)))
-	  (logwarn |Finished| 
+	  (logwarn |Finished|
 	    (printnum total-calls) " calls in " (secs->string clocktime) " "
 	    "(" (printnum (/~ total-calls clocktime) 2) " calls/sec) "
 	    "using " (secs->string cputime) " cputime")
