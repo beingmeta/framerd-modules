@@ -87,7 +87,8 @@
        AUTHORIZE "https://api.twitter.com/oauth/authorize"
        ;; AUTHENTICATE "https://api.twitter.com/oauth/authenticate"
        KEY TWITTER:KEY SECRET TWITTER:SECRET
-       ACCESS_TOKEN "oauth_token"
+       ;;ACCESS_TOKEN "oauth_token"
+       ACCESS_TOKEN HTTP
        VERSION "2.0"
        REALM TWITTER20
        NAME "Twitter"]
@@ -489,7 +490,7 @@
 	    "oauth_signature=\"" (uriencode sig64) "\", "
 	    "oauth_version=\"" (getopt spec 'version "1.0") "\""))
 	 (req (urlget endpoint (curlopen 'header auth-header 'method 'POST))))
-    (debug%watch sigstring sig sig64 auth-header)
+    (debug%watch "OAUTH/VERIFY" sigstring sig sig64 auth-header)
     (if (test req 'response 200)
 	(let ((info (cgiparse (get req '%content))))
 	  (store! info 'token (get info 'OAUTH_TOKEN))
@@ -532,7 +533,7 @@
 			    (try (get parsed 'expires_in)
 				 (get parsed 'expires))))
 	       (authinfo `#[token ,(get parsed 'access_token)]))
-	  (debug%watch parsed spec req expires_in)
+	  (debug%watch "OAUTH/GETACCESS" parsed spec req expires_in)
 	  (when (exists? (get parsed 'token_type))
 	    (unless (string-ci=? (get parsed 'token_type) "Bearer")
 	      (logwarn |OAUTH/GETACESS/OddToken|
@@ -543,7 +544,7 @@
 	    (when (exists? (get parsed 'refresh_token))
 	      (store! authinfo 'refresh
 		      (->secret (get parsed 'refresh_token)))))
-	  (debug%watch (cons authinfo spec) "OAUTH/GETACCESS/RESULT")
+	  (debug%watch  "OAUTH/GETACCESS/RESULT" (cons authinfo spec))
 	  (cons authinfo spec))
 	(begin
 	  (logwarn |OATH/GETACCESS:Failure|
@@ -572,7 +573,7 @@
 			    (try (get parsed 'expires_in)
 				 (get parsed 'expires))))
 	       (authinfo `#[token ,(get parsed 'access_token)]))
-	  (debug%watch parsed spec req expires_in)
+	  (debug%watch "OAUTH/GETCLIENT" parsed spec req expires_in)
 	  (when (exists? (get parsed 'token_type))
 	    (unless (string-ci=? (get parsed 'token_type) "Bearer")
 	      (logwarn |OAUTH/GETACESS/OddToken|
@@ -583,7 +584,7 @@
 	    (when (exists? (get parsed 'refresh_token))
 	      (store! authinfo 'refresh
 		      (->secret (get parsed 'refresh_token)))))
-	  (debug%watch (cons authinfo spec) "OAUTH/GETACCESS/RESULT")
+	  (debug%watch "OAUTH/GETACCESS/RESULT" (cons authinfo spec) )
 	  (cons authinfo spec))
 	(begin
 	  (logwarn |OATH/GETACCESS:Failure|
@@ -738,7 +739,7 @@
 			      (error OAUTH:BADMETHOD OAUTH/CALL20
 				     "Only GET, HEAD, PUT, and POST are allowed: "
 				     method endpoint args)))))))
-    (debug%watch endpoint auth-header req)
+    (debug%watch "OAUTH/CALL20" endpoint auth-header req)
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
@@ -795,7 +796,7 @@
 			      "client_secret" ,(getcsecret spec)
 			      "grant_type" "refresh_token"
 			      "refresh_token" ,(getopt spec 'refresh)]))))
-    (debug%watch endpoint auth-header req)
+    (debug%watch "OAUTH/REFRESH!" endpoint auth-header req)
     (if (test req 'response 200)
 	(let* ((parsed (getreqdata req))
 	       (expires_in (->number (try (get parsed 'expires_in)
