@@ -191,21 +191,34 @@
 	     export)))
 	(else (irritant index '|NotSlotIndex|))))
 
-(define (slotindex/branch slotindex)
-  (let ((branch (frame-create #f 
-		  'slotindex 'slotindex
-		  'slots (get slotindex 'slots)
-		  'root slotindex)))
+(define (branch-table opts (size) (table))
+  (default! size (getopt opts 'size 1000))
+  (set! table (make-hashtable size))
+  (if (getopt opts 'threadsafe #t)
+      table
+      (unsafe-hashtable table)))
+
+(define (slotindex/branch slotindex (opts #f))
+  (let* ((branchopts
+	  (if (and opts (test slotindex 'opts))
+	      (cons opts (get slotindex 'opts))
+	      (or opts
+		  (try (get slotindex 'opts) #f))))
+	 (branch (frame-create #f 
+		   'slotindex 'slotindex
+		   'slots (get slotindex 'slots)
+		   'root slotindex
+		   'opts opts)))
     (do-choices (slot (get slotindex 'slots))
       (let ((index (slot->index slotindex slot)))
-	(store! branch slot (make-hashtable))))
+	(store! branch slot (branch-table (getopt branch 'opts)))))
     branch))
 
 (defslambda (setup-branch-index branch-index slot)
   (try
    (get branch-index slot)
    (begin (slot->index (get branch-index 'root) slot)
-     (store! branch-index slot (make-hashtable))
+     (store! branch-index slot (branch-table (getopt branch-index 'opts)))
      (get branch-index slot))))
 
 (define (slotindex/merge! branch (parallel #f) (root) (count 0))
@@ -219,12 +232,17 @@
 	  (for-choices (slot (get branch 'slots))
 	    (let ((table (get branch slot)))
 	      (tryif (modified? table)
-		(begin (store! branch slot (make-hashtable))
+		(begin 
+		  (store! branch slot 
+			  (branch-table (getopt branch 'opts)
+					(table-size table)))
 		  (threadcall index-merge! (get root slot) table)))))))
 	(begin (do-choices (slot (get branch 'slots))
 		 (let ((table (get branch slot)))
 		   (when (modified? table)
-		     (store! branch slot (make-hashtable))
+		     (store! branch slot 
+			     (branch-table (getopt branch 'opts)
+					   (table-size table)))
 		     (index-merge! (get root slot) table)
 		     (set! count (1+ count)))))
 	  count))))

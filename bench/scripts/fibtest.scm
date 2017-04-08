@@ -8,3 +8,4 @@
 
 (define (main (nthreads 1.0) (interval 15) (fibrange 50))
   (tbench nthreads interval (lambda (data) (fibi (random fibrange))) #f))
+

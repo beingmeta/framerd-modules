@@ -128,8 +128,14 @@
 
 ;;; Regular checkins
 
-(defslambda (batch/checkin delta (state batch-state))
+(define (batch/checkin delta (state batch-state))
   (info%watch "BATCH/CHECKIN" delta state)
+  (let ((result (docheckin delta state)))
+    (if (applicable? result)
+	(result)
+	result)))
+
+(defslambda (docheckin delta state)
   (if (table? delta)
       (do-choices (key (getkeys delta))
 	(let ((dv (get delta key)))
@@ -146,12 +152,13 @@
       (set! finished #t))
     (when (and log-frequency (> (elapsed-time last-log) log-frequency))
       (set! last-log (elapsed-time))
-      (batch/log! state))
-    (when (and save-frequency (not saving) 
-	       (not (zero? save-frequency))
-	       (> (elapsed-time last-save) save-frequency) 
-	       (getsavelock))
-      (batch/save! state))))
+      (batch/log! state)))
+  (if (and (not finished) save-frequency (not saving) 
+	   (not (zero? save-frequency))
+	   (> (elapsed-time last-save) save-frequency) 
+	   (getsavelock))
+      (lambda () (batch/save! state))
+      state))
 
 (module-export! '{batch/checkin})
 
@@ -281,21 +288,40 @@
 	      (printout " " (car log) "=" 
 		((cdr log) (get state (car log))))))))
   (when (test state 'logcounts)
-    (let ((elapsed (elapsed-time start-time)))
-      (lognotice |Progress|
-	(do-choices (count (get state 'logcounts) i)
-	  (let ((slot (if (symbol? count) count (if (pair? count) (car count) #f))))
-	    (when (and slot (test state slot))
-	      (when (> i 0) (printout "; "))
-	      (printout ($num (get state slot)) " " (downcase slot))
-	      (when (pair? count)
-		(printout " (" (show% (get state slot) (cdr count)) ")"))))))))
+    (lognotice |Progress|
+      (do-choices (count (get state 'logcounts) i)
+	(let ((slot (if (symbol? count) count (if (pair? count) (car count) #f))))
+	  (when (and slot (test state slot))
+	    (when (> i 0) (printout "; "))
+	    (printout ($num (get state slot)) " " (downcase slot))
+	    (when (pair? count)
+	      (printout " (" (show% (get state slot) (cdr count)) ")")))))))
   (when (test state 'logrates)
     (let ((elapsed (elapsed-time start-time)))
       (lognotice |Progress|
 	(do-choices (rate (get state 'logrates) i)
 	  (when (test state rate)
 	    (printout (printnum (/ (get state rate) elapsed) 1) " "
+	      (downcase rate) "/sec; "))))))
+  (when (and init-state (test state 'logcounts))
+    (lognotice |Overall|
+      (do-choices (count (get state 'logcounts) i)
+	(let ((slot (if (symbol? count) count (if (pair? count) (car count) #f))))
+	  (when (and slot (test state slot) (test init-state slot))
+	    (when (> i 0) (printout "; "))
+	    (printout ($num (+ (get state slot) (get init-state slot))) " " (downcase slot))
+	    (when (pair? count)
+	      (printout " (" (show% (+ (get state slot) (get init-state slot))
+				    (cdr count)) ")")))))))
+  (when (and init-state (test state 'logrates) (test init-state 'elapsed))
+    (let ((elapsed (+ (get init-state 'elapsed)
+		      (elapsed-time start-time))))
+      (lognotice |Overall|
+	(do-choices (rate (get state 'logrates) i)
+	  (when (and (test state rate) (test init-state rate))
+	    (printout 
+	      (printnum (/ (+ (get state rate) (get init-state rate))
+			   elapsed) 1) " "
 	      (downcase rate) "/sec; "))))))
   (let ((u (rusage)))
     (lognotice |Resources|

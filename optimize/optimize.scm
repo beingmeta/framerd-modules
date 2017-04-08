@@ -21,7 +21,7 @@
 (use-module 'logger)
 
 (define-init %loglevel %warning%)
-(define-init useopcodes #t)
+(define-init useopcodes #f)
 (define-init optdowarn #t)
 (define-init lexrefs-default #t)
 (define-init special-default #f)
@@ -108,7 +108,8 @@
 ;;; Converting non-lexical function references
 
 (define (fcnref value sym env opts)
-  (if (and (applicable? value) (cons? value))
+  (if (and (cons? value)
+	   (or (applicable? value) (special-form? value)))
       (let ((usevalue
 	     (if (getopt opts 'staticfns staticfns-default)
 		 (static-ref value)
@@ -122,15 +123,25 @@
       value))
 
 (defslambda (add-fcnid sym env value)
-  (try (get fcnids (cons sym env))
+  (try (if env
+	   (get fcnids (cons sym env))
+	   (get fcnids env))
        (let ((newid (fcnid/register value)))
-	 (store! fcnids (cons sym env) newid)
+	 (store! fcnids 
+		 (if env (cons sym env) sym)
+		 newid)
 	 newid)))
 
 (define (get-fcnid sym env value)
   (if (cons? value)
       (try (get fcnids (cons sym env))
 	   (add-fcnid sym env value))
+      value))
+
+(define (force-fcnid value)
+  (if (cons? value)
+      (try (get fcnids value)
+	   (add-fcnid value #f value))
       value))
 
 (define (static-ref ref)
@@ -171,6 +182,11 @@
 	   (get opcode-map value)
 	   value)
       value))
+
+(define (try-opcode value (length #f))
+  (tryif useopcodes
+    (try (get opcode-map (cons value length))
+       (get opcode-map value))))
 
 (define (def-opcode prim code (n-args #f))
   (if n-args
@@ -313,7 +329,9 @@
 		       (list 'quote (qc v))
 		       v)))
 		((not module) expr)
-		(else `(,(try (tryif use-opcodes (map-opcode %modref))
+		(else `(,(try (tryif use-opcodes (try-opcode %modref))
+			      (tryif (getopt opts 'fcnrefs fcnrefs-default)
+				(force-fcnid %modref))
 			      %modref)
 			,module ,expr)))))))
 
@@ -410,12 +428,16 @@
 			       (map-opcode
 				(cond ((not from) (try unoptimized head))
 				      ((fail? value) 
-				       `(,(try (tryif use-opcodes (map-opcode %modref))
+				       `(,(try (try-opcode %modref)
+					       (tryif (getopt opts 'fcnrefs fcnrefs-default)
+						 (force-fcnid %modref))
 					       %modref)
 					 ,from ,head))
 				      ((test from '%nosubst head) head)
 				      ((test from '%volatile head)
-				       (try (tryif use-opcodes (map-opcode %modref))
+				       (try (try-opcode %modref)
+					    (tryif (getopt opts 'fcnrefs fcnrefs-default)
+					      (force-fcnid %modref))
 					    %modref))
 				      (else unoptimized))
 				n-exprs)
