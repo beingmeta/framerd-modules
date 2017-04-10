@@ -31,6 +31,7 @@
 (varconfig! optimize:lexrefs lexrefs-default)
 (varconfig! optimize:staticfns staticfns-default)
 (varconfig! optimize:fcnrefs fcnrefs-default)
+(varconfig! optimize:opcodes useopcodes)
 
 (defslambda (codewarning warning)
   (debug%watch "CODEWARNING" warning)
@@ -39,13 +40,6 @@
 (define-init module? 
   (lambda (arg) 
     (and (table? arg) (not (or (environment? arg) (pair? arg))))))
-
-(define opcodeopt-config
-  (slambda (var (val 'unbound))
-    (cond ((eq? val 'unbound) useopcodes)
-	  (val (set! useopcodes #t))
-	  (else (set! useopcodes #f)))))
-(config-def! 'opcodeopt opcodeopt-config)
 
 (define optdowarn-config
   (slambda (var (val 'unbound))
@@ -174,7 +168,7 @@
 ;;;   execution to make assumptions about the number of arguments.  Note that
 ;;;   this means that this file needs to be synchronized with src/scheme/eval.c
 
-(define opcode-map (make-hashtable))
+(define-init opcode-map (make-hashtable))
 
 (define (map-opcode value (length #f))
   (if useopcodes
@@ -183,22 +177,52 @@
 	   value)
       value))
 
+(define name2op
+  (and (bound? name->opcode) name->opcode))
+
+(define (probe-opcode proc)
+  (if (not name2op) (fail)
+      (if (or (symbol? proc) (string? proc))
+	  (name2op proc)
+	  (if (and (or (procedure? proc) (special-form? proc))
+		   (procedure-name proc))
+	      (or (name2op (procedure-name proc)) (fail))
+	      (fail)))))
+
 (define (try-opcode value (length #f))
   (tryif useopcodes
-    (try (get opcode-map (cons value length))
-       (get opcode-map value))))
+    (or (try (get opcode-map (cons value length))
+	     (get opcode-map value))
+	(fail))))
 
-(define (def-opcode prim code (n-args #f))
+(define (get-opcode proc code (opname #f))
+  (try (get opcode-map proc)
+       (if name2op
+	   (try
+	    (tryif (or (string? opname) (symbol? opname))
+	      (name2op opname))
+	    (tryif (and (or (procedure? proc) (special-form? proc))
+			(procedure-name proc))
+	      (name2op (procedure-name proc)))
+	    (tryif (or (string? proc) (symbol? proc))
+	      (name2op proc))
+	    (begin (logwarn |No opcode| "For procedure " proc)
+	      (fail)))
+	   (make-opcode code))))
+
+(define (def-opcode prim code (n-args #f) (opname #f))
   (if n-args
-      (add! opcode-map (cons prim n-args) (make-opcode code))
-      (add! opcode-map prim (make-opcode code))))
+      (add! opcode-map (cons prim n-args) 
+	    (get-opcode prim code opname))
+      (add! opcode-map prim 
+	    (get-opcode prim code opname))))
 
 (when (bound? make-opcode)
 
   (def-opcode AMBIGUOUS? 0x20 1)
   (def-opcode SINGLETON? 0x21 1)
   (def-opcode FAIL?      0x22 1)
-  (def-opcode EMPTY?     0x22 1)
+  (def-opcode EMPTY?     0x22 1 "EMPTY?")
   (def-opcode EXISTS?    0x23 1)
   (def-opcode SINGLETON  0x24 1)
   (def-opcode CAR        0x25 1)
