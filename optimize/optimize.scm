@@ -285,7 +285,7 @@
   (define begin-opcode (get-opcode "BEGIN" 0x13))
   (define quote-opcode (get-opcode "QUOTEOP" 0x14))
   (define set-opcode (get-opcode "SET!OP" 0x15))
-  (define setplus-opcode (get-copcode "SET+!OP" 0x16))
+  (define setplus-opcode (get-opcode "SET+!OP" 0x16))
   (define void-opcode (get-opcode "VOIDOP" 0x17))
   (define xref-opcode (get-opcode "XREF" 0xA2))
 
