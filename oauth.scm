@@ -345,7 +345,10 @@
       (cons (car spec) (get oauth-servers (cdr spec)))
       (if (and (symbol? spec) (test oauth-servers spec))
 	  (get oauth-servers spec)
-	  (if (and (pair? spec) (getopt spec 'realm)) spec
+	  (if (or (and (pair? spec) (getopt spec 'realm))
+		  (and (table? spec) (getopt spec 'realm) 
+		       (getopt spec 'key)))
+	      spec
 	      (if (and (table? spec) (test spec 'realm)
 		       (test oauth-servers (get spec 'realm)))
 		  (cons spec (get oauth-servers (get spec 'realm)))
