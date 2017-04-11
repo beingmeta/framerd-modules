@@ -14,17 +14,29 @@
 (define default-creds 'twitter20)
 (define search-endpoint "https://api.twitter.com/1.1/search/tweets.json")
 
-(define (twitter/searchapi args (access default-token))
+(define (twitter/searchapi args (access default-creds))
   (oauth/call access 'GET search-endpoint args))
 
-(define (twitter/search q (blocksize) (token default-token))
+(define (getid x) (get x 'id))
+
+(define (twitter/search q (blocksize) (conn default-creds))
   (default! blocksize 
-    (if (table? q) (getopt q 'blocksize 5000) 5000))
+    (if (table? q) 
+	(getopt q 'count (getopt q 'blocksize 5000))
+	5000))
   (when (string? q)
     (set! q (frame-create "q" q "count" blocksize)))
-  (oauth/call token 'GET search-endpoint q))
+  (let* ((creds (if (pair? conn) conn
+		    (try (get q 'creds) (oauth/getclient conn))))
+	 (r (oauth/call creds 'GET search-endpoint (try (get q 'next) q)))
+	 (tweets (get r 'statuses))
+	 (min_id (smallest (get (elts tweets) 'id))))
+    `#[tweets ,(get r 'statuses) q ,q count ,blocksize
+       creds ,creds
+       next #["q" ,(get q "q") "count" ,blocksize
+	      "max_id" ,(-1+ min_id)]]))
 
-(define (twitter/search/n q n (blocksize) (token default-token))
+(define (twitter/search/n q n (blocksize) (token default-creds))
   (default! blocksize (quotient n 10))
   (let ((blocks '())
 	(done #f)
@@ -36,15 +48,12 @@
 			  (test result 'statuses)
 			  (get result 'statuses)))
 	     (metadata (get result 'search_metadata))
-	     (max_id (get metadata 'max_id)))
+	     (min_id (smallest (elts (map (lambda (x) (get x 'id)) tweets)))))
 	(logwarn |GotTweets| "Got " (length tweets) " tweets, total=" (+ count (length blocks)))
 	(set! blocks (cons tweets blocks))
 	(set! count (+ count (length tweets)))
 	(set! result (oauth/call token 'GET search-endpoint
 				 `#["q" ,q "count" ,blocksize
-				    "max_id" ,(-1+ max_id)]))))
+				    "max_id" ,(-1+ min_id)]))))
     (apply append blocks)))
-
-
-
 
