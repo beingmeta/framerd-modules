@@ -78,15 +78,18 @@
 	     (IC (label MONTH ,monthstrings ,monthnum))
 	     (spaces)
 	     (opt (label YEAR #({"1" "2"} (isdigit) (isdigit) (isdigit)) #t)))
-	  `#({(spaces) (bol) ">"}
-	     (label HOURS #((isdigit) (opt (isdigit))) #t)
-	     {(spaces) (eol) "<"
-	      #(":" (label MINUTES #((isdigit) (isdigit)) #t)
-		{(spaces) (eol)
-		 #(":" (label SECONDS #((isdigit) (isdigit)) #t)
-		   {(spaces) (eol)
-		    #("." (label FRACTION (isdigit+)))
-		    "<"})})})
+	  `(PREF #({(bol) (isspace)}
+		   (label HOUR #((isdigit) (opt (isdigit))) #t) ":"
+		   (label MINUTE #((isdigit) (isdigit)) #t) ":"
+		   (label SECOND #((isdigit) (isdigit)) #t)
+		   (opt #("." (label FRACTION (isdigit+) #t))))
+		 #({(bol) (isspace)}
+		    (label HOUR #((isdigit) (opt (isdigit))) #t) ":"
+		    (label MINUTE #((isdigit) (isdigit)) #t) ":"
+		    (label SECOND #((isdigit) (isdigit)) #t))
+		 #({(bol) (isspace)}
+		   (label HOUR #((isdigit) (opt (isdigit))) #t) ":"
+		   (label MINUTE #((isdigit) (isdigit)) #t)))
 	  `#({(bol) (spaces) ">"}
 	     (label AMPM (IC {"AM" "PM"})) {(eol) (spaces) "<"})
 	  `#({(bol) (spaces) ">"}
@@ -139,16 +142,16 @@
 		      (->list (sorted (getkeys matches)))))
 
 (define (timeparser string (us us-format-default))
-  (text->frames (qc (if us us-patterns terran-patterns))
+  (text->frames (if us us-patterns terran-patterns)
 		string))
 
 (defambda (getfields matches)
-  (try (tryif (test matches 'second) '(second minute hour date month year))
-       (tryif (test matches 'minute) '(minute hour date month year))
-       (tryif (test matches 'hour) '(hour date month year))
-       (tryif (test matches 'date) '(date month year))
-       (tryif (test matches 'month) '(month year))
-       (tryif (test matches 'year) '(year))))
+  (try (tryif (test matches 'second) '(seconds second minute hour date month year))
+       (tryif (test matches 'minute) '(minutes minute hour date month year))
+       (tryif (test matches 'hour) '(hours hour date month year))
+       (tryif (test matches 'date) '(days date month year))
+       (tryif (test matches 'month) '(months month year))
+       (tryif (test matches 'year) '(years year))))
 
 (defambda (matches->timestamps matches fields base)
   (%debug "base=" base "; tick=" (get base '%tick) "; fields=" fields)
@@ -165,10 +168,9 @@
 (define (parsetime string (base #f) (us us-format-default))
   (if (string? string)
       (let ((matches
-	     (text->frames (qc (if us us-patterns terran-patterns))
-			   string)))
+	     (text->frames (if us us-patterns terran-patterns) string)))
 	(when (test matches 'ampm '{"PM" "pm"})
-	  (let ((hours (get matches 'hours)))
+	  (let ((hours (get matches 'hour)))
 	    (unless (> (+ 12 hours) 24)
 	      (store! matches 'hours (+ 12 hours)))))
 	(when (test matches 'year)
@@ -186,7 +188,7 @@
 	(let* ((fields (getfields matches))
 	       (base (timestamp (car fields))))
 	  (%debug "parsetime matches=" matches ", fields=" fields)
-	  (matches->timestamps matches fields base)))
+	  (matches->timestamps matches (cdr fields) base)))
       (timestamp string)))
 
 (define (parsegmtime string (base #f) (us us-format-default))
