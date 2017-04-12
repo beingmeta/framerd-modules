@@ -4,11 +4,21 @@
 (in-module 'twitter)
 
 (use-module '{fdweb texttools reflection varconfig parsetime logger})
-(use-module '{xhtml xhtml/auth})
+(use-module '{xhtml xhtml/auth oauth xconfig})
 
+(module-export! '{twitter/creds})
 (module-export! '{->tweet twitter/user twitter/tag twitter/url})
 
 (define-init %loglevel %notice%)
+
+(define init-creds 'twitter20)
+(define twitter-creds #f)
+
+(define (twitter/creds (init init-creds))
+  (or twitter-creds
+      (let ((creds (oauth/getclient init)))
+	(set! twitter-creds creds)
+	creds)))
 
 (define (->tweet result (pool #f))
   (let ((f (frame-create pool
