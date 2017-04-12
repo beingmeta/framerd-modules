@@ -81,7 +81,7 @@
 
 (define (batch/start! (state batch-state) . defaults)
   (when (string? state) 
-    (set! state (batch/read-state state defaults)))
+    (set! state (batch/read-state state)))
   (unless init-state 
     (set! init-state (try (get state 'init) (deep-copy state))))
   (set! batch-state state)
@@ -162,15 +162,25 @@
 
 (module-export! '{batch/checkin})
 
+(define (log-resources)
+  (let ((u (rusage)))
+    (lognotice |Resources|
+      "MEM=" ($bytes (get u 'memusage)) 
+      ", VMEM=" ($bytes (get u 'vmemusage))
+      (when maxmem (printout ", MAXMEM=" ($bytes maxmem)))
+      (when maxvmem (printout ", MAXMEM=" ($bytes maxvmem)))
+      ", PHYSMEM=" ($bytes (get u 'physical-memory)))))
+
 ;;; Checkpointing
 
-(defslambda (batch/save! (state batch-state))
+(defslambda (batch/save! (state batch-state) (started (elapsed-time)))
   (cond ((not saving))
 	((and pre-save (not (pre-save)))
 	 (logwarn |BatchSaveAbort| "PRESAVE function aborted save")
 	 (set! saving #f))
 	(else
 	 (lognotice |BatchSave| "Saving task databases")
+	 (log-resources)
 	 (set! last-save (elapsed-time))
 	 (let ((threads
 		(choice
@@ -189,7 +199,7 @@
 	     "Using " (choice-size threads) " threads to commit task state")
 	   (thread/join threads)
 	   (lognotice |BatchSave| 
-	     "Writing out processing state to " (get state 'statefile))
+	     "Writing out current state to " (get state 'statefile))
 	   (when post-save (post-save state-copy))
 	   (let* ((state-copy (deep-copy state))
 		  (totals (get state-copy 'totals)))
@@ -209,7 +219,17 @@
 			    (get totals slot)
 			    (get state slot))))
 	     (drop! state-copy 'init)
-	     (dtype->file state-copy (get state-copy 'statefile)))
+	     (onerror
+		 (begin
+		   (dtype->file state-copy (get state-copy 'statefile))
+		   (lognotice |BatchSave| 
+		     "Finished saving batch state to " (get state 'statefile) 
+		     " in " (elapsed-time started) "s")
+		   (log-resources))
+		 (lambda (ex)
+		   (logwarn |SaveFailed| 
+		     "Couldn't write state file " (get state-copy 'statefile) ":\n"
+		     (pprint state-copy)))))
 	   (set! saving #f)))))
 
 (defslambda (batch/finish! (state batch-state) (sleep-for 4))
@@ -221,8 +241,10 @@
     (unless (pre-save)
       (logwarn |BatchSaveAbort| "PRESAVE function would have aborted")
       (set! saving #f)))
-  (logwarn |BatchFinished| "Starting to save databases")
-  (let ((threads
+  (logwarn |BatchFinished| "Starting to save current state")
+  (log-resources)
+  (let ((started (elapsed-time))
+	(threads
 	 (choice
 	  (for-choices (pool (get state 'pools))
 	    (threadcall commit-pool pool))
@@ -259,7 +281,11 @@
       (drop! (get state-copy 'slotindex)
 	     (get (get state-copy 'slotindex) 'slots))
       (drop! state-copy 'init)
-      (dtype->file state-copy (get state-copy 'statefile)))))
+      (dtype->file state-copy (get state-copy 'statefile)))
+    (lognotice |BatchFinished| 
+      "Finished saving current state to " (get state 'statefile) 
+      " in " (elapsed-time started) "s")
+    (log-resources)))
 
 (defslambda (getsavelock)
   (and (not saving) 
