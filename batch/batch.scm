@@ -359,7 +359,7 @@
 	  (get state 'nthreads) " threads) "))
       " load= "
       (let ((load (loadavg)))
-	(printout (first load) " ⋯  " (second load) " ⋯  " (third load))))
+	(printout (first load) "  ⋯  " (second load) "  ⋯  " (third load))))
     (lognotice |Resources|
       "MEM=" ($bytes (get u 'memusage)) 
       ", VMEM=" ($bytes (get u 'vmemusage))
