@@ -10,7 +10,7 @@
 		   freqfns use-wordforms})
 
 ;; For index-name, at least
-(use-module '{texttools reflection logger})
+(use-module '{texttools reflection logger varconfig})
 ;; When BRICOSOURCE is ".db"
 (use-module 'usedb)
 ;; For custom methods
@@ -27,6 +27,9 @@
 (define places-pool {})
 
 (define brico.db #f)
+
+(define brico-readonly #t)
+(varconfig! brico:readonly brico-readonly)
 
 (define absfreqs {})
 
@@ -46,7 +49,7 @@
 		(or (has-suffix val ".db")
 		    (file-exists? (string-append val ".db"))))
 	   (set! bricosource val)
-	   (set! brico.db (usedb val))
+	   (set! brico.db (usedb val `#[readonly ,brico-readonly]))
 	   (set! brico-index (get brico.db '%indexes))
 	   (set! brico-pool (name->pool "brico.framerd.org"))
 	   (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
@@ -57,8 +60,8 @@
 		      #f)))
 	  (else
 	   (set! bricosource val)
-	   (use-pool val)
-	   (set! brico-index (onerror (use-index val) #f))
+	   (use-pool val `#[readonly ,brico-readonly])
+	   (set! brico-index (onerror (use-index val `#[readonly ,brico-readonly]) #f))
 	   (set! brico-pool (name->pool "brico.framerd.org"))
 	   (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
 	   (set! names-pool (name->pool "namedb.beingmeta.com"))
