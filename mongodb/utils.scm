@@ -53,20 +53,20 @@
 (defambda (generate-index-specs specs)
   (let ((specs (for-choices (spec specs)
 		 (cond ((symbol? spec)
-			(mongomap "key" `#[,(downcase spec) 1]
-				  "name" (glom (downcase spec) "_" "1")))
+			`#["key" #[,(downcase spec) 1]
+			   "name" ,(glom (downcase spec) "_" "1")])
 		       ((string? spec)
-			(mongomap "key" `#[,spec 1]
-				  "name" (glom spec "_" "1")))
+			#["key" #[,spec 1]
+			  "name" ,(glom spec "_" "1")])
 		       ((vector? spec)
 			(let ((keyspec '()))
 			  (doseq (spec spec)
 			    (set! keyspec 
 				  (cons* 1 (if (symbol? spec) (downcase spec) spec)
 					 keyspec)))
-			  (mongomap "key" (apply mongomap (reverse keyspec))
-				    "name" (stringout (doseq (elt (reverse keyspec) i)
-							(printout (if (> i 0) "_") elt))))))
+			  #["key" ,(apply frame-create #f (reverse keyspec))
+			    "name" ,(stringout (doseq (elt (reverse keyspec) i)
+						 (printout (if (> i 0) "_") elt)))]))
 		       ((table? spec) (generate-index-spec spec))
 		       (else (irritant spec "Bad index spec"))))))
     (if (singleton? specs) (mongovec specs)
@@ -99,32 +99,31 @@
 	    (stringout (doseq (elt (reverse key) i)
 			 (printout (if (> i 0) "_") 
 			   (if (symbol? elt) (downcase elt) elt))))))
-    (mongomap 
-      "key" (apply mongomap (reverse key))
-      "name" name
-      "unique" unique
-      "sparse" sparse
-      "background" background
-      "expireAfterSeconds" ttl)))
+    `#["key" ,(apply frame-create #f (reverse key))
+       "name" ,name
+       "unique" ,unique
+       "sparse" ,sparse
+       "background" ,background
+       "expireAfterSeconds" ,ttl]))
 
 (define (collection/new db name (opts #f))
-  (mongodb/do db (monogmap "create" name 
-		       "capped" (getopt opts 'capped {})
-		       "indexids" (getopt opts 'indexid {})
-		       "maxsize" (getopt opts 'maxsize {})
-		       "maxdocs" (getopt opts 'maxdocs {}))))
+  (mongodb/do db `#["create" ,name 
+		    "capped" ,(getopt opts 'capped {})
+		    "indexids" ,(getopt opts 'indexid {})
+		    "maxsize" ,(getopt opts 'maxsize {})
+		    "maxdocs" ,(getopt opts 'maxdocs {})]))
 
 (define (collection/rename! collection newname (db))
   (set! db (mongodb/getdb collection))
-  (mongodb/do db (monogmap "renameCollection" 
-		       (glom (mongodb/name collection) "/" (collection/name collection))
-		       "to" newname)))
+  (mongodb/do db `#["renameCollection" 
+		    ,(glom (mongodb/name collection) "/" (collection/name collection))
+		    "to" ,newname]))
 
 (define (collection/drop! collection)
-  (mongodb/do db (monogmap "drop" (collection/name collection))))
+  (mongodb/do db `#["drop" ,(collection/name collection)]))
 
 (define (mgo/dropdb! db dbname)
-  (mongodb/do db (monogmap "dropDatabse" 1)))
+  (mongodb/do db #["dropDatabse" 1]))
 
 (define (mgo/params/list arg (db))
   (set! db (if (mongodb? arg) arg (mongodb/getdb arg)))

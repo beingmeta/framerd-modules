@@ -229,12 +229,6 @@
 	    (map (lambda (e) (adjunct-query e subjects)) (cdr unpacked))
 	    '%mongovec
 	    #f #f)))
-	((mongomap? query)
-	 (let ((unpacked (unpack-compound query)))
-	   (vector->compound
-	    (map (lambda (e) (adjunct-query e subjects)) (cdr unpacked))
-	    '%mongomap
-	    #f #f)))
 	(else query)))
 
 ;;; Handling mongo/pool arguments
