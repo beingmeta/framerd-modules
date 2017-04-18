@@ -10,7 +10,7 @@
 
 (module-export! 'usedb)
 
-(define (use-component usefn name dbname (warn #t))
+(define (use-component usefn name dbname (opts #f) (warn #t))
   (cond ((not (string? name)))
 	((position #\@ name)
 	 (onerror (usefn name)
@@ -22,18 +22,22 @@
 	   (lambda (v) (fail))))
 	((has-prefix name "/")
 	 (if (file-exists? name)
-	     (usefn name)
+	     (if opts
+		 (usefn name opts) 
+		 (usefn name))
 	     (prog1 (fail)
 	       (when warn
 		 (warning "Can't access file " name " from " dbname)))))
 	(else
 	 (if (file-exists? (get-component name dbname))
-	     (usefn (get-component name dbname))
+	     (if opts 
+		 (usefn (get-component name dbname) opts)
+		 (usefn (get-component name dbname)))
 	     (prog1 (fail)
 	       (when warn
 		 (warning "Can't access file " name " from " dbname)))))))
 
-(define (usedb name)
+(define (usedb name (opts #f))
   (let ((dbname (cond ((file-exists? name) name)
 		      ((file-exists? (stringout name ".db"))
 		       (stringout name ".db"))
@@ -46,10 +50,10 @@
 	     (and (file-exists? dbname)
 		  (let ((dbdata (file->dtype dbname)))
 		    (do-choices (pool (get dbdata 'pools))
-		      (add! dbdata '%pools (use-component use-pool pool dbname)))
+		      (add! dbdata '%pools (use-component use-pool pool dbname opts)))
 		    (do-choices (index (get dbdata '{indexes indices}))
 		      (add! dbdata '%indexes 
-			    (use-component use-index index dbname)))
+			    (use-component use-index index dbname opts)))
 		    (do-choices (config (get dbdata 'configs))
 		      (cond ((not (pair? config)))
 			    ((and (pair? (cdr config))
@@ -62,7 +66,7 @@
 		      (do-choices (slotid (getkeys mi))
 			(let ((index (get mi slotid)))
 			  (add! rmi slotid
-				(use-component open-index index dbname #f))))
+				(use-component open-index index dbname opts #f))))
 		      (add! dbdata '%metaindex rmi))
 		    dbdata))
 	     dbname))))
