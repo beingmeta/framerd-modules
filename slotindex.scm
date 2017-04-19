@@ -39,7 +39,7 @@
     (let* ((base (frame-create #f  
 		   'slotindex 'slotindex 
 		   'directory dir 'prefix prefix
-		   'pools (use-pool (getopt opts 'pools))
+		   'pools (getopt opts 'pools {})
 		   'custom #[]
 		   'opts opts)))
       (do-choices (slot slots)
