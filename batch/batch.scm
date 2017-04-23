@@ -45,8 +45,8 @@
 
 (define %nosusbt '{pre-save post-save})
 
-(define batch-state #[])
-(define init-state #f)
+(define-init batch-state #[])
+(define-init init-state #f)
 
 (defambda (nstore! table slot value)
   (unless (fail? value) (store! table slot value)))
@@ -218,6 +218,7 @@
 		       (try (+ (get state slot )(get totals slot))
 			    (get totals slot)
 			    (get state slot))))
+	     (store! state-copy (getkeys totals) 0)
 	     (drop! state-copy 'init)
 	     (onerror
 		 (begin
