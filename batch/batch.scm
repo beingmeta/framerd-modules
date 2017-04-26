@@ -17,7 +17,7 @@
 (define-init maxtime #f)
 (varconfig! maxtime maxtime config:interval)
 
-(define-init maxmem (->exact (* 0.8 (physmem))))
+(define-init maxmem (->exact (* 0.9 (physmem))))
 (varconfig! maxmem maxmem config:bytes)
 
 (define-init maxvmem (physmem))
@@ -330,24 +330,29 @@
 	  (when (test state rate)
 	    (printout (printnum (/ (get state rate) elapsed) 1) " "
 	      (downcase rate) "/sec; "))))))
-  (when (and init-state (test state 'logcounts))
-    (lognotice |Overall|
-      (do-choices (count (get state 'logcounts) i)
-	(let ((slot (if (symbol? count) count (if (pair? count) (car count) #f))))
-	  (when (and slot (test state slot) (test init-state slot))
-	    (when (> i 0) (printout "; "))
-	    (printout ($num (+ (get state slot) (get init-state slot))) " " (downcase slot))
-	    (when (pair? count)
-	      (printout " (" (show% (+ (get state slot) (get init-state slot))
-				    (cdr count)) ")")))))))
-  (when (and init-state (test state 'logrates) (test init-state 'elapsed))
-    (let ((elapsed (+ (get init-state 'elapsed)
+  (when (and (test state 'totals) (test state 'logcounts))
+    (let ((totals (get state 'totals)))
+      (lognotice |Overall|
+	(do-choices (count (get state 'logcounts) i)
+	  (let ((slot (if (symbol? count) count (if (pair? count) (car count) #f))))
+	    (when (and slot (test state slot) (test totals slot))
+	      (when (> i 0) (printout "; "))
+	      (printout ($num (+ (get state slot) (get totals slot)))
+		" " (downcase slot))
+	      (when (pair? count)
+		(printout " (" (show% (+ (get state slot) (get totals slot))
+				      (cdr count)) ")"))))))))
+  (when (and init-state (test state 'totals)
+	     (test state 'logrates) (test init-state 'elapsed)
+	     (test (get state 'totals) (get state 'logrates)))
+    (let ((totals (get state 'totals))
+	  (elapsed (+ (get init-state 'elapsed)
 		      (elapsed-time start-time))))
       (lognotice |Overall|
 	(do-choices (rate (get state 'logrates) i)
-	  (when (and (test state rate) (test init-state rate))
+	  (when (and (test state rate) (test totals rate))
 	    (printout 
-	      (printnum (/ (+ (get state rate) (get init-state rate))
+	      (printnum (/ (+ (get state rate) (get totals rate))
 			   elapsed) 1) " "
 	      (downcase rate) "/sec; "))))))
   (let ((u (rusage)))
