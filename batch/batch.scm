@@ -99,7 +99,9 @@
       (exists batch/threshtest "Time" 
 	      (elapsed-time start-time) maxtime secs->string)
       (exists batch/threshtest "Memory" (memusage) maxmem $bytes)
-      (exists batch/threshtest "VMEM" (vmemusage) maxvmem $bytes)
+      (and maxvmem (> (vmemusage) maxvmem)
+	   (begin (release-memory)
+	     (exists batch/threshtest "VMEM" (vmemusage) maxvmem $bytes)))
       (exists batch/threshtest "Progress" (get state 'progress) maxcount)
       (exists batch/threshtest "LOAD" (get (rusage) 'load) maxload)
       (exists test-limit state tasklimits)))
