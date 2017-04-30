@@ -271,6 +271,7 @@
       (define set-opcode 0x15)
       (define setplus-opcode 0x16)
       (define void-opcode 0x17)
+      (define symref-opcode {})
       (define xref-opcode 0xA2))
     (begin
       (use-opcode AMBIGUOUS? 1)
@@ -341,7 +342,9 @@
       (define set-opcode (name2op "SET!OP"))
       (define setplus-opcode (name2op "SET+!OP"))
       (define void-opcode (name2op "VOIDOP"))
-      (define xref-opcode "XREF")))
+      (define assign-opcode (name2op "ASSIGN!"))
+      (define symref-opcode (name2op "SYMREF"))
+      (define xref-opcode (name2op "XREF"))))
 
 ;;; The core loop
 
@@ -405,7 +408,7 @@
 		       (list 'quote (qc v))
 		       v)))
 		((not module) expr)
-		(else `(,(try (tryif use-opcodes (try-opcode %modref))
+		(else `(,(try (tryif use-opcodes symref-opcode)
 			      (tryif (getopt opts 'fcnrefs fcnrefs-default)
 				(force-fcnid %modref))
 			      %modref)
@@ -500,24 +503,25 @@
 	     (choice
 	      optimized-exprs
 	      (tryif (exists? unoptimized)
-		(callcons (qc (fcnref
-			       (map-opcode
-				(cond ((not from) (try unoptimized head))
-				      ((fail? value) 
-				       `(,(try (try-opcode %modref)
-					       (tryif (getopt opts 'fcnrefs fcnrefs-default)
-						 (force-fcnid %modref))
-					       %modref)
-					 ,from ,head))
-				      ((test from '%nosubst head) head)
-				      ((test from '%volatile head)
-				       (try (try-opcode %modref)
-					    (tryif (getopt opts 'fcnrefs fcnrefs-default)
-					      (force-fcnid %modref))
-					    %modref))
-				      (else unoptimized))
-				n-exprs)
-			       head from opts))
+		(callcons 
+		 (qc (fcnref
+		      (map-opcode
+		       (cond ((not from) (try unoptimized head))
+			     ((fail? value) 
+			      `(,(try (tryif use-opcodes symref-opcode)
+				      (tryif (getopt opts 'fcnrefs fcnrefs-default)
+					(force-fcnid %modref))
+				      %modref)
+				,from ,head))
+			     ((test from '%nosubst head) head)
+			     ((test from '%volatile head)
+			      (try (tryif use-opcodes symref-opcode)
+				   (tryif (getopt opts 'fcnrefs fcnrefs-default)
+				     (force-fcnid %modref))
+				   %modref))
+			     (else unoptimized))
+		       n-exprs)
+		      head from opts))
 			  opt-args)))))
 	  (else
 	   (when (and optdowarn from
@@ -916,8 +920,29 @@
       ,(optimize-let*-bindings (cadr expr) env (cons '() bound) opts lexrefs)
       ,@(let ((bound (cons (map car bindspec) bound)))
 	  (forseq (b body) (optimize b env bound opts lexrefs))))))
-(define (optimize-set-form handler expr env bound opts lexrefs)
-  `(,handler ,(cadr expr) ,(optimize (third expr) env bound opts lexrefs)))
+(define (optimize-assign handler expr env bound opts lexrefs)
+  (let ((var (get-arg expr 1))
+	(setval (get-arg expr 2)))
+    (let ((loc (or (get-lexref var bound 0) 
+		   (if (wherefrom var env)
+		       (cons var (wherefrom var env))
+		       var)))
+	  (optval (optimize setval  env bound opts lexrefs)))
+      (info%watch "OPTIMIZE-ASSIGN" 
+	"DOSPECIAL" (getopt opts 'optspecial special-default)
+	handler expr var setval loc optval opts)
+      (if (getopt opts 'optspecial special-default)
+	  (cond ((symbol? loc) 
+		 ;; If loc is a symbol, we couldn't resolve it to a
+		 ;; lexical contour or enviroment
+		 `(,handler ,var ,optval))
+		((overlaps? handler set!) `
+		 (,assign-opcode ,loc ,optval #f))
+		((overlaps? handler set+!)
+		 `(,assign-opcode ,loc ,optval ,union-opcode))
+		((overlaps? handler default!) `(,assign-opcode ,loc ,optval  #t))
+		(else `(,handler ,var ,optval)))
+	  `(,handler ,var ,optval)))))
 
 (define (optimize-lambda handler expr env bound opts lexrefs)
   `(,handler ,(cadr expr)
@@ -1074,8 +1099,9 @@
   (add! special-form-optimizers letq* optimize-let*))
 (add! special-form-optimizers (choice lambda ambda slambda)
       optimize-lambda)
-(add! special-form-optimizers (choice set! set+! default! define)
-      optimize-set-form)
+(add! special-form-optimizers 
+      (choice set! set+! default! define)
+      optimize-assign)
 
 (add! special-form-optimizers
       (choice dolist dotimes doseq forseq)
