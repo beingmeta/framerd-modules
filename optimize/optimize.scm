@@ -21,36 +21,65 @@
 (use-module 'logger)
 
 (define-init %loglevel %warning%)
-(define-init useopcodes #f)
-(define-init optdowarn #t)
-(define-init lexrefs-default #t)
-(define-init special-default #f)
-(define-init staticfns-default #f)
-(define-init fcnrefs-default #t)
-(varconfig! optimize:special special-default)
-(varconfig! optimize:lexrefs lexrefs-default)
-(varconfig! optimize:staticfns staticfns-default)
-(varconfig! optimize:fcnrefs fcnrefs-default)
-(varconfig! optimize:opcodes useopcodes)
 
+;; OPTLEVEL interpretations
+;; 0: no optimization
+;; 1: fcnrefs + opcodes
+;; 2: substs + lexrefs
+;; 3: rewrites
+(define-init optlevel 3)
+(varconfig! optimize:level optlevel)
+(varconfig! optlevel optlevel)
+
+(define-init fcnrefs-default {})
+(define-init opcodes-default {})
+(define-init lexrefs-default {})
+(define-init substs-default {})
+(define-init rewrite-default {})
+
+(varconfig! optimize:fcnrefs fcnrefs-default)
+(varconfig! optimize:opcodes opcodes-default)
+(varconfig! optimize:substs  substs-default)
+(varconfig! optimize:lexrefs lexrefs-default)
+(varconfig! optimize:rewrite rewrite-default)
+
+(define-init staticfns-default #f)
+(varconfig! optimize:staticfns staticfns-default)
+
+(define-init persist-default #f)
+(varconfig! optimize:persist persist-default)
+
+(define (optmode-macro optname thresh varname)
+  (macro expr
+    `(getopt ,(cadr expr) ',optname
+	     (try ,varname (>= (getopt ,(cadr expr) 'optlevel optlevel)
+			       ,thresh)))))
+(define optmode
+  (macro expr
+    (let ((optname (get-arg expr 1))
+	  (opthresh (get-arg expr 2))
+	  (optvar (get-arg expr 3)))
+      `(optmode-macro ',optname ,opthresh ',optvar))))
+
+(define use-opcodes? (optmode opcodes 2 opcodes-default))
+(define use-substs? (optmode substs 2 substs-default))
+(define use-lexrefs? (optmode lexrefs 2 lexrefs-default))
+(define rewrite? (optmode 'ewrite 3 rewrite-default))
+
+;;; Controls whether optimization warnings are emitted in real time
+;;; (when encountered)
+(define-init optwarn #t)
+(define optwarn-config
+  (slambda (var (val 'unbound))
+    (cond ((eq? val 'unbound) optwarn)
+	  (val (set! optwarn #t))
+	  (else (set! optwarn #f)))))
+(config-def! 'optwarn optwarn-config)
 (defslambda (codewarning warning)
   (debug%watch "CODEWARNING" warning)
   (threadset! 'codewarnings (choice warning (threadget 'codewarnings))))
 
-(define-init module? 
-  (lambda (arg) 
-    (and (table? arg) (not (or (environment? arg) (pair? arg))))))
-
-(define optdowarn-config
-  (slambda (var (val 'unbound))
-    (cond ((eq? val 'unbound) optdowarn)
-	  (val (set! optdowarn #t))
-	  (else (set! optdowarn #f)))))
-(config-def! 'optdowarn optdowarn-config)
-
-(define-init static-refs (make-hashtable))
-
-(define-init fcnids (make-hashtable))
+;;; What we export
 
 (module-export! '{optimize! optimized optimized?
 		  optimize-procedure! optimize-module!
@@ -60,7 +89,13 @@
 		  deoptimize-module!
 		  deoptimize-bindings!})
 
-(define %volatile '{optdowarn useopcodes %loglevel})
+;;; Tables
+
+(define-init static-refs (make-hashtable))
+
+(define-init fcnids (make-hashtable))
+
+(define %volatile '{optwarn useopcodes %loglevel})
 
 (varconfig! optimize:checkusage check-module-usage)
 
@@ -170,17 +205,17 @@
 
 (define-init opcode-map (make-hashtable))
 
-(define (map-opcode value (length #f))
-  (if useopcodes
-      (try (try-opcode value length)
+(define (map-opcode value (opts #f) (length #f))
+  (if (use-opcodes? opts)
+      (try (probe-opcode value opts length)
 	   value)
       value))
 
 (define name2op
   (and (bound? name->opcode) name->opcode))
 
-(define (try-opcode value (length #f))
-  (tryif useopcodes
+(define (probe-opcode value (opts #f) (length #f))
+  (tryif (use-opcodes? opts)
     (or (try (get opcode-map (cons value length))
 	     (get opcode-map value))
 	(fail))))
@@ -323,6 +358,12 @@
 
       (use-opcode GET 2)
       (use-opcode TEST 3)
+      (use-opcode TEST 2)
+      (use-opcode ADD! 3)
+      (use-opcode DROP! 3)
+      (use-opcode ASSERT! 3)
+      (use-opcode RETRACT! 3)
+      (use-opcode STORE! 3)
       ;; (def-opcode XREF       0xA2 3)
       (use-opcode %GET 2)
       (use-opcode %TEST 3)
@@ -344,79 +385,97 @@
       (define void-opcode (name2op "VOIDOP"))
       (define assign-opcode (name2op "ASSIGN!"))
       (define symref-opcode (name2op "SYMREF"))
-      (define xref-opcode (name2op "XREF"))))
+      (define xref-opcode (name2op "XREF"))
+      (define union-opcode (name2op "UNION"))
+      (define and-opcode (name2op "AND"))
+      (define or-opcode (name2op "OR"))
+      (define try-opcode (name2op "TRY"))))
 
 ;;; The core loop
 
 (define dont-touch-decls '{%unoptimized %volatile %nosubst})
 
-(defambda (optimize expr env bound opts lexrefs)
+(defambda (optimize expr env bound opts)
   (logdebug "Optimizing " expr " given " bound)
   (cond ((ambiguous? expr)
 	 (for-choices (each expr) 
-	   (optimize each env bound opts lexrefs)))
+	   (optimize each env bound opts)))
 	((fail? expr) expr)
-	((symbol? expr) (optimize-symbol expr env bound opts lexrefs))
+	((symbol? expr) (optimize-symbol expr env bound opts))
 	((not (pair? expr)) expr)
 	((or (pair? (car expr)) (ambiguous? (car expr)))
 	 ;; We assume that special forms always have a symbol in the
 	 ;; head, so anything else we just optimize as a function call.
-	 (optimize-call expr env bound opts lexrefs))
+	 (optimize-call expr env bound opts))
 	((and (symbol? (car expr)) 
 	      (not (symbol-bound? (car expr) env))
 	      (not (get-lexref (car expr) bound 0))
 	      (not (test env '%nowarn (car expr))))
 	 (codewarning (cons* 'UNBOUND expr bound))
-	 (when optdowarn
+	 (when optwarn
 	   (warning "The symbol " (car expr) " in " expr
 		    " appears to be unbound given bindings "
 		    (apply append bound)))
 	 expr)
-	(else (optimize-expr expr env bound opts lexrefs))))
+	(else (optimize-expr expr env bound opts))))
 
-(defambda (optimize-symbol expr env bound opts lexrefs)
+(define optimize-body
+  (macro expr
+    (let ((body-expr (get-arg expr 1))
+	  (env-expr (get-arg expr 2 'env))
+	  (bound-expr (get-arg expr 3 'bound))
+	  (opts-expr (get-arg expr 4 'opts)))
+      `(forseq (_subexpr ,body-expr) 
+	 (optimize _subexpr ,env-expr ,bound-expr ,opts-expr)))))
+
+(defambda (optimize-symbol expr env bound opts)
   (let ((lexref (get-lexref expr bound 0))
-	(use-opcodes (getopt opts 'opcodes useopcodes)))
+	(use-opcodes (use-opcodes? opts)))
     (debug%watch "OPTIMIZE/SYMBOL" expr lexref env bound)
     (if lexref
-	(if lexrefs lexref expr)
+	(if (use-lexrefs? opts) lexref expr)
 	(let* ((srcenv (wherefrom expr env))
 	       (module (and srcenv (module? srcenv) srcenv))
 	       (value (and srcenv (get srcenv expr))))
 	  (debug%watch "OPTIMIZE/SYMBOL/module" 
-	    expr module srcenv env bound optdowarn)
+	    expr module srcenv env bound optwarn)
 	  (when (and module (module? env))
-	    (add! env '%free_vars expr)
+	    (add! env '%symrefs expr)
 	    (when (and module (table? module))
-	      (add! env '%used_modules
+	      (add! env '%modrefs
 		    (pick (get module '%moduleid) symbol?))))
-	  (cond ((and (not srcenv) (test env '%nowarn expr)))
+	  (cond ((and (not srcenv)
+		      (or (test env '%nowarn expr)
+			  (testopt opts 'nowarn expr)
+			  (testopt opts 'nowarn #t))))
 		((not srcenv)
 		 (codewarning (cons* 'UNBOUND expr bound))
 		 (when env
 		   (add! env '%warnings (cons* 'UNBOUND expr bound)))
-		 (when optdowarn
+		 (when (or optwarn (not env))
 		   (warning "The symbol " expr
 			    " appears to be unbound given bindings "
 			    (apply append bound)))
 		 expr)
 		((not module) expr)
-		((%test srcenv '%nosubst expr) expr)
+		((%test srcenv dont-touch-decls expr) expr)
 		((%test srcenv '%constants expr)
 		 (let ((v (%get srcenv expr)))
 		   (if (or (pair? v) (symbol? v) (ambiguous? v))
 		       (list 'quote (qc v))
 		       v)))
 		((not module) expr)
+		;; TODO: add 'modrefs' which resolves module.var to a
+		;; fcnref and uses that for the symbol
 		(else `(,(try (tryif use-opcodes symref-opcode)
 			      (tryif (getopt opts 'fcnrefs fcnrefs-default)
 				(force-fcnid %modref))
 			      %modref)
 			,module ,expr)))))))
 
-(define (do-rewrite rewriter expr env bound opts lexrefs)
+(define (do-rewrite rewriter expr env bound opts)
   (onerror
-      (optimize (rewriter expr) env bound opts lexrefs)
+      (optimize (rewriter expr) env bound opts)
       (lambda (ex)
 	(logwarn |RewriteError| 
 	  "Error rewriting " expr " with " rewriter)
@@ -427,31 +486,32 @@
   (when (and (procedure-min-arity value)
 	     (< n-exprs (procedure-min-arity value)))
     (codewarning (list 'TOOFEWARGS expr value))
-    (when optdowarn
+    (when optwarn
       (warning "The call to " expr
 	       " provides too few arguments "
 	       "(" n-exprs ") for " value)))
   (when (and (procedure-arity value)
 	     (> n-exprs (procedure-arity value)))
     (codewarning (list 'TOOMANYARGS expr value))
-    (when optdowarn
+    (when optwarn
       (warning "The call to " expr " provides too many "
 	       "arguments (" n-exprs ") for " value))))
 
-(define (optimize-expr expr env bound opts lexrefs)
+(define (optimize-expr expr env bound opts)
   (let* ((head (get-arg expr 0))
-	 (use-opcodes (getopt opts 'opcodes useopcodes))
+	 (use-opcodes (use-opcodes? opts))
 	 (n-exprs (-1+ (length expr)))
 	 (value (if (symbol? head)
-		    (or (get-lexref head bound 0) (get env head))
+		    (or (get-lexref head bound 0)
+			(get env head))
 		    head))
 	 (from (and (symbol? head)
 		    (not (get-lexref head bound 0))
 		    (wherefrom head env))))
     (when (and from (module? env))
-      (add! env '%free_vars expr)
+      (add! env '%symrefs expr)
       (when (and from (table? from))
-	(add! env '%used_modules
+	(add! env '%modrefs
 	      (pick (get from '%moduleid) symbol?))))
     (cond ((or (and from (test from dont-touch-decls head))
 	       (and env (test env dont-touch-decls head)))
@@ -459,7 +519,7 @@
 	  ((and from (%test from '%rewrite)
 		(%test (get from '%rewrite) head))
 	   (do-rewrite (get (get from '%rewrite) head) 
-		       expr env bound opts lexrefs))
+		       expr env bound opts))
 	  ((and (ambiguous? value)
 		(or (exists special-form? value)
 		    (exists macro? value)))
@@ -478,7 +538,7 @@
 			(get special-form-optimizers
 			     (procedure-name value))
 			(get special-form-optimizers head)))
-		  (transformed (try (optimizer value expr env bound opts lexrefs)
+		  (transformed (try (optimizer value expr env bound opts)
 				    expr))
 		  (newhead (car transformed)))
 	     (cons (try (get opcode-map newhead)
@@ -487,17 +547,16 @@
 			newhead)
 		   (cdr transformed))))
 	  ((exists macro? value)
-	   (optimize (macroexpand value expr) env
-		     bound opts lexrefs))
+	   (optimize (macroexpand value expr) env bound opts))
 	  ((fail? (reject value applicable?))
 	   (check-arguments value n-exprs expr)
-	   (let* ((opt-args (optimize-args (cdr expr) env bound opts lexrefs))
+	   (let* ((opt-args (optimize-args (cdr expr) env bound opts))
 		  (optimized-exprs {})
 		  (unoptimized {}))
 	     (do-choices (proc value)
 	       (let ((optimized ((get procedure-optimizers proc)
-				 proc expr env bound opts lexrefs)))
-		 (if (exists? optimized) 
+				 proc expr env bound opts)))
+		 (if (exists? optimized)
 		     (set+! optimized-exprs optimized)
 		     (set+! unoptimized proc))))
 	     (choice
@@ -520,11 +579,12 @@
 				     (force-fcnid %modref))
 				   %modref))
 			     (else unoptimized))
+		       opts
 		       n-exprs)
 		      head from opts))
-			  opt-args)))))
+		 opt-args)))))
 	  (else
-	   (when (and optdowarn from
+	   (when (and optwarn from
 		      (not (test from '{%nosubst %volatile} head)))
 	     (codewarning (cons* 'NOTFCN expr value))
 	     (warning "The current value of " expr " (" head ") "
@@ -532,74 +592,75 @@
 		      (apply append bound)))
 	   expr))))
 
-(defambda (optimize-apply procs headexpr expr env bound opts lexrefs)
-  (let ((unoptimized {})
-	(exprs {}))
-    (do-choices (proc procs)
-      (let ((optimized ((get procedure-optimizers proc) 
-			proc expr env bound opts lexrefs)))
-	(if (exists? optimized)
-	    (set+! exprs optimized)
-	    (set+! unoptimized proc))))
-    (choice exprs
-	    (for-choices (proc unoptimized)
-	      ))))
-  
 (define (callcons head tail)
   (cons head (->list tail)))
 
-(defambda (optimize-call expr env bound opts lexrefs)
+(defambda (optimize-call expr env bound opts)
   (if (pair? expr)
       (if (or (symbol? (car expr)) (pair? (car expr))
 	      (ambiguous? (car expr)))
-	  `(,(optimize (car expr) env bound opts lexrefs)
+	  `(,(optimize (car expr) env bound opts)
 	    ,@(if (pair? (cdr expr))
-		  (optimize-args (cdr expr) env bound opts lexrefs)
+		  (optimize-args (cdr expr) env bound opts)
 		  (cdr expr)))
-	  (optimize-args expr env bound opts lexrefs))
+	  (optimize-args expr env bound opts))
       expr))
 
-(defambda (optimize-args expr env bound opts lexrefs)
+(defambda (optimize-args expr env bound opts)
   (forseq (arg expr)
-    (if (or (qchoice? arg) (fail? arg)) 
+    (if (or (qchoice? arg) (fail? arg))
 	arg
-	(optimize arg env bound opts lexrefs))))
+	(optimize arg env bound opts))))
 
-(define (optimize-procedure! proc (opts #f) (lexrefs))
-  (default! lexrefs (getopt opts 'lexrefs lexrefs-default))
+(define (optimize-procedure! proc (opts #f))
   (threadset! 'codewarnings #{})
   (unless (reflect/get proc 'optimized)
-    (let* ((env (procedure-env proc))
-	   (arglist (procedure-args proc))
-	   (body (procedure-body proc))
-	   (bound (list (arglist->vars arglist)))
-	   (initial (and (pair? body) (car body)))
-	   (new-body (forseq (b body)
-		       (optimize b env bound opts lexrefs))))
-      (unless (null? body)
-	(reflect/store! proc 'optimized (gmtimestamp))
-	(reflect/store! proc 'original_args arglist)
-	(reflect/store! proc 'original_body body)
-	(set-procedure-body! proc new-body)
-	(when (pair? arglist)
-	  (let ((optimized-args (optimize-arglist arglist env opts lexrefs)))
-	    (unless (equal? arglist optimized-args)
-	      (set-procedure-args! proc optimized-args))))
-	(when (exists? (threadget 'codewarnings))
-	  (warning "Errors optimizing " proc ": "
-		   (do-choices (warning (threadget 'codewarnings))
-		     (printout "\n\t" warning)))
-	  (threadset! 'codewarnings #{}))))))
+    (onerror
+	(let* ((env (procedure-env proc))
+	       (arglist (procedure-args proc))
+	       (body (procedure-body proc))
+	       (bound (list (arglist->vars arglist)))
+	       (initial (and (pair? body) (car body)))
+	       (opts (if (reflect/get proc 'optimize)
+			 (if opts
+			     (cons (reflect/get proc 'optimize) opts)
+			     (reflect/get proc 'optimize))
+			 opts))
+	       (new-body (optimize-body body env bound opts)))
+	  (unless (null? body)
+	    (reflect/store! proc 'optimized (gmtimestamp))
+	    (reflect/store! proc 'original_args arglist)
+	    (reflect/store! proc 'original_body body)
+	    (set-procedure-body! proc new-body)
+	    (when (pair? arglist)
+	      (let ((optimized-args (optimize-arglist arglist env opts)))
+		(unless (equal? arglist optimized-args)
+		  (set-procedure-args! proc optimized-args))))
+	    (if (exists? (threadget 'codewarnings))
+		(warning "Errors optimizing " proc ": "
+			 (do-choices (warning (threadget 'codewarnings))
+			   (printout "\n\t" warning)))
+		(lognotice |Optimized| proc))
+	    (threadset! 'codewarnings #{})))
+	(lambda (ex) 
+	  (logwarn |OptimizationError|
+	    "While optimizing "
+	    (or (procedure-name proc) proc) ", got "
+	    (error-condition ex) " in " (error-context ex) 
+	    (if (error-details ex) (printout " (" (error-details ex) ")"))
+	    (when (error-irritant? ex)
+	      (printout "\n" (pprint (error-irritant ex)))))
+	  (if persist-default #f ex)))))
 
-(define (optimize-arglist arglist env opts lexrefs)
+(define (optimize-arglist arglist env opts)
   (if (pair? arglist)
       (cons
        (if (and (pair? (car arglist)) (pair? (cdr (car arglist)))
 		(singleton? (cadr (car arglist))))
 	   `(,(caar arglist) 
-	     ,(optimize (cadr (car arglist)) env '() opts lexrefs))
+	     ,(optimize (cadr (car arglist)) env '() opts))
 	   (car arglist))
-       (optimize-arglist (cdr arglist) env opts lexrefs))
+       (optimize-arglist (cdr arglist) env opts))
       arglist))
   
 (define (deoptimize-procedure! proc)
@@ -613,11 +674,7 @@
       (reflect/drop! proc 'original_args))))
 
 (define (procedure-optimized? arg)
-  (let* ((body (procedure-body arg))
-	 (exprs (->list (pick (pick (elts body) {rail? pair?}) length >= 3)))
-	 (original-body (pick exprs car 'comment cadr '|original|))
-	 (original-args (pick exprs car 'comment cadr '|originalargs|)))
-    (and (exists? original-body) (exists? original-args))))
+  (reflect/get arg 'optimized))
 
 (define (optimized? arg)
   (if (compound-procedure? arg)
@@ -632,12 +689,15 @@
       (irritant+ spec |GetModuleFailed| optimize-module
 		 "Couldn't load module " spec))))
 
-(define (optimize-module! module (opts) (lexrefs))
+(define (optimize-module! module (opts #f))
   (loginfo |OptimizeModule| module)
   (when (symbol? module)
     (set! module (optimize-get-module module)))
-  (default! opts (try (get module '%optimize_options) #f))
-  (default! lexrefs (getopt opts 'lexrefs lexrefs-default))
+  (set! opts
+	(if opts
+	    (try (cons (get module '%optimize_options) opts)
+		 opts)
+	    (try (get module '%optimize_options) #f)))
   (let ((bindings (module-bindings module))
 	(usefcnrefs (getopt opts 'fcnrefs fcnrefs-default))
 	(count 0))
@@ -646,11 +706,11 @@
 	(when (and (exists? value) (compound-procedure? value))
 	  (loginfo |OptimizeModule| "Optimizing procedure " var " in " module)
 	  (set! count (1+ count))
-	  (optimize-procedure! value opts lexrefs))
+	  (optimize-procedure! value opts))
 	(when (and usefcnrefs (exists? value) (applicable? value))
 	  (update-fcnid! var module value))))
     (when (exists symbol? (get module '%moduleid))
-      (let* ((referenced-modules (get module '%used_modules))
+      (let* ((referenced-modules (get module '%modrefs))
 	     (used-modules
 	      (eval `(within-module ',(pick (get module '%moduleid) symbol?)
 				    (,getmodules))))
@@ -679,8 +739,7 @@
 	    (set! count (1+ count))))))
     count))
 
-(define (optimize-bindings! bindings (opts #f) (lexrefs))
-  (default! lexrefs (getopt opts 'lexrefs lexrefs-default))
+(define (optimize-bindings! bindings (opts #f))
   (logdebug "Optimizing bindings " bindings)
   (let ((count 0)
 	(skip (getopt opts 'dont-optimize
@@ -692,11 +751,11 @@
 	(if (bound? value)
 	    (when (compound-procedure? value)
 	      (set! count (1+ count))
-	      (optimize-procedure! value #f lexrefs))
+	      (optimize-procedure! value #f))
 	    (warning var " is unbound"))))
     count))
 
-(define (deoptimize-bindings! bindings (opts #f) (lexrefs))
+(define (deoptimize-bindings! bindings (opts #f))
   (logdebug "Deoptimizing bindings " bindings)
   (let ((count 0))
     (do-choices (var (getkeys bindings))
@@ -761,108 +820,95 @@
 			"Not a compound procedure, environment, or module")))
   arg)
 
-;;; Procedure optimiziers
+;;; Procedure optimizers
 
-(define (optimize-compound-ref proc expr env bound opts lexrefs (off-arg) (type-arg))
+(define (optimize-compound-ref proc expr env bound opts (off-arg) (type-arg))
   (set! off-arg (get-arg expr 2 #f))
   (set! type-arg (get-arg expr 3 #f))
   (tryif (fixnum? off-arg)
     (tryif (and (pair? type-arg) (= (length type-arg) 2)
 		(overlaps? (car type-arg) {'quote quote}))
-      `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs)
+      `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts)
 		     ,off-arg ,(cadr type-arg)))
     (tryif (and (pair? type-arg) (eq? (car type-arg) quote-opcode))
-      `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs)
+      `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts)
 		     ,off-arg ,(cadr type-arg)))
     (tryif (and (pair? type-arg) (not type-arg))
-      `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs)
+      `(,xref-opcode ,(optimize (get-arg expr 1) env bound opts)
 		     ,off-arg))))
 
 (store! procedure-optimizers compound-ref optimize-compound-ref)
 
 ;;;; Special form handlers
 
-(define (optimize-block handler expr env bound opts lexrefs)
-  (cons (map-opcode handler (length (cdr expr)))
-	(forseq (x (cdr expr))
-	  (optimize x env bound opts lexrefs))))
+(define (optimize-block handler expr env bound opts)
+  (cons (map-opcode handler opts (length (cdr expr)))
+	(optimize-body (cdr expr))))
 
-(define (optimize-quote handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
+(define (optimize-quote handler expr env bound opts)
+  (if (use-opcodes? opts)
       (list quote-opcode (get-arg expr 1))
       expr))
 
-(define (optimize-begin handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
-      (cons begin-opcode
-	    (forseq (x (cdr expr))
-	      (optimize x env bound opts lexrefs)))
-      (optimize-block handler expr env bound opts lexrefs)))
+(define (optimize-begin handler expr env bound opts)
+  (if (use-opcodes? opts)
+      (cons begin-opcode (optimize-body (cdr expr)))
+      (optimize-block handler expr env bound opts)))
 
-(define (optimize-if handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
-      (cons branch-opcode
-	    (forseq (x (cdr expr))
-	      (optimize x env bound opts lexrefs)))
-      (optimize-block handler expr env bound opts lexrefs)))
+(define (optimize-if handler expr env bound opts)
+  (if (use-opcodes? opts)
+      (cons branch-opcode (optimize-body (cdr expr)))
+      (optimize-block handler expr env bound opts)))
 
-(define (optimize-not handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
-      `(,not-opcode ,(optimize (get-arg expr 1) env bound opts lexrefs))
-      (optimize-block handler expr env bound opts lexrefs)))
+(define (optimize-not handler expr env bound opts)
+  (if (use-opcodes? opts)
+      `(,not-opcode ,(optimize (get-arg expr 1) env bound opts))
+      (optimize-block handler expr env bound opts)))
 
-(define (optimize-when handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
+(define (optimize-when handler expr env bound opts)
+  (if (and (use-opcodes? opts) (rewrite? opts))
       `(,branch-opcode
-	,(optimize (cadr expr) env bound opts lexrefs)
-	(,begin-opcode
-	 ,@(forseq (x (cddr expr))
-	     (optimize x env bound opts lexrefs))
+	,(optimize (cadr expr) env bound opts)
+	(,begin-opcode ,@(optimize-body (cddr expr))
 	 (,void-opcode)))
-      (optimize-block handler expr env bound opts lexrefs)))
-(define (optimize-unless handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
+      (optimize-block handler expr env bound opts)))
+(define (optimize-unless handler expr env bound opts)
+  (if (and (use-opcodes? opts) (rewrite? opts))
       `(,branch-opcode
-	(,not-opcode ,(optimize (cadr expr) env bound opts lexrefs))
-	(,begin-opcode
-	 ,@(forseq (x (cddr expr))
-	     (optimize x env bound opts lexrefs))
-	 (,void-opcode)))
-      (optimize-block handler expr env bound opts lexrefs)))
+	(,not-opcode ,(optimize (cadr expr) env bound opts))
+	(,begin-opcode ,@(optimize-body (cddr expr)) (,void-opcode)))
+      (optimize-block handler expr env bound opts)))
 
-(define (optimize-until handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
+(define (optimize-until handler expr env bound opts)
+  (if (and (use-opcodes? opts) (rewrite? opts))
       `(,begin-opcode
 	(,until-opcode
-	 ,(optimize (cadr expr) env bound opts lexrefs)
-	 ,@(forseq (x (cddr expr))
-	     (optimize x env bound opts lexrefs)))
+	 ,(optimize (cadr expr) env bound opts)
+	 ,@(optimize-body (cddr expr)))
 	(,void-opcode))
-      (optimize-block handler expr env bound opts lexrefs)))
-(define (optimize-while handler expr env bound opts lexrefs)
-  (if (getopt opts 'optspecial special-default)
+      (optimize-block handler expr env bound opts)))
+(define (optimize-while handler expr env bound opts)
+  (if (and (use-opcodes? opts) (rewrite? opts))
       `(,begin-opcode
 	(,until-opcode
-	 (,not-opcode ,(optimize (cadr expr) env bound opts lexrefs))
-	 ,@(forseq (x (cddr expr))
-	     (optimize x env bound opts lexrefs)))
+	 (,not-opcode ,(optimize (cadr expr) env bound opts))
+	 ,@(optimize-body (cddr expr)))
 	(,void-opcode))
-      (optimize-block handler expr env bound opts lexrefs)))
+      (optimize-block handler expr env bound opts)))
 
-(define (optimize-let handler expr env bound opts lexrefs)
+(define (optimize-let handler expr env bound opts)
   (let* ((bindexprs (cadr expr))
 	 (new-bindexprs
-	  (forseq (x bindexprs)
-	    `(,(car x) ,(optimize (cadr x) env bound opts lexrefs))))
+	  (forseq (x bindexprs) `(,(car x) ,(optimize (cadr x) env bound opts))))
 	 (body (cddr expr)))
     `(,handler ,new-bindexprs
 	       ,@(let ((bound (cons (map car bindexprs) bound)))
-		   (forseq (b body) (optimize b env bound opts lexrefs))))))
-(define (optimize-doexpression handler expr env bound opts lexrefs)
+		   (optimize-body body)))))
+(define (optimize-doexpression handler expr env bound opts)
   (let ((bindspec (cadr expr)) 
 	(body (cddr expr)))
     `(,handler (,(car bindspec)
-		,(optimize (cadr bindspec) env bound opts lexrefs)
+		,(optimize (cadr bindspec) env bound opts)
 		,@(cddr bindspec))
 	       ,@(let ((bound
 			(if (= (length bindspec) 3)
@@ -870,17 +916,17 @@
 				  bound)
 			    (cons (list (first bindspec)) bound))))
 		   (forseq (b body)
-		     (optimize b env bound opts lexrefs))))))
-(define (optimize-do2expression handler expr env bound opts lexrefs)
+		     (optimize b env bound opts))))))
+(define (optimize-do2expression handler expr env bound opts)
   (let ((bindspec (cadr expr)) 
 	(body (cddr expr)))
     `(,handler ,(cond ((pair? bindspec)
 		       `(,(car bindspec)
-			 ,(optimize (cadr bindspec) env bound opts lexrefs)
+			 ,(optimize (cadr bindspec) env bound opts)
 			 ,@(cddr bindspec)))
 		      ((symbol? bindspec)
 		       `(,bindspec
-			 ,(optimize bindspec env bound opts lexrefs)))
+			 ,(optimize bindspec env bound opts)))
 		      (else (error 'syntax "Bad do-* expression")))
 	       ,@(let ((bound
 			(if (symbol? bindspec)
@@ -889,49 +935,46 @@
 				(cons (list (first bindspec)
 					    (third bindspec)) bound)
 				(cons (list (first bindspec)) bound)))))
-		   (forseq (b body) (optimize b env bound opts lexrefs))))))
+		   (forseq (b body) (optimize b env bound opts))))))
 
-(define (optimize-dosubsets handler expr env bound opts lexrefs)
+(define (optimize-dosubsets handler expr env bound opts)
   (let ((bindspec (cadr expr)) 
 	(body (cddr expr)))
     `(,handler (,(car bindspec)
-		,(optimize (cadr bindspec) env bound opts lexrefs)
+		,(optimize (cadr bindspec) env bound opts)
 		,@(cddr bindspec))
 	       ,@(let ((bound (if (= (length bindspec) 4)
 				  (cons (list (first bindspec) (fourth bindspec))
 					bound)
 				  (cons (list (first bindspec)) bound))))
-		   (forseq (b body) (optimize b env bound opts lexrefs))))))
+		   (optimize-body body)))))
 
-(define (optimize-let*-bindings bindings env bound opts lexrefs)
+(define (optimize-let*-bindings bindings env bound opts)
   (if (null? bindings) '()
       `((,(car (car bindings))
-	 ,(optimize (cadr (car bindings)) env bound opts lexrefs))
+	 ,(optimize (cadr (car bindings)) env bound opts))
 	,@(optimize-let*-bindings
 	   (cdr bindings) env
 	   (cons (append (car bound) (list (car (car bindings))))
 		 (cdr bound))
-	   opts lexrefs))))
+	   opts))))
 
-(define (optimize-let* handler expr env bound opts lexrefs)
+(define (optimize-let* handler expr env bound opts)
   (let ((bindspec (cadr expr))
 	(body (cddr expr)))
     `(,handler
-      ,(optimize-let*-bindings (cadr expr) env (cons '() bound) opts lexrefs)
+      ,(optimize-let*-bindings (cadr expr) env (cons '() bound) opts)
       ,@(let ((bound (cons (map car bindspec) bound)))
-	  (forseq (b body) (optimize b env bound opts lexrefs))))))
-(define (optimize-assign handler expr env bound opts lexrefs)
+	  (optimize-body body)))))
+(define (optimize-assign handler expr env bound opts)
   (let ((var (get-arg expr 1))
 	(setval (get-arg expr 2)))
     (let ((loc (or (get-lexref var bound 0) 
 		   (if (wherefrom var env)
 		       (cons var (wherefrom var env))
 		       var)))
-	  (optval (optimize setval  env bound opts lexrefs)))
-      (info%watch "OPTIMIZE-ASSIGN" 
-	"DOSPECIAL" (getopt opts 'optspecial special-default)
-	handler expr var setval loc optval opts)
-      (if (getopt opts 'optspecial special-default)
+	  (optval (optimize setval  env bound opts)))
+      (if (and (use-opcodes? opts) (rewrite? opts))
 	  (cond ((symbol? loc) 
 		 ;; If loc is a symbol, we couldn't resolve it to a
 		 ;; lexical contour or enviroment
@@ -944,151 +987,155 @@
 		(else `(,handler ,var ,optval)))
 	  `(,handler ,var ,optval)))))
 
-(define (optimize-lambda handler expr env bound opts lexrefs)
+(define (optimize-lambda handler expr env bound opts)
   `(,handler ,(cadr expr)
 	     ,@(let ((bound (cons (arglist->vars (cadr expr)) bound))
 		     (body (cddr expr)))
 		 (forseq (b body)
-		   (optimize b env bound opts lexrefs)))))
+		   (optimize b env bound opts)))))
 
-(define (optimize-cond handler expr env bound opts lexrefs)
+(define (optimize-cond handler expr env bound opts)
   (cons handler 
 	(forseq (clause (cdr expr))
 	  (cond ((eq? (car clause) 'else)
-		 `(ELSE
-		   ,@(forseq (x (cdr clause))
-		       (optimize x env bound opts lexrefs))))
+		 `(ELSE ,@(optimize-body (cdr clause))))
 		((and (pair? (cdr clause)) (eq? (cadr clause) '=>))
-		 `(,(optimize (car clause) env bound opts lexrefs)
+		 `(,(optimize (car clause) env bound opts)
 		   =>
-		   ,@(forseq (x (cddr clause))
-		       (optimize x env bound opts lexrefs))))
-		(else (forseq (x clause)
-			(optimize x env bound opts lexrefs)))))))
+		   ,@(optimize-body (cddr clause))))
+		(else (optimize-body clause))))))
 
-(define (optimize-case handler expr env bound opts lexrefs)
-  `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
+(define (optimize-and handler expr env bound opts)
+  (if (use-opcodes? opts)
+      `(,and-opcode ,@(optimize-body (cdr expr)))
+      (optimize-block handler expr env bound opts)))
+
+(define (optimize-or handler expr env bound opts)
+  (if (use-opcodes? opts)
+      `(,or-opcode ,@(optimize-body (cdr expr)))
+      (optimize-block handler expr env bound opts)))
+
+(define (optimize-try handler expr env bound opts)
+  (if (use-opcodes? opts)
+      `(,try-opcode ,@(optimize-body (cdr expr)))
+      (optimize-block handler expr env bound opts)))
+
+(define (optimize-tryif handler expr env bound opts)
+  (if (and (use-opcodes? opts) (rewrite? opts))
+      `(,branch-opcode 
+	,(optimize (get-arg expr 1) env bound opts)
+	(,try-opcode ,@(optimize-body (cddr expr)))
+	{})
+      (optimize-block handler expr env bound opts)))
+
+(define (optimize-case handler expr env bound opts)
+  `(,handler ,(optimize (cadr expr) env bound opts)
 	     ,@(forseq (clause (cddr expr))
 		 (cons (car clause)
-		       (forseq (x (cdr clause))
-			 (optimize x env bound opts lexrefs))))))
+		       (forseq (x (cdr clause)) (optimize x env bound opts))))))
 
-(define (optimize-unwind-protect handler expr env bound opts lexrefs)
-  `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
-	     ,@(forseq (uwclause (cddr expr))
-		 (optimize uwclause env bound opts lexrefs))))
+(define (optimize-unwind-protect handler expr env bound opts)
+  `(,handler ,(optimize (cadr expr) env bound opts)
+	     ,@(optimize-body (cddr expr))))
 
-(define (optimize-quasiquote handler expr env bound opts lexrefs)
-  `(,handler ,(optimize-quasiquote-node (cadr expr) env bound opts lexrefs)))
-(defambda (optimize-quasiquote-node expr env bound opts lexrefs)
+(define (optimize-quasiquote handler expr env bound opts)
+  `(,handler ,(optimize-quasiquote-node (cadr expr) env bound opts)))
+(defambda (optimize-quasiquote-node expr env bound opts)
   (cond ((ambiguous? expr)
 	 (for-choices (elt expr)
-	   (optimize-quasiquote-node elt env bound opts lexrefs)))
+	   (optimize-quasiquote-node elt env bound opts)))
 	((and (pair? expr) 
 	      (or (eq? (car expr) 'unquote)  (eq? (car expr) 'unquote*)))
-	 `(,(car expr) ,(optimize (cadr expr) env bound opts lexrefs)))
+	 `(,(car expr) ,(optimize (cadr expr) env bound opts)))
 	((pair? expr)
 	 (forseq (elt expr)
-	   (optimize-quasiquote-node elt env bound opts lexrefs)))
+	   (optimize-quasiquote-node elt env bound opts)))
 	((vector? expr)
 	 (forseq (elt expr)
-	   (optimize-quasiquote-node elt env bound opts lexrefs)))
+	   (optimize-quasiquote-node elt env bound opts)))
 	((slotmap? expr)
 	 (let ((copy (frame-create #f))
 	       (slots (getkeys expr)))
 	   (do-choices (slot slots)
-	     (store! copy (optimize-quasiquote-node slot env bound opts lexrefs)
-		     (try (optimize-quasiquote-node (get expr slot) env bound opts lexrefs)
+	     (store! copy (optimize-quasiquote-node slot env bound opts)
+		     (try (optimize-quasiquote-node (get expr slot) env bound opts)
 			  (get expr slot))))
 	   copy))
 	(else expr)))
 
-(define (optimize-logmsg handler expr env bound opts lexrefs)
+(define (optimize-logmsg handler expr env bound opts)
   (if (or (symbol? (cadr expr)) (number? (cadr expr)))
       (if (or (symbol? (caddr expr)) (number? (caddr expr)))
 	  `(,handler ,(cadr expr)
 		     ,(caddr expr)
-		     ,@(forseq (elt (cdddr expr))
-			 (optimize elt env bound opts lexrefs)))
-	  `(,handler ,(cadr expr)
-		     ,@(forseq (elt (cddr expr))
-			 (optimize elt env bound opts lexrefs))))
-      `(,handler ,@(forseq (elt (cdr expr))
-		     (optimize elt env bound opts lexrefs)))))
+		     ,@(optimize-body (cdddr expr)))
+	  `(,handler ,(cadr expr) ,@(optimize-body (cddr expr))))
+      `(,handler ,@(optimize-body (cdr expr)))))
 
-(define (optimize-logif handler expr env bound opts lexrefs)
+(define (optimize-logif handler expr env bound opts)
   (if (or (symbol? (caddr expr))  (number? (caddr expr)))
-      `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
+      `(,handler ,(optimize (cadr expr) env bound opts)
 		 ,(caddr expr)
-		 ,@(forseq (elt (cdddr expr))
-		     (optimize elt env bound opts lexrefs)))
-      `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
-		 ,@(forseq (elt (cddr expr))
-		     (optimize elt env bound opts lexrefs)))))
+		 ,@(optimize-body (cdddr expr)))
+      `(,handler ,(optimize (cadr expr) env bound opts)
+		 ,@(optimize-body (cddr expr)))))
 
-(define (optimize-logif+ handler expr env bound opts lexrefs)
+(define (optimize-logif+ handler expr env bound opts)
   (if (or (symbol? (caddr expr))  (number? (caddr expr)))
       (if (or (symbol? (cadr (cddr expr))) (number? (cadr (cddr expr))))
-	  `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
+	  `(,handler ,(optimize (cadr expr) env bound opts)
 		     ,(caddr expr)
 		     ,(cadr (cddr expr))
-		     ,@(forseq (elt (cdr (cdddr expr)))
-			 (optimize elt env bound opts lexrefs)))
-	  `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
+		     ,@(optimize-body (cdr (cdddr expr))))
+	  `(,handler ,(optimize (cadr expr) env bound opts)
 		     ,(caddr expr)
-		     ,@(forseq (elt (cdddr expr))
-			 (optimize elt env bound opts lexrefs))))
-      `(,handler ,(optimize (cadr expr) env bound opts lexrefs)
-		 ,@(forseq (elt (cddr expr))
-		     (optimize elt env bound opts lexrefs)))))
+		     ,@(optimize-body (cdddr expr))))
+      `(,handler ,(optimize (cadr expr) env bound opts)
+		 ,@(optimize-body (cddr expr)))))
 
 ;;; Optimizing XHTML expressions
 
 ;; This doesn't handle mixed alist ((x y)) and plist (x y) attribute lists
 ;;  because they shouldn't work anyway
-(define (optimize-attribs attribs env bound opts lexrefs)
+(define (optimize-attribs attribs env bound opts)
   (cond ((not (pair? attribs)) attribs)
 	((pair? (cdr attribs))
 	 `(,(if (and (pair? (car attribs))
 		     (not (eq? (car (car attribs)) 'quote)))
 		`(,(car (car attribs))
-		  ,(optimize (cadr (car attribs)) env bound opts lexrefs))
+		  ,(optimize (cadr (car attribs)) env bound opts))
 		(car attribs))
 	   ,(if (and (pair? (car attribs))
 		     (not (eq? (car (car attribs)) 'quote)))
 		(if (pair? (cadr attribs))
 		    `(,(car (cadr attribs))
-		      ,(optimize (cadr (cadr attribs)) env bound opts lexrefs))
-		    (optimize (cadr attribs) env bound opts lexrefs))
-		(optimize (cadr attribs) env bound opts lexrefs))
-	   ,@(optimize-attribs (cddr attribs) env bound opts lexrefs)))
+		      ,(optimize (cadr (cadr attribs)) env bound opts))
+		    (optimize (cadr attribs) env bound opts))
+		(optimize (cadr attribs) env bound opts))
+	   ,@(optimize-attribs (cddr attribs) env bound opts)))
 	((pair? (car attribs))
 	 `((,(car (car attribs))
-	    ,(optimize (cadr (car attribs)) env bound opts lexrefs))))
+	    ,(optimize (cadr (car attribs)) env bound opts))))
 	(else attribs)))
 
-(define (optimize-markup handler expr env bound opts lexrefs)
-  `(,(car expr)
-    ,@(forseq (x (cdr expr)) (optimize x env bound opts lexrefs))))
-(define (optimize-markup* handler expr env bound opts lexrefs)
-  `(,(car expr) ,(optimize-attribs (second expr) env bound opts lexrefs)
-    ,@(forseq (x (cddr expr))
-	(optimize x env bound opts lexrefs))))
+(define (optimize-markup handler expr env bound opts)
+  `(,(car expr) ,@(optimize-body (cdr expr))))
+(define (optimize-markup* handler expr env bound opts)
+  `(,(car expr) ,(optimize-attribs (second expr) env bound opts)
+    ,@(optimize-body (cddr expr))))
 
-(define (optimize-emptymarkup fcn expr env bound opts lexrefs)
-  `(,(car expr) ,@(optimize-attribs (cdr expr) env bound opts lexrefs)))
+(define (optimize-emptymarkup fcn expr env bound opts)
+  `(,(car expr) ,@(optimize-attribs (cdr expr) env bound opts)))
 
-(define (optimize-anchor* fcn expr env bound opts lexrefs)
-  `(,(car expr) ,(optimize (cadr expr) env bound opts lexrefs)
-    ,(optimize-attribs (third expr) env bound opts lexrefs)
-    ,@(forseq (elt (cdr (cddr expr)))
-	(optimize elt env bound opts lexrefs) )))
+(define (optimize-anchor* fcn expr env bound opts)
+  `(,(car expr) ,(optimize (cadr expr) env bound opts)
+    ,(optimize-attribs (third expr) env bound opts)
+    ,@(optimize-body (cdddr expr))))
 
-(define (optimize-xmlblock fcn expr env bound opts lexrefs)
+(define (optimize-xmlblock fcn expr env bound opts)
   `(,(car expr) ,(cadr expr)
-    ,(optimize-attribs (third expr) env bound opts lexrefs)
-    ,@(forseq (elt (cdr (cddr expr)))
-	(optimize elt env bound opts lexrefs) )))
+    ,(optimize-attribs (third expr) env bound opts)
+    ,@(optimize-body (cdddr expr))))
 
 ;;; Declare them
 
@@ -1110,9 +1157,10 @@
       (choice do-choices for-choices filter-choices try-choices)
       optimize-do2expression)
 
-(add! special-form-optimizers
-      (choice prog1 try tryif and or)
-      optimize-block)
+(add! special-form-optimizers tryif optimize-tryif)
+(add! special-form-optimizers and optimize-and)
+(add! special-form-optimizers or optimize-or)
+(add! special-form-optimizers try optimize-try)
 
 (add! special-form-optimizers begin optimize-begin)
 (add! special-form-optimizers if optimize-if)
