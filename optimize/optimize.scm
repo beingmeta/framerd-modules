@@ -389,7 +389,8 @@
       (define union-opcode (name2op "UNION"))
       (define and-opcode (name2op "AND"))
       (define or-opcode (name2op "OR"))
-      (define try-opcode (name2op "TRY"))))
+      (define try-opcode (name2op "TRY"))
+      (define bind-opcode (name2op "BINDOP"))))
 
 ;;; The core loop
 
