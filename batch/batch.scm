@@ -60,6 +60,7 @@
     (when file (store! state 'statefile file))
     (nstore! state 'pools (use-pool (get state 'pools)))
     (nstore! state 'indexes (open-index (get state 'indexes)))
+    (nstore! state 'adjpools (open-pool (get state 'adjpools) #[adjunct #t]))
     (nstore! state 'objects
 	     (for-choices (obj (get state 'objects))
 	       (if (and (string? obj) (file-exists? obj))
@@ -190,6 +191,8 @@
 		   (threadcall commit-pool pool))
 		 (for-choices (index (get state 'indexes))
 		   (threadcall commit index))
+		 (for-choices (pool (get state 'adjpools))
+		   (threadcall commit pool))
 		 (for-choices (index (get (get state 'slotindex)
 					  (get (get state 'slotindex) 'slots)))
 		   (threadcall commit index))
@@ -209,6 +212,8 @@
 		     (pool-source (get state-copy 'pools)))
 	     (store! state-copy 'indexes
 		     (index-source (get state-copy 'indexes)))
+	     (store! state-copy 'adjpools
+		     (pool-source (get state-copy 'adjpools)))
 	     (store! state-copy 'objects (car (get state-copy 'objects)))
 	     (store! state-copy 'elapsed 
 		     (+ (elapsed-time start-time) 
@@ -253,6 +258,8 @@
 	    (threadcall commit-pool pool))
 	  (for-choices (index (get state 'indexes))
 	    (threadcall commit index))
+	  (for-choices (pool (get state 'adjpools))
+	    (threadcall commit pool))
 	  (for-choices (index (get (get state 'slotindex)
 				   (get (get state 'slotindex) 'slots)))
 	    (threadcall commit index))
@@ -277,6 +284,8 @@
 	      (pool-source (get state-copy 'pools)))
       (store! state-copy 'indexes
 	      (index-source (get state-copy 'indexes)))
+      (store! state-copy 'adjpools
+	      (pool-source (get state-copy 'adjpools)))
       (store! state-copy 'objects (car (get state-copy 'objects)))
       (store! state-copy 'elapsed 
 	      (+ (elapsed-time start-time) 
