@@ -23,6 +23,29 @@
 (define-init curlcache #f)
 (varconfig! oauth:curlcache curlcache)
 
+(define-init lograw #f)
+(define (oauth-lograw-config var (val))
+  (cond ((not (bound? val)) lograw)
+	((not val) (set! lograw #f))
+	((eq? val 'reset) (set! lograw (make-hashtable)))
+	((and (eq? val #t) lograw)
+	 (lognotice |OAUTH/lograw|
+	   "Raw logging is already writing to " lograw))
+	((string? val)
+	 (onerror (set! lograw (open-index val))
+	     (lambda (ex)
+	       (logcrit |OAUTH/lograw|
+		 "Unexpected error " (error-condition ex) " in " (error-context ex)
+		 (when (error-details ex)
+		   (printout " [" (error-details ex) "]"))
+		 (when (error-irritant? ex)
+		   (printout " irritant:\n" (pprint (error-irritant ex))))))))
+	((or (hashtable? val) (index? val))
+	 (set! lograw val))
+	(else (irritant val 
+		  |InvalidLogRaw| "Couldn't use the value for logging raw responses"))))
+(config-def! 'oauth:lograw oauth-lograw-config)
+
 (module-export!
  '{oauth oauth/spec oauth/start oauth/refresh!
    oauth/request oauth/authurl oauth/verify 
@@ -247,7 +270,7 @@
 	       (store! oauth-pending id (oauth/spec pending)))
 	   pending))))
 (define (oauth/pending! id (state))
-  (debug%watch "OAUTH/PENDING!" id state oauth-sessionfn)
+  (info%watch "OAUTH/PENDING!" id state oauth-sessionfn)
   (if (and (bound? state) state)
       (store! oauth-pending id state)
       (drop! oauth-pending id))
@@ -359,7 +382,7 @@
   (set! spec (debug%watch (oauth/spec spec) spec))
   (default! ckey (getckey spec))
   (default! csecret (getcsecret spec))
-  (debug%watch "OAUTH/REQUEST" spec ckey cecret)
+  (info%watch "OAUTH/REQUEST" spec ckey cecret)
   (unless (and (getopt spec 'request)
 	       (getopt spec 'authorize)
 	       (getopt spec 'verify))
@@ -412,7 +435,7 @@
    If a scope is provided, we assume that we're authorizing, not \
    authenticating."
   (set! spec (oauth/spec spec))
-  (debug%watch "OAUTH/AUTHURL" spec (getcallback spec))
+  (info%watch "OAUTH/AUTHURL" spec (getcallback spec))
   (unless (and (getopt spec 'authenticate (getopt spec 'authorize))
 	       (or (getopt spec 'oauth_token) (getckey spec)))
     (irritant spec OAUTH:BADSPEC OAUTH/AUTHURL "Incomplete OAUTH spec"))
@@ -454,7 +477,7 @@
 	       (getopt spec 'authorize)
 	       (getopt spec 'verify))
     (irritant spec OAUTH:BADSPEC OAUTH/VERIFY "Invalid OAUTH1.0 spec"))
-  (debug%watch "OAUTH/VERIFY/1.0" verifier spec)
+  (info%watch "OAUTH/VERIFY/1.0" verifier spec)
   (default! ckey (getckey spec))
   (default! csecret (getcsecret spec))
   (unless (getopt spec 'oauth_token)
@@ -515,7 +538,7 @@
   (default! ckey (getckey spec))
   (default! csecret (getcsecret spec))
   (default! verifier (getopt spec 'verifier))
-  (debug%watch "OAUTH/GETACCESS" code spec)
+  (info%watch "OAUTH/GETACCESS" code spec)
   (let* ((callback (getcallback spec))
 	 (req (urlpost (getopt spec 'access)
 		       #[content-type "application/x-www-form-urlencoded"
@@ -561,7 +584,7 @@
   (set! spec (oauth/spec spec))
   (default! ckey (getckey spec))
   (default! csecret (getcsecret spec))
-  (debug%watch "OAUTH/GETACCESS" spec)
+  (info%watch "OAUTH/GETACCESS" spec)
   (let* ((callback (getcallback spec))
 	 (req (urlpost (getopt spec 'access)
 		       `#[content-type "application/x-www-form-urlencoded"
@@ -576,7 +599,7 @@
 			    (try (get parsed 'expires_in)
 				 (get parsed 'expires))))
 	       (authinfo `#[token ,(get parsed 'access_token)]))
-	  (debug%watch "OAUTH/GETCLIENT" parsed spec req expires_in)
+	  (info%watch "OAUTH/GETCLIENT" parsed spec req expires_in)
 	  (when (exists? (get parsed 'token_type))
 	    (unless (string-ci=? (get parsed 'token_type) "Bearer")
 	      (logwarn |OAUTH/GETACESS/OddToken|
@@ -587,7 +610,7 @@
 	    (when (exists? (get parsed 'refresh_token))
 	      (store! authinfo 'refresh
 		      (->secret (get parsed 'refresh_token)))))
-	  (debug%watch "OAUTH/GETACCESS/RESULT" (cons authinfo spec) )
+	  (info%watch "OAUTH/GETACCESS/RESULT" (cons authinfo spec) )
 	  (cons authinfo spec))
 	(begin
 	  (logwarn |OATH/GETACCESS:Failure|
@@ -603,7 +626,7 @@
 	 (if (pair? body) (cdr body)
 	     (getopt spec 'ctype
 		     (if (packet? body) "application" "text")))))
-  (debug%watch "OAUTH/CALL1.0" method endpoint args ctype)
+  (info%watch "OAUTH/CALL1.0" method endpoint args ctype)
   (unless (getopt spec 'token)
     (irritant spec OAUTH:NOTOKEN OAUTH/CALL
 	      "No OAUTH token for OAuth1.0 call"))
@@ -689,7 +712,7 @@
 
 (define (oauth/call20 spec method endpoint args
 		      (body #f) (ctype) (raw) (ckey) (csecret) (expires))
-  (debug%watch "OAUTH/CALL2.0" method endpoint args ckey csecret)
+  (info%watch "OAUTH/CALL2.0" method endpoint args ckey csecret)
   (unless (getopt spec 'token)
     (irritant spec OAUTH:NOTOKEN OAUTH/CALL
 	      "No OAUTH token for OAuth2 call"))
@@ -746,7 +769,9 @@
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
-	    (getreqdata req)
+	    (if lograw
+		()
+		(getreqdata req))
 	    (if (and (<= 400 (get req 'response) 499) (getopt spec 'refresh))
 		(begin
 		  (debug%watch 'OAUTH/ERROR "RESPONSE" response req)
@@ -799,7 +824,7 @@
 			      "client_secret" ,(getcsecret spec)
 			      "grant_type" "refresh_token"
 			      "refresh_token" ,(getopt spec 'refresh)]))))
-    (debug%watch "OAUTH/REFRESH!" endpoint auth-header req)
+    (info%watch "OAUTH/REFRESH!" endpoint auth-header req)
     (if (test req 'response 200)
 	(let* ((parsed (getreqdata req))
 	       (expires_in (->number (try (get parsed 'expires_in)
@@ -935,7 +960,7 @@
 (define (oauth (code #f) (state #f)
 	       (oauth_realm #f) (oauth_token #f) (oauth_verifier #f)
 	       (scope #f))
-  (debug%watch "OAUTH" oauth_realm code oauth_token oauth_verifier scope getuser)
+  (info%watch "OAUTH" oauth_realm code oauth_token oauth_verifier scope getuser)
   (if oauth_verifier ;; 1.0 success
       (let* ((auth-state (oauth/pending oauth_token))
 	     (verified (oauth/verify auth-state oauth_verifier)))
@@ -994,7 +1019,7 @@
 	    #f))))
 
 (define (oauth/start spec)
-  (debug%watch "OAUTH/START" spec)
+  (info%watch "OAUTH/START" spec)
   (set! spec (oauth/spec spec))
   (let* ((state (if (getopt spec 'request)
 		    (oauth/request spec) ;; 1.0
