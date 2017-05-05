@@ -23,6 +23,8 @@
 (define-init curlcache #f)
 (varconfig! oauth:curlcache curlcache)
 
+(define default-expect #f)
+
 (define-init lograw #f)
 (define (oauth-lograw-config var (val))
   (cond ((not (bound? val)) lograw)
@@ -541,8 +543,10 @@
   (info%watch "OAUTH/GETACCESS" code spec)
   (let* ((callback (getcallback spec))
 	 (req (urlpost (getopt spec 'access)
-		       #[content-type "application/x-www-form-urlencoded"
-			 header ("Expect" . "")]
+		       `#[content-type "application/x-www-form-urlencoded"
+			  header ,(and (getopt spec 'expect default-expect)
+				       (cons "Expect" 
+					     (getopt spec 'expect default-expect)))]
 		       (args->post
 			(list "code" (qc (tryif code code))
 			      "fb_exchange_token"
@@ -589,7 +593,9 @@
 	 (req (urlpost (getopt spec 'access)
 		       `#[content-type "application/x-www-form-urlencoded"
 			  basicauth ,(glom ckey ":" csecret)
-			  header ("Expect" . "")]
+			  header ,(and (getopt spec 'expect default-expect)
+				       (cons "Expect" 
+					     (getopt spec 'expect default-expect)))]
 		       (args->post
 			(list "grant_type" 
 			      (getopt spec 'grant "client_credentials"))))))
@@ -674,7 +680,10 @@
 	    "oauth_token=\"" (getopt spec 'token) "\", "
 	    "oauth_version=\"" (getopt spec 'version "1.0") "\""))
 	 (content (if (pair? body) (car body) body))
-	 (handle (curlopen 'header "Expect: "
+	 (handle (curlopen 'header
+			   (and (getopt spec 'expect default-expect)
+				(cons "Expect" 
+				      (getopt spec 'expect default-expect)))
 			   'header auth-header
 			   'method method))
 	 (req (if (eq? method 'GET)
@@ -751,9 +760,17 @@
 				 (apply scripturl+ endpoint (list args)))))
 		     endpoint))
 	 (handle (if httpauth
-		     (curlopen 'header "Expect: " 'header auth-header
+		     (curlopen 'header
+			       (and (getopt spec 'expect default-expect)
+				    (cons "Expect" 
+					  (getopt spec 'expect default-expect))) 
+			       'header auth-header
 			       'method method)
-		     (curlopen 'header "Expect: " 'method method)))
+		     (curlopen 'header
+			       (and (getopt spec 'expect default-expect)
+				    (cons "Expect" 
+					  (getopt spec 'expect default-expect)))
+			       'method method)))
 	 (req (if (eq? method 'GET) (urlget useurl handle)
 		  (if (eq? method 'HEAD) (urlget useurl handle)
 		      (if (eq? method 'POST)
@@ -816,7 +833,10 @@
 	 (auth-header
 	  (glom "Authorization: Bearer " (getopt spec 'token)))
 	 (req (urlpost endpoint
-		       (curlopen 'header "Expect: "
+		       (curlopen 'header
+				 (and (getopt spec 'expect default-expect)
+				      (cons "Expect" 
+					    (getopt spec 'expect default-expect)))
 				 'header auth-header
 				 'method 'POST)
 		       (scripturl+
