@@ -21,7 +21,7 @@
 
 (define (getid x) (get x 'id))
 
-(define (twitter/search q (opts #f) (fetchsize) (creds #f))
+(define (twitter/search q (opts #f) (fetchsize) (creds))
   (when (fixnum? opts)
     (set! fetchsize opts)
     (set! opts #[]))
@@ -29,6 +29,7 @@
     (if (table? q)
 	(getopt q "count" (getopt opts 'fetchsize 100))
 	(getopt opts 'fetchsize 100)))
+  (default! creds (getopt opts 'creds (twitter/creds)))
   (when (string? q)
     (set! q (frame-create #f "q" q "count" fetchsize)))
   (let* ((start (elapsed-time))
