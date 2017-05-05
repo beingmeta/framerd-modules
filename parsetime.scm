@@ -59,11 +59,14 @@
 	(if (< num 35) (+ num 2000) (+ num 1900)))
       (string->number string)))
 
+(define date-in-month
+  '(word #((isdigit) (opt (isdigit)) (opt {"st" "th" "nd"}))))
+
 (define generic-patterns
   (choice `#({(bol) (spaces) ">"}
 	     (label year #({"19" "20"} (isdigit) (isdigit)) #t))
 	  `#({(bol) (spaces) ">"}
-	     (label DATE #((isdigit) (opt (isdigit)) (opt {"st" "th" "nd"})) #t)
+	     (label DATE ,date-in-month #t)
 	     (spaces)
 	     (IC (label MONTH ,monthstrings ,monthnum)) (opt #({"" (spaces)} ","))
 	     (spaces)
@@ -71,7 +74,7 @@
 	  `#({(bol) (spaces) ">"}
 	     (IC (label MONTH ,monthstrings ,monthnum))
 	     (spaces*)
-	     (label DATE #((isdigit) (opt (isdigit)) (opt {"st" "th" "nd"})) #t)
+	     (label DATE ,date-in-month #t)
 	     {"" (spaces) #("," (spaces))}
 	     (opt (label YEAR #({"1" "2"} (isdigit) (isdigit) (isdigit)) #t)))
 	  `#({(bol) (spaces) ">"}
@@ -149,9 +152,9 @@
   (try (tryif (test matches 'second) '(seconds second minute hour date month year))
        (tryif (test matches 'minute) '(minutes minute hour date month year))
        (tryif (test matches 'hour) '(hours hour date month year))
-       (tryif (test matches 'date) '(days date month year))
-       (tryif (test matches 'month) '(months month year))
-       (tryif (test matches 'year) '(years year))))
+       (tryif (test matches 'date) '(date date month year))
+       (tryif (test matches 'month) '(month month year))
+       (tryif (test matches 'year) '(year year))))
 
 (defambda (matches->timestamps matches fields base)
   (%debug "base=" base "; tick=" (get base '%tick) "; fields=" fields)
