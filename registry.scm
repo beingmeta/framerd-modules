@@ -37,16 +37,16 @@
 
 (defambda (register slotid value 
 		    (defaults #f) (adds #f)
-		    (use-registry #f)
+		    (registry-arg #f)
 		    (reg))
-  (unless use-registry
+  (unless registry-arg
     (do-choices slotid
       (unless (get registries slotid)
 	(irritant slotid |No Registry| REGISTER
 		  "No registry exists for the slot "
 		  (write slotid)))))
   (for-choices slotid
-    (set! reg (or use-registry (get registries slotid)))
+    (set! reg (or registry-arg (get registries slotid)))
     (for-choices value
       (cond ((and reg (not defaults) (not adds))
 	     (try (get (registry-cache reg) value)
@@ -106,7 +106,9 @@
 	     (try (find-frames index slotid value)
 		  (dtcall server 'register slotid value))
 	     (let* ((bloom (registry-bloom registry))
-		    (key (if (registry-oneslot key) value (cons slotid value)))
+		    (key (if (registry-oneslot registry) 
+			     value
+			     (cons slotid value)))
 		    (existing (if (and bloom (not (bloom/check bloom key)))
 				  (fail)
 				  (find-frames index slotid value)))
@@ -174,7 +176,7 @@
 	((getopt spec 'oneslot) (glom idbase ".ids"))
 	(else (glom idbase ".keys"))))
 
-(define (registry-spec arg)
+(define (registry-opts arg)
   (cond ((table? arg) arg)
 	((index? arg) (registry-spec (strip-suffix (index-id arg) ".pool")))
 	((pool? arg)  (registry-spec (strip-suffix (pool-id arg) ".index")))
@@ -183,7 +185,7 @@
 	(else `#[server #f pool ,arg index ,arg oneslot #f])))
 
 (define (use-registry slotid spec)
-  (when (string? spec) (set! spec (registry-spec spec)))
+  (when (string? spec) (set! spec (registry-opts spec)))
   (try (get registries slotid)
        (register-registry slotid spec)))
 
