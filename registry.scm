@@ -15,6 +15,8 @@
 (module-export! '{registry-slotid registry-spec
 		  registry-pool registry-index registry-server})
 
+(define %loglevel %notice%)
+
 ;; Not yet used
 (define default-registry #f)
 
@@ -56,6 +58,8 @@
 		    (try (get (registry-cache reg) value)
 			 (registry/get reg slotid value #t))))
 	       (when defaults
+		 (when (test defaults '%id) 
+		   (store! frame '%id (get defaults '%id)))
 		 (do-choices (slotid (getkeys defaults))
 		   (unless (test frame slotid)
 		     (store! frame slotid (get defaults slotid)))))
@@ -63,7 +67,7 @@
 		 (do-choices (slotid (getkeys adds))
 		   (add! frame slotid (get adds slotid))))
 	       frame))
-	    (else)))))
+	    (else (fail))))))
 
 (define (registry/ref slotid value (registry))
   (default! registry (try (get registries slotid) #f))
@@ -129,31 +133,72 @@
 
 ;;; Registering registries
 
-(defslambda (register-registry slotid spec (replace #f))
+(defslambda (register-registry-inner slotid spec (replace #f))
   (when replace (drop! registries slotid))
   (try (get registries slotid)
        (let ((server (and (getopt spec 'server)
 			  (if (dtserver? (getopt spec 'server))
 			      (getopt spec 'server)
 			      (open-dtserver (getopt spec 'server)))))
-	     (pool (try (use-pool (getopt spec 'pool)) #f))
-	     (index (try (open-index (getopt spec 'index)) #f))
+	     (pool (try (use-pool (getsource spec 'pool)) #f))
+	     (index (try (open-index (getsource spec 'index)) #f))
 	     (registry #f))
 	 (if (or server (not (getopt spec 'bloom use-bloom)))
 	     ;; Server-based registries don't have bloom filters or idstreams
 	     (set! registry
-		   (cons-registry slotid spec server pool index (getopt spec 'oneslot)))
+		   (cons-registry slotid spec server pool index
+				  (getopt spec 'oneslot)))
 	     (let* ((ixsource (and index (index-source index)))
-		    (idbase (and ixsource (not (exists position {#\: #\@} ixsource)) ixsource))
-		    (idpath (getopt spec 'idpath (get-idpath spec idbase)))
+		    (idbase (and ixsource 
+				 (not (∃ position {#\: #\@} ixsource))
+				 ixsource))
+		    (idpath (getopt spec 'idpath 
+				    (get-idpath spec idbase)))
 		    (oneslot (has-suffix idpath ".ids"))
-		    (idstream (and idpath (extend-dtype-file idpath)))
-		    (bloom (and idpath (get-bloom idpath))))
+		    (idstream (and idpath 
+				   (or (file-exists? idpath)
+				       (getopt spec 'bloom use-bloom))
+				   (extend-dtype-file idpath)))
+		    (bloom (and idstream (get-bloom idpath))))
 	       (set! registry
 		     (cons-registry slotid spec server pool index oneslot
 				    idstream bloom))))
 	 (store! registries slotid registry)
 	 registry)))
+
+(define (getsource spec slot)
+  (try
+   (getopt spec slot {})
+   (let ((server (getopt spec 'server)))
+     (cond ((not server) {})
+	   ((string? server) server)
+	   ((dtserver? server) (dtserver-id server))
+	   (else {})))
+   (getopt spec 'source {})))
+
+(define (register-registry slotid spec (replace #f))
+  (if replace
+      (let ((cur (get registries slotid))
+	    (new (register-registry-inner slotid spec replace)))
+	(if (fail? new)
+	    (logcrit |RegisterRegistry|
+	      "Couldn't create registry for " slotid 
+	      " specified as " spec)
+	    (unless (identical? cur new)
+	      (lognotice |RegisterRegistry|
+		"Registry for " slotid " is now "
+		(if (registry-server new)
+		    (dtserver-id (registry-server new))
+		    (pool-id (registry-pool new)))))
+	    new))
+      (try (get registries slotid)
+	   (let ((new (register-registry-inner slotid spec replace)))
+	     (lognotice |RegisterRegistry|
+	       "Registry for " slotid " is now "
+	       (if (registry-server new)
+		   (dtserver-id (registry-server new))
+		   (pool-id (registry-pool new))))
+	     new))))
 
 (define (get-idpath spec idbase (root))
   (default! root (strip-suffix idbase ".index"))
@@ -177,14 +222,27 @@
 	(else (glom idbase ".keys"))))
 
 (define (registry-opts arg)
-  (cond ((table? arg) arg)
-	((index? arg) (registry-spec (strip-suffix (index-id arg) ".pool")))
-	((pool? arg)  (registry-spec (strip-suffix (pool-id arg) ".index")))
+  (cond ((table? arg) (fixup-opts arg))
+	((index? arg) (registry-opts (strip-suffix (index-id arg) ".pool")))
+	((pool? arg)  (registry-opts (strip-suffix (pool-id arg) ".index")))
 	((not (string? arg)) (irritant arg |InvalidRegistrySpec|))
 	((exists position {#\: #\@} arg) `#[server ,arg])
 	(else `#[server #f pool ,arg index ,arg oneslot #f])))
 
+(define (fixup-opts opts (source))
+  (default! source (getopt opts 'source))
+  (when (string? source)
+    (when (and (not (getopt opts 'server))
+	       (exists position {#\: #\@} source))
+      (store! opts 'server source))
+    (unless (getopt opts 'pool)
+      (store! opts 'pool source))
+    (unless (getopt opts 'index)
+      (store! opts 'index source)))
+  opts)
+
 (define (use-registry slotid spec)
+  (info%watch "USE-REGISTRY" slotid spec)
   (when (string? spec) (set! spec (registry-opts spec)))
   (try (get registries slotid)
        (register-registry slotid spec)))
@@ -197,14 +255,20 @@
 	      (and (dtserver? (getopt spec 'server))
 		   (equal? (dtserver-id (registry-server registry))
 			   (dtserver-id (getopt spec 'server))))
-	      (equal? (dtserver-id (registry-server registry)) (getopt spec 'server)))
-	  (or (and (not (registry-bloom registry)) (getopt spec 'bloom use-bloom))
-	      (and (registry-bloom registry) (not (getopt spec 'bloom use-bloom)))
-	      (not (equal? (use-pool (get spec 'pool)) (registry-pool registry)))
-	      (not (equal? (open-index (get spec 'index)) (registry-index registry)))))))
+	      (equal? (dtserver-id (registry-server registry))
+		      (getopt spec 'server)))
+	  (or (and (not (registry-bloom registry))
+		   (getopt spec 'bloom use-bloom))
+	      (and (registry-bloom registry)
+		   (not (getopt spec 'bloom use-bloom)))
+	      (not (equal? (use-pool (get spec 'pool))
+			   (registry-pool registry)))
+	      (not (equal? (open-index (get spec 'index))
+			   (registry-index registry)))))))
 
 (define (set-registry! slotid spec)
-  (when (string? spec) (set! spec (registry-spec spec)))
+  (info%watch "SET-REGISTRY!" slotid spec)
+  (when (string? spec) (set! spec (registry-opts spec)))
   (if (test registries slotid)
       (when (need-replace? (get registries slotid) spec)
 	(register-registry slotid spec #t))
