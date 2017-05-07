@@ -14,10 +14,12 @@
 (define twitter-creds #f)
 
 (define (twitter/creds (init init-creds))
-  (or twitter-creds
+  (or (and twitter-creds (not init))
       (let ((creds (oauth/getclient init)))
 	(set! twitter-creds creds)
 	creds)))
+
+
 
 
 
