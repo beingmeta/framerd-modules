@@ -61,7 +61,7 @@
     (getopt opts 'blocksize (min (quotient n 10) n 100)))
   (when (string? q) (set! q `#["q" ,q "count" ,blocksize]))
   (let* ((start (elapsed-time))
-	 (start_min (getopt opts 'min_id (try (get q "min_id") #f)))
+	 (start_min (getopt opts 'min_id (try (get q "since_id") #f)))
 	 (start_max (getopt opts 'max_id (try (get q "max_id") #f)))
 	 (qstring (get q "q"))
 	 (backward (or (< n 0) (< blocksize 0) start_max))
@@ -71,7 +71,7 @@
 	 (count 0))
     (if backward
 	(when start_max (store! q "max_id" start_max))
-	(when start_min (store! q "min_id" start_min)))
+	(when start_min (store! q "since_id" start_min)))
     (set! result 
 	  (oauth/call creds 'GET search-endpoint
 		      (if (table? q) q `#["q" ,qstring "count" ,blocksize])))
@@ -91,8 +91,8 @@
 	  (set! result
 		(oauth/call creds 'GET search-endpoint
 			    `#["q" ,q "count" ,blocksize
-			       ,(if backward "max_id" "min_id")
-			       ,(if backward (-1+ min_id) (1+ max_id))])))))
+			       ,(if backward "max_id" "since_id")
+			       ,(if backward (-1+ min_id) max_id)])))))
     (lognotice |Twitter/Search/N| 
       "Got " count "/" n " tweets for " (write qstring) 
       " in " (secs->string (elapsed-time start)))
