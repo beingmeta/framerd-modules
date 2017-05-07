@@ -89,7 +89,12 @@
   (set! start-time (elapsed-time))
   (store! state 'cycle-count (1+ (try (get state 'cycle-count) 0)))
   (unless (test state 'begun)
-    (store! state 'begun (gmtimestamp 'seconds))))
+    (store! state 'begun (gmtimestamp 'seconds)))
+  (lognotice |BatchStart| 
+    "Cycle "  (get state 'cycle-count) 
+    " of batch task " (get state 'statefile)
+    (when (test state 'summary) (printout " (" (get state 'summary) ")")))
+  state)
 
 (module-export! '{batch/read-state batch/start! batch-state})
 
@@ -378,6 +383,11 @@
       (let ((load (loadavg)))
 	(printout (first load) "  ⋯  " (second load) "  ⋯  " (third load))))
     (lognotice |Resources|
+      (when (test u 'mallocd)
+	(printout "HEAP="  
+	  (when (test u 'heap) 
+	    (printout ($bytes (get u 'mallocd))))
+	  " "))
       "MEM=" ($bytes (get u 'memusage)) 
       ", VMEM=" ($bytes (get u 'vmemusage))
       (when maxmem (printout ", MAXMEM=" ($bytes maxmem)))
