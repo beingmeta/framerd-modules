@@ -995,7 +995,7 @@
 		 (forseq (b body)
 		   (optimize b env bound opts)))))
 
-(define (optimize-cond handler expr env bound opts)
+(define (old-optimize-cond handler expr env bound opts)
   (cons handler 
 	(forseq (clause (cdr expr))
 	  (cond ((eq? (car clause) 'else)
@@ -1005,6 +1005,30 @@
 		   =>
 		   ,@(optimize-body (cddr clause))))
 		(else (optimize-body clause))))))
+
+(define (optimize-cond handler expr env bound opts)
+  (if (use-opcodes? opts)
+      (convert-cond (cdr expr) env bound opts)
+      (cons handler 
+	    (forseq (clause (cdr expr))
+	      (cond ((eq? (car clause) 'else)
+		     `(ELSE ,@(optimize-body (cdr clause))))
+		    ((and (pair? (cdr clause)) (eq? (cadr clause) '=>))
+		     `(,(optimize (car clause) env bound opts)
+		       =>
+		       ,@(optimize-body (cddr clause))))
+		    (else (optimize-body clause)))))))
+
+(define (convert-cond clauses env bound opts)
+  (if (null? clauses) (list void-opcode)
+      `(,branch-opcode 
+	,(if (overlaps? (car (car clauses)) '{else default})
+	     #t
+	     (optimize (car (car clauses)) env bound opts))
+	(,begin-opcode 
+	 ,@(forseq (c (cdr (car clauses)))
+	     (optimize c env bound opts)))
+	,(convert-cond (cdr clauses) env bound opts))))
 
 (define (optimize-and handler expr env bound opts)
   (if (use-opcodes? opts)
