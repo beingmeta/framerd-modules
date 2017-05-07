@@ -71,7 +71,7 @@
   (let ((parsed (xmlparse string '{data slotify})))
     (reject (elts parsed) string?)))
 
-(define (getreqdata req (ctype) (content))
+(define (parsereqdata req (ctype) (content))
   (default! ctype (try (get req 'content-type) #f))
   (default! content (try (get req '%content) #f))
   (if (and (test req 'response) ctype content
@@ -94,6 +94,17 @@
 			  (cgiparse content)))))
 	  req)
       (fail)))
+
+(define (getreqdata req . args)
+  (if (and lograw (test req 'reqid))
+      (modify-frame 
+       (if (null? args)
+	   (parsereqdata req)
+	   (apply parsereqdata req args))
+       'reqid (get req 'reqid))
+      (if (null? args)
+	  (parsereqdata req)
+	  (apply parsereqdata req args))))
 
 ;;; Server info
 
@@ -557,6 +568,10 @@
 			      "grant_type"
 			      (getopt spec 'grant "authorization_code")
 			      "redirect_uri" (qc callback))))))
+    (when (getopt spec 'lograw lograw)
+      (let ((reqid (getuuid)))
+	(store! lograw reqid req)
+	(store! req 'reqid reqid)))
     (if (test req 'response 200)
 	(let* ((parsed (getreqdata req))
 	       (expires_in (->number
@@ -599,6 +614,7 @@
 		       (args->post
 			(list "grant_type" 
 			      (getopt spec 'grant "client_credentials"))))))
+    (when (getopt spec 'lograw lograw) (store! req 'reqid (getuuid)))
     (if (test req 'response 200)
 	(let* ((parsed (getreqdata req))
 	       (expires_in (->number
@@ -711,6 +727,10 @@
     ;;  (maybe %watch needs a redesign?)
     (debug%watch sigstring)
     (debug%watch auth-header)
+    (when (getopt spec 'lograw lograw)
+      (let ((reqid (getuuid)))
+	(store! lograw reqid req)
+	(store! req 'reqid reqid)))
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
@@ -783,12 +803,14 @@
 				     "Only GET, HEAD, PUT, and POST are allowed: "
 				     method endpoint args)))))))
     (debug%watch "OAUTH/CALL20" endpoint auth-header req)
+    (when (getopt spec 'lograw lograw)
+      (let ((reqid (getuuid)))
+	(store! lograw reqid req)
+	(store! req 'reqid reqid)))
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
-	    (if lograw
-		()
-		(getreqdata req))
+	    (getreqdata req)
 	    (if (and (<= 400 (get req 'response) 499) (getopt spec 'refresh))
 		(begin
 		  (debug%watch 'OAUTH/ERROR "RESPONSE" response req)
@@ -845,6 +867,7 @@
 			      "grant_type" "refresh_token"
 			      "refresh_token" ,(getopt spec 'refresh)]))))
     (info%watch "OAUTH/REFRESH!" endpoint auth-header req)
+    (when (getopt spec 'lograw lograw) (store! req 'reqid (getuuid)))
     (if (test req 'response 200)
 	(let* ((parsed (getreqdata req))
 	       (expires_in (->number (try (get parsed 'expires_in)
