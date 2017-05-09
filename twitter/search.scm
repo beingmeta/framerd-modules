@@ -14,7 +14,7 @@
 
 ;;(load-config (get-component "listenbot.cfg"))
 
-(define search-endpoint "https://api.twitter.com/1.1/search/tweets.json")
+(define search-endpoint (glom twitter-root "search/tweets.json"))
 
 (define (twitter/searchapi args (access (twitter/creds)))
   (oauth/call access 'GET search-endpoint args))
@@ -40,6 +40,8 @@
 	 (ids (get (elts tweets) 'id))
 	 (min_id (smallest ids))
 	 (max_id (largest ids)))
+    (loginfo |Twitter/search| 
+      "Calling twitter with " (try (get q 'next) q))
     (lognotice |Twitter/search| 
       "Got " (length tweets) " tweets for " (write (getopt q "q")) 
       " in " (secs->string (elapsed-time start)) " based on:\n"
@@ -59,19 +61,25 @@
 	 100))
   (default! blocksize
     (getopt opts 'blocksize (min (quotient n 10) n 100)))
-  (when (string? q) (set! q `#["q" ,q "count" ,blocksize]))
+  (when (> blocksize n) (set! blocksize n))
+  (if (string? q)
+      (set! q `#["q" ,q "count" ,blocksize])
+      (store! q "count" blocksize))
   (let* ((start (elapsed-time))
-	 (start_min (getopt opts 'min_id (try (get q "since_id") #f)))
-	 (start_max (getopt opts 'max_id (try (get q "max_id") #f)))
+	 (search_min (getopt opts 'min_id (try (get q "since_id") #f)))
+	 (search_max (getopt opts 'max_id (try (get q "max_id") #f)))
 	 (qstring (get q "q"))
-	 (backward (or (< n 0) (< blocksize 0) start_max))
+	 (backward (or (< n 0) (< blocksize 0) search_max))
 	 (result #f)
 	 (blocks '())
 	 (done #f)
 	 (count 0))
     (if backward
-	(when start_max (store! q "max_id" start_max))
-	(when start_min (store! q "since_id" start_min)))
+	(when search_max (store! q "max_id" search_max))
+	(when search_min (store! q "since_id" search_min)))
+    (loginfo |Twitter/search/n| 
+      "Calling API at count=" count "/" n " with "
+      (if (table? q) q `#["q" ,qstring "count" ,blocksize]))
     (set! result 
 	  (oauth/call creds 'GET search-endpoint
 		      (if (table? q) q `#["q" ,qstring "count" ,blocksize])))
@@ -83,23 +91,25 @@
 	     (ids (elts (map (lambda (x) (get x 'id)) tweets)))
 	     (min_id (smallest ids))
 	     (max_id (largest ids)))
+	(set! search_max (if (not search_max) max_id (max search_max max_id)))
+	(set! search_min (if (not search_min) min_id (min search_min min_id)))
 	(if (= (length tweets) 0)
-	    (set! done #t)
+	    (begin (loginfo |Twitter/search/n| "Search returned zero results")
+	      (set! done #t))
 	    (set! blocks (cons tweets blocks)))
 	(set! count (+ count (length tweets)))
 	(unless done
+	  (loginfo |Twitter/search/n| 
+	    "Calling API at count=" count "/" n " with "
+	    `#["q" ,(get q "q") "count" ,blocksize
+	       ,(if backward "max_id" "since_id")
+	       ,(if backward (-1+ min_id) max_id)])
 	  (set! result
 		(oauth/call creds 'GET search-endpoint
-			    `#["q" ,q "count" ,blocksize
+			    `#["q" ,(get q "q") "count" ,blocksize
 			       ,(if backward "max_id" "since_id")
 			       ,(if backward (-1+ min_id) max_id)])))))
     (lognotice |Twitter/Search/N| 
       "Got " count "/" n " tweets for " (write qstring) 
       " in " (secs->string (elapsed-time start)))
     (apply append blocks)))
-
-
-
-
-
-
