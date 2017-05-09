@@ -6,9 +6,13 @@
 (use-module '{fdweb texttools reflection varconfig parsetime logger})
 (use-module '{xhtml xhtml/auth oauth xconfig})
 
-(module-export! '{twitter/creds})
+(module-export! '{twitter/creds twitter/limits twitter-root})
+(module-export! '{twitter/throttled? twitter/throttled!})
 
 (define-init %loglevel %notice%)
+(define-init throttled (make-hashtable))
+
+(define twitter-root "https://api.twitter.com/1.1/")
 
 (define init-creds 'twitter20)
 (define twitter-creds #f)
@@ -19,13 +23,29 @@
 	(set! twitter-creds creds)
 	creds)))
 
+(define (twitter/limits creds (family #f))
+  (oauth/call (cons #[jsonflags 0] creds) 
+	      (glom twitter-root "application/rate_limit_status.json")
+	      (and family `#["resources" family])))
 
+#|
+(define (twitter/throttled? creds (resource #f) (key))
+  (default! key
+    (if (table? creds)
+	(get creds 'token)
+	creds))
+  (and (test throttled key)
+       (let ((until (get throttled key)))
+	 (or (fail? until) 
+	     (and (past? until) (begin (drop! throttled key) #t))))))
 
-
-
-
-
-
-
-
-
+(define (twitter/throttled! creds (until) (key))
+  (default! key
+    (if (table? creds)
+	(get creds 'token)
+	creds))
+  (and (test throttled key)
+       (let ((until (get throttled key)))
+	 (or (fail? until) 
+	     (and (past? until) (begin (drop! throttled key) #t))))))
+|#
