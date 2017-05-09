@@ -79,7 +79,7 @@
 	   (>= (get req 'response) 200)
 	   (< (get req 'response) 300))
       (if (search "json" ctype)
-	  (jsonparse content)
+	  (jsonparse content (getopt req 'jsonflags 24))
 	  (if (search "xml" ctype)
 	      (getxmldata content)
 	      ;; This comes across as text/plain from FB,
@@ -90,7 +90,7 @@
 		      (getxmldata content)
 		      (if (textsearch #((bol) (spaces*) {"{" "["})
 				      content)
-			  (jsonparse content)
+			  (jsonparse content (getopt req 'jsonflags 24))
 			  (cgiparse content)))))
 	  req)
       (fail)))
@@ -582,8 +582,9 @@
 	  (when (exists? (get parsed 'token_type))
 	    (unless (string-ci=? (get parsed 'token_type) "Bearer")
 	      (logwarn |OAUTH/GETACESS/OddToken|
-		       "Odd token type " (get parsed 'token_type) " responding to " spec
-		       " response=" parsed)))
+		       "Odd token type " (get parsed 'token_type) " "
+		       "responding to " spec " "
+		       "response=" parsed)))
 	  (when (and (exists? expires_in) expires_in)
 	    (store! authinfo 'expires (timestamp+ expires_in))
 	    (when (exists? (get parsed 'refresh_token))
@@ -731,6 +732,8 @@
       (let ((reqid (getuuid)))
 	(store! lograw reqid req)
 	(store! req 'reqid reqid)))
+    (when (getopt spec 'jsonflags)
+      (store! req 'jsonflags (getopt spec 'jsonflags)))
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
@@ -807,6 +810,8 @@
       (let ((reqid (getuuid)))
 	(store! lograw reqid req)
 	(store! req 'reqid reqid)))
+    (when (getopt spec 'jsonflags)
+      (store! req 'jsonflags (getopt spec 'jsonflags)))
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
