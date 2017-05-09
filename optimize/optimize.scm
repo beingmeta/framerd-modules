@@ -33,12 +33,14 @@
 
 (define-init fcnrefs-default {})
 (define-init opcodes-default {})
+(define-init bindops-default {})
 (define-init lexrefs-default {})
 (define-init substs-default {})
 (define-init rewrite-default {})
 
 (varconfig! optimize:fcnrefs fcnrefs-default)
 (varconfig! optimize:opcodes opcodes-default)
+(varconfig! optimize:bindops bindpos-default)
 (varconfig! optimize:substs  substs-default)
 (varconfig! optimize:lexrefs lexrefs-default)
 (varconfig! optimize:rewrite rewrite-default)
@@ -62,9 +64,10 @@
       `(optmode-macro ',optname ,opthresh ',optvar))))
 
 (define use-opcodes? (optmode opcodes 2 opcodes-default))
+(define use-bindops? (optmode bindops 4 bindops-default))
 (define use-substs? (optmode substs 2 substs-default))
 (define use-lexrefs? (optmode lexrefs 2 lexrefs-default))
-(define rewrite? (optmode 'ewrite 3 rewrite-default))
+(define rewrite? (optmode 'rewrite 3 rewrite-default))
 
 ;;; Controls whether optimization warnings are emitted in real time
 ;;; (when encountered)
@@ -898,13 +901,27 @@
       (optimize-block handler expr env bound opts)))
 
 (define (optimize-let handler expr env bound opts)
-  (let* ((bindexprs (cadr expr))
-	 (new-bindexprs
-	  (forseq (x bindexprs) `(,(car x) ,(optimize (cadr x) env bound opts))))
-	 (body (cddr expr)))
-    `(,handler ,new-bindexprs
-	       ,@(let ((bound (cons (map car bindexprs) bound)))
-		   (optimize-body body)))))
+  (if (and (use-opcodes? opts) (use-bindops? opts))
+      (let* ((bindexprs (cadr expr))
+	     (vars (map car bindexprs))
+	     (vals (->vector (map cadr bindexprs)))
+	     (not-vars (forseq (var vars) #f))
+	     (outer (cons not-vars bound))
+	     (inner (cons vars bound)))
+	`(,bind-opcode
+	  ,(->vector vars)
+	  ,(forseq (valexpr vals)
+	     (optimize valexpr env outer opts))
+	  ,(forseq (bodyexpr (cddr expr))
+	     (optimize bodyexpr env inner opts))))
+      (let* ((bindexprs (cadr expr))
+	     (new-bindexprs
+	      (forseq (x bindexprs) `(,(car x) ,(optimize (cadr x) env bound opts))))
+	     (body (cddr expr)))
+	`(,handler ,new-bindexprs
+		   ,@(let ((bound (cons (map car bindexprs) bound)))
+		       (optimize-body body))))))
+
 (define (optimize-doexpression handler expr env bound opts)
   (let ((bindspec (cadr expr)) 
 	(body (cddr expr)))
@@ -961,12 +978,38 @@
 	   opts))))
 
 (define (optimize-let* handler expr env bound opts)
-  (let ((bindspec (cadr expr))
-	(body (cddr expr)))
-    `(,handler
-      ,(optimize-let*-bindings (cadr expr) env (cons '() bound) opts)
-      ,@(let ((bound (cons (map car bindspec) bound)))
-	  (optimize-body body)))))
+  (if (and (use-opcodes? opts) (use-bindops? opts))
+      (let* ((bindexprs (cadr expr))
+	     (vars (map car bindexprs))
+	     (vals (->vector (map cadr bindexprs)))
+	     (not-vars (forseq (var vars) #f))
+	     (outer (cons not-vars bound))
+	     (inner (cons vars bound)))
+	`(,bind-opcode
+	  ,(->vector vars)
+	  ,(forseq (valexpr vals i)
+	     (optimize valexpr env 
+		       (cons (append (slice vars 0 i)
+				     (slice not-vars i))
+			     bound)
+		       opts))
+	  ,(forseq (bodyexpr (cddr expr))
+	     (optimize bodyexpr env inner opts))))
+      (let ((bindspec (cadr expr))
+	    (body (cddr expr)))
+	`(,handler
+	  ,(optimize-let*-bindings (cadr expr) env (cons '() bound) opts)
+	  ,@(let ((bound (cons (map car bindspec) bound)))
+	      (optimize-body body))))))
+
+#|
+(define (foo x y) (let ((x2 (* x x)) (y2 (* y y))) (+ x2 y2)))
+(define (foo* x y)
+  (let* ((x (begin (%watch x) (* x x))) 
+	 (y (begin (%watch x y)) (* x y)))
+    (+ x y)))
+|#
+
 (define (optimize-assign handler expr env bound opts)
   (let ((var (get-arg expr 1))
 	(setval (get-arg expr 2)))
@@ -1007,7 +1050,10 @@
 		(else (optimize-body clause))))))
 
 (define (optimize-cond handler expr env bound opts)
-  (if (use-opcodes? opts)
+  (if (and (use-opcodes? opts)
+	   (not (exists? (lambda (clause) 
+			   (and (pair? clause) (pair? (cdr clause))
+				(eq? (cadr clause) '==>))))))
       (convert-cond (cdr expr) env bound opts)
       (cons handler 
 	    (forseq (clause (cdr expr))
