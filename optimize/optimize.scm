@@ -553,40 +553,21 @@
 	  ((exists macro? value)
 	   (optimize (macroexpand value expr) env bound opts))
 	  ((fail? (reject value applicable?))
+	   ;; If all of the head values are applicable, we optimize
+	   ;;  the call, replacing the head with shortcuts to the
+	   ;;  value
 	   (check-arguments value n-exprs expr)
-	   (let* ((opt-args (optimize-args (cdr expr) env bound opts))
-		  (optimized-exprs {})
-		  (unoptimized {}))
-	     (do-choices (proc value)
-	       (let ((optimized ((get procedure-optimizers proc)
-				 proc expr env bound opts)))
-		 (if (exists? optimized)
-		     (set+! optimized-exprs optimized)
-		     (set+! unoptimized proc))))
-	     (choice
-	      optimized-exprs
-	      (tryif (exists? unoptimized)
-		(callcons 
-		 (qc (fcnref
-		      (map-opcode
-		       (cond ((not from) (try unoptimized head))
-			     ((fail? value) 
-			      `(,(try (tryif use-opcodes symref-opcode)
-				      (tryif (getopt opts 'fcnrefs fcnrefs-default)
-					(force-fcnid %modref))
-				      %modref)
-				,from ,head))
-			     ((test from '%nosubst head) head)
-			     ((test from '%volatile head)
-			      (try (tryif use-opcodes symref-opcode)
-				   (tryif (getopt opts 'fcnrefs fcnrefs-default)
-				     (force-fcnid %modref))
-				   %modref))
-			     (else unoptimized))
-		       opts
-		       n-exprs)
-		      head from opts))
-		 opt-args)))))
+	   (try (tryif (singleton? (get procedure-optimizers value))
+		  ((get procedure-optimizers proc)
+		   proc expr env bound opts))
+		(callcons
+		 (cond ((or (not from) (fail? value)
+			    (test from '%nosubst head))
+			head)
+		       ((test from '%volatile head)
+			`(,symref-opcode ,from ,head))
+		       (else (fcnref value head env opts)))
+		 (optimize-args (cdr expr) env bound opts))))
 	  (else
 	   (when (and optwarn from
 		      (not (test from '{%nosubst %volatile} head)))
