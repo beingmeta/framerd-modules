@@ -53,7 +53,10 @@
 
 (defambda (batch/read-state file . defaults)
   (let* ((init (if (and file (file-exists? file))
-		   (file->dtype file)
+		   (begin
+		     (logwarn |BatchRead| 
+		       "Reading batch state from " file)
+		     (file->dtype file))
 		   (apply frame-create #f defaults)))
 	 (state (deep-copy init)))
     (store! state 'init init)
