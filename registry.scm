@@ -94,24 +94,23 @@
 (define (registry/save! (r #f))
   (when (and (or (symbol? r) (oid? r)) (test registries r))
     (set! r (get registries r)))
-  (cond ((not r)
-	 (let ((threads (for-choices (r (get registries (getkeys registries)))
-			  (threadcall registry/save! r))))
-	   (threadjoin threads)))
-	((and (registry? r) (not (registry-server r)))
-	 (let ((threads
-		(choice (threadcall commit ({registry-pool registry-index} r))
-			(threadcall commit (get-adjuncts (registry-pool r)))
-			(tryif  (registry-idstream r)
-			  (threadcall flush-output (registry-idstream r))))))
-	   (threadjoin threads)))
-	((registry? r)
-	 (logwarn |RemoteRegistry|
-	   "Can't save a remote registry"))
-	((or (symbol? r) (oid? r))
-	 (logwarn |NoRegistry|
-	   "No registry for slotid " r " to save"))
-	(else (irritant r |NoRegistry| REGISTRY/SAVE!))))
+  (if (and r (registry-server r))
+      (logwarn |RemoteRegistry| "Can't save a remote registry")
+      (let* ((r (or r (pick (get registries (getkeys registries))
+			    registry-server #f)))
+	     (pools (registry-pool r))
+	     (indexes (registry-index r))
+	     (adjuncts-map (get-adjuncts pools))
+	     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
+	     (streams (difference (registry-idstream r) #f))
+	     (threads
+	      (choice (thread/call+ #[logexit #f]
+			  commit {pools indexes adjuncts})
+		      (thread/call+ #[logexit #f]
+			  flush-output streams))))
+	(if (exists? threads)
+	    (threadjoin threads)
+	    (logwarn |NoRegistry| "Couldn't get a registry to save")))))
 
 ;;; The meat of it
 
