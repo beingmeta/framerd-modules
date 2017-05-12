@@ -32,7 +32,8 @@
 
 (defrecord (registry OPAQUE `(stringfn . registry->string))
   slotid spec server pool index (slotid #f) (slotindexes {})
-  (idstream #f) (bloom #f)
+  (idfile #f) (bloom #f)
+  (newids (make-hashset))
   (cache (make-hashtable))
   (lock (make-condvar)))
 (module-export! '{registry? registry-pool registry-index registry-server})
@@ -58,7 +59,7 @@
 	    (reg
 	     (let ((frame 
 		    (try (get (registry-cache reg) value)
-			 (registry/get reg slotid value #t)))
+			 (registry/get reg slotid value inits)))
 		   (slotindexes (registry-slotindexes reg)))
 	       (when defaults
 		 (when (test defaults '%id) 
@@ -102,15 +103,17 @@
 	     (indexes (registry-index r))
 	     (adjuncts-map (get-adjuncts pools))
 	     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
-	     (streams (difference (registry-idstream r) #f))
 	     (threads
 	      (choice (thread/call+ #[logexit #f]
 			  commit {pools indexes adjuncts})
-		      (thread/call+ #[logexit #f]
-			  flush-output streams))))
+		      (thread/call+ #[logexit #f] save-ids! r))))
 	(if (exists? threads)
 	    (threadjoin threads)
 	    (logwarn |NoRegistry| "Couldn't get a registry to save")))))
+
+(define (save-ids! r)
+  (let ((elts (hashset-elts (registry-newids r) #t)))
+    (dtype->file+ elts (registry-idfile r))))
 
 ;;; The meat of it
 
@@ -142,8 +145,7 @@
 		     (do-choices (key (getkeys create))
 		       (store! result key (get create key)))))
 		 (when bloom
-		   (when (registry-idstream registry)
-		     (dtype->file+ key (registry-idstream registry)))
+		   (hashset-add! (registry-newids registry) key)
 		   (bloom/add! bloom key))
 		 (store! (registry-cache registry) value result))
 	       result)))))
