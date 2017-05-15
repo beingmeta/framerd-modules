@@ -948,20 +948,21 @@
 		((and (pair? (cdr clause)) (eq? (cadr clause) '=>))
 		 `(,(optimize (car clause) env bound opts)
 		   =>
-		   ,@(optimize-body (cddr clause))))
+		   ,@(optimize-body (cdr clause))))
 		(else (optimize-body clause))))))
 
 (define (optimize-cond handler expr env bound opts)
   (if (and (use-opcodes? opts)
 	   (not (exists? (lambda (clause) 
 			   (and (pair? clause) (pair? (cdr clause))
-				(eq? (cadr clause) '==>))))))
+				(identical? (cadr clause) '==>))))))
       (convert-cond (cdr expr) env bound opts)
       (cons handler 
 	    (forseq (clause (cdr expr))
 	      (cond ((eq? (car clause) 'else)
 		     `(ELSE ,@(optimize-body (cdr clause))))
-		    ((and (pair? (cdr clause)) (eq? (cadr clause) '=>))
+		    ((and (pair? (cdr clause)) 
+			  (identical? (cadr clause) '=>))
 		     `(,(optimize (car clause) env bound opts)
 		       =>
 		       ,@(optimize-body (cddr clause))))
