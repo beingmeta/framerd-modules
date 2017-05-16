@@ -59,9 +59,9 @@
     (try (getopt opts 'count)
 	 (tryif (table? q) (get q "count"))
 	 100))
-  (default! blocksize
-    (getopt opts 'blocksize (min (quotient n 10) n 100)))
+  (default! blocksize (getopt opts 'blocksize 100))
   (when (> blocksize n) (set! blocksize n))
+  (info%watch "TWITTER/SEARCH/N" q opts n blocksize)
   (if (string? q)
       (set! q `#["q" ,q "count" ,blocksize])
       (store! q "count" blocksize))
