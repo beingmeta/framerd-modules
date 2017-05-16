@@ -11,6 +11,8 @@
 (define-init getuser #f)
 (varconfig! oauth:getuser getuser)
 
+(define-init default-json-flags 8)
+
 (define-init default-callback #f)
 (varconfig! oauth:callback default-callback)
 
@@ -79,7 +81,7 @@
 	   (>= (get req 'response) 200)
 	   (< (get req 'response) 300))
       (if (search "json" ctype)
-	  (jsonparse content (getopt req 'jsonflags 24))
+	  (jsonparse content (getopt req 'jsonflags default-json-flags))
 	  (if (search "xml" ctype)
 	      (getxmldata content)
 	      ;; This comes across as text/plain from FB,
@@ -90,7 +92,7 @@
 		      (getxmldata content)
 		      (if (textsearch #((bol) (spaces*) {"{" "["})
 				      content)
-			  (jsonparse content (getopt req 'jsonflags 24))
+			  (jsonparse content (getopt req 'jsonflags default-json-flags))
 			  (cgiparse content)))))
 	  req)
       (fail)))
