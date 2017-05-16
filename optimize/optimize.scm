@@ -142,16 +142,21 @@
 (define (fcnref value sym env opts)
   (if (and (cons? value)
 	   (or (applicable? value) (special-form? value)))
-      (let ((usevalue
-	     (if (getopt opts 'staticfns staticfns-default)
-		 (static-ref value)
-		 value)))
-	(if (and (symbol? sym) 
-		 (test env sym value)
-		 (getopt opts 'fcnrefs fcnrefs-default))
-	    (try (get fcnids (cons sym env))
-		 (add-fcnid sym env value))
-	    value))
+      (if (special-form? value) 
+	  (if (getopt opts 'staticfns staticfns-default)
+	      (static-ref value)
+	      value)
+	  ;; Otherwise:
+	  (let ((usevalue
+		 (if (getopt opts 'staticfns staticfns-default)
+		     (static-ref value)
+		     value)))
+	    (if (and (symbol? sym) 
+		     (test env sym value)
+		     (getopt opts 'fcnrefs fcnrefs-default))
+		(try (get fcnids (cons sym env))
+		     (add-fcnid sym env value))
+		value)))
       value))
 
 (defslambda (add-fcnid sym env value)
@@ -453,6 +458,7 @@
 	     expr)
 	   expr)
 	  ((exists special-form? value)
+	   (loginfo |SpecialForm| "Optimizing reference to " value)
 	   (let* ((optimizer
 		   (try (get special-form-optimizers value)
 			(get special-form-optimizers
