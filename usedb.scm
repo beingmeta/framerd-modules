@@ -66,7 +66,7 @@
 		      (do-choices (slotid (getkeys mi))
 			(let ((index (get mi slotid)))
 			  (add! rmi slotid
-				(use-component open-index index dbname opts #f))))
+				(use-component open-index index dbname (cons #[register #t] opts) #f))))
 		      (add! dbdata '%metaindex rmi))
 		    dbdata))
 	     dbname))))
