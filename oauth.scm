@@ -241,7 +241,17 @@
        SCOPE "openid profile email"
        VERSION "2.0"
        REALM DWOLLA
-       NAME "Dwolla"]])
+       NAME "Dwolla"]
+     REDDIT
+     #[AUTHORIZE "https://www.reddit.com/api/v1/authorize"
+       ACCESS "https://www.reddit.com/api/v1/access_token"
+       KEY REDDIT:KEY SECRET REDDIT:SECRET
+       VERSION "2.0"
+       ;; SCOPE "r_fullprofile r_network r_emailaddress rw_groups"
+       ;; ACCESS_TOKEN "oauth2_access_token"
+       ACCESS_TOKEN HTTP
+       REALM REDDIT
+       NAME "Reddit"]])
 
 (define (oauth/provider spec) (get oauth-servers spec))
 (module-export! 'oauth/provider)
@@ -756,7 +766,7 @@
 	 (if (pair? body) (cdr body)
 	     (getopt spec 'ctype
 		     (if (packet? body) "application" "text")))))
-  (when (and expires (time-earlier? expires)) (oauth/refresh! spec))
+  (when (and expires (past? expires)) (oauth/refresh! spec))
   (let* ((endpoint (or endpoint
 		       (getopt args 'endpoint
 			       (getopt spec 'endpoint default-endpoint))))
@@ -790,11 +800,15 @@
 				    (cons "Expect" 
 					  (getopt spec 'expect default-expect))) 
 			       'header auth-header
+			       'user-agent (if (getopt spec 'user-agent #f)
+					       (getopt spec 'user-agent #f))
 			       'method method)
 		     (curlopen 'header
 			       (and (getopt spec 'expect default-expect)
 				    (cons "Expect" 
 					  (getopt spec 'expect default-expect)))
+			       'user-agent (if (getopt spec 'user-agent #f)
+					       (getopt spec 'user-agent #f))
 			       'method method)))
 	 (req (if (eq? method 'GET) (urlget useurl handle)
 		  (if (eq? method 'HEAD) (urlget useurl handle)
