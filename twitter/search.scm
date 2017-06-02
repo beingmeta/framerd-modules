@@ -10,7 +10,7 @@
 		  twitter/search
 		  twitter/search/n})
 
-(define %loglevel %warn%)
+(define %loglevel %notice%)
 
 ;;(load-config (get-component "listenbot.cfg"))
 
@@ -94,16 +94,15 @@
 	(set! search_max (if (not search_max) max_id (max search_max max_id)))
 	(set! search_min (if (not search_min) min_id (min search_min min_id)))
 	(if (= (length tweets) 0)
-	    (begin (loginfo |Twitter/search/n| "Search returned zero results")
+	    (begin (loginfo |Twitter/Search/N| "Search returned zero results")
 	      (set! done #t))
 	    (set! blocks (cons tweets blocks)))
 	(set! count (+ count (length tweets)))
 	(unless done
-	  (loginfo |Twitter/search/n| 
+	  (loginfo |Twitter/Search/N| 
 	    "Calling API at count=" count "/" n " with "
 	    `#["q" ,(get q "q") "count" ,blocksize
-	       ,(if backward "max_id" "since_id")
-	       ,(if backward (-1+ min_id) max_id)])
+	       "max_id" (-1+ min_id)])
 	  (set! result
 		(oauth/call creds 'GET search-endpoint
 			    `#["q" ,(get q "q") "count" ,blocksize
