@@ -177,7 +177,7 @@
 	     (let ((threads (thread/call commit tosave)))
 	       (logwarn |IndexSave| "Waiting for " 
 			(choice-size threads) " threads")
-	       (thread/join threads)
+	       (thread/wait threads)
 	       (logwarn |IndexSave| 
 		 "Saved " (choice-size tosave) " indexes in "
 		 (secs->string (elapsed-time started)))))
@@ -231,7 +231,7 @@
     (set! root (get branch 'root))
     (if parallel
 	(choice-size
-	 (threadjoin
+	 (thread/wait
 	  (for-choices (slot (get branch 'slots))
 	    (let ((table (get branch slot)))
 	      (tryif (modified? table)
@@ -239,7 +239,7 @@
 		  (store! branch slot 
 			  (branch-table (getopt branch 'opts)
 					(table-size table)))
-		  (threadcall index-merge! (get root slot) table)))))))
+		  (thread/call index-merge! (get root slot) table)))))))
 	(begin (do-choices (slot (get branch 'slots))
 		 (let ((table (get branch slot)))
 		   (when (modified? table)
