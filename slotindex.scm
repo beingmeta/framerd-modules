@@ -21,11 +21,11 @@
 (define-init default-opts
   #[size 1000000
     flags (DTYPEV2)
+    register #t
     config #[]])
 (config! 'SLOTINDEX:OPTS '())
 
-(defambda (slotindex/make dir (opts (cons #[] default-opts))
-			  . slots)
+(defambda (slotindex/make dir (opts (cons #[] default-opts)) . slots)
   (unless (pair? opts) 
     (set! opts (cons opts default-opts)))
 
@@ -67,11 +67,13 @@
 
 (defambda (slotindex/init index)
   (if (test index 'slots)
-      (let* ((copy (frame-create #f 
+      (let* ((opts (try (get index 'opts)
+			(cons #[] default-opts)))
+	     (copy (frame-create #f 
 		     'slotindex 'slotindex
 		     'directory (get index 'directory)
 		     'prefix (get index 'prefix)
-		     'opts (get index 'opts)
+		     'opts (if (pair? opts) opts (cons opts default-opts))
 		     'custom (get index 'custom))))
 	(do-choices (slot (get index 'slots))
 	  (slotindex/setup copy slot))
@@ -110,11 +112,12 @@
 	 (when (file-exists? path)
 	   (lognotice |UsingIndex| "Using the index at " path " for " slot))
 	 (if (file-exists? path)
-	     (set! index (open-index path))
-	     (let ((opts `#[type ,(getopt opts 'indextype 'hashindex)
-			    slots ,(getopt opts 'size 1000000)
-			    offtype ,(getopt opts 'offtype 'b40)
-			    slotids #(,slot)])
+	     (set! index (open-index path opts))
+	     (let ((opts (cons `#[type ,(getopt opts 'indextype 'hashindex)
+				  size ,(getopt opts 'size 1000000)
+				  offtype ,(getopt opts 'offtype 'b40)
+				  slotids #(,slot)]
+			       opts))
 		   (baseoids {(getopt opts 'baseoids {})
 			      (get-baseoids pools)}))
 	       (lognotice |NewIndex| "Creating new index for " slot " at " path)
