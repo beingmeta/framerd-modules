@@ -191,15 +191,11 @@
 			(idpath (getopt spec 'idpath 
 					(get-idpath spec idbase)))
 			(slotid (has-suffix idpath ".ids"))
-			(idstream (and idpath 
-				       (or (file-exists? idpath)
-					   (getopt spec 'bloom use-bloom))
-				       (extend-dtype-file idpath)))
-			(bloom (and idstream (get-bloom idpath))))
+			(bloom (and idpath (get-bloom idpath))))
 		   (set! registry
 			 (cons-registry slotid spec server pool index slotid 
 					(getopt spec 'slotindex {})
-					idstream bloom))))
+					idpath bloom))))
 	     (store! registries slotid registry)
 	     registry))))
 
@@ -324,9 +320,18 @@
 (define (get-bloom path (error #f))
   (if (and (string? path) (file-exists? path))
        (let* ((ids (file->dtypes path))
-	      (bloom (make-bloom-filter (* 8 (max (choice-size ids) 4000000)) 
-					(or error 0.0001))))
+	      (bloom (make-bloom-filter (* 8 (max (choice-size ids) 16000)) 
+					(or error 0.0001)))
+	      (started (elapsed-time)))
+	 (lognotice |BloomInit| 
+	   "Initializing bloom filter " path " with " 
+	   (choice-size ids) " items")
 	 (bloom/add! bloom ids)
+	 (when (> (elapsed-time started) 1)
+	   (lognotice |BloomInit| 
+	     "Initialized bloom filter " path " with " 
+	     (choice-size ids) " items in " 
+	     (secs->string (elapsed-time started))))
 	 bloom)
        (make-bloom-filter 8000000 (or error 0.0001))))
 

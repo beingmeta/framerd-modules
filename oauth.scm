@@ -806,8 +806,7 @@
 			       (and (getopt spec 'expect default-expect)
 				    (cons "Expect" 
 					  (getopt spec 'expect default-expect)))
-			       'user-agent (if (getopt spec 'user-agent #f)
-					       (getopt spec 'user-agent #f))
+			       'useragent (getopt spec 'user-agent #f)
 			       'method method)))
 	 (req (if (eq? method 'GET) (urlget useurl handle)
 		  (if (eq? method 'HEAD) (urlget useurl handle)
