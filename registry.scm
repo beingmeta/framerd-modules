@@ -39,7 +39,7 @@
 (module-export! '{registry? registry-pool registry-index registry-server})
 
 (defambda (register slotid value 
-		    (inits #f) (defaults #f) (adds #f)
+		    (inits #t) (defaults #f) (adds #f)
 		    (registry-arg #f)
 		    (reg))
   (unless registry-arg
@@ -50,6 +50,7 @@
 		  (write slotid)))))
   (for-choices slotid
     (set! reg (or registry-arg (get registries slotid)))
+    (info%watch "REGISTER" slotid value reg)
     (for-choices value
       (cond ((and reg (not defaults) (not adds))
 	     ;; Simple call, since we dont' need to do anything 
@@ -124,6 +125,7 @@
 (define (registry/get registry slotid value (create #f) (server) (index))
   (default! server (registry-server registry))
   (default! index (registry-index registry))
+  (info%watch "REGISTRY/GET" registry slotid value create server index)
   (with-lock (registry-lock registry)
     (try (get (registry-cache registry) value)
 	 (if server
@@ -181,7 +183,7 @@
 		 (set! registry
 		       (cons-registry slotid spec server pool index
 				      (getopt spec 'slotid)
-				      (qc (getopt spec 'slotindex {}))))
+				      (getopt spec 'slotindex {})))
 		 (let* ((ixsource (and index (index-source index)))
 			(idbase (and ixsource 
 				     (not (∃ position {#\: #\@} ixsource))
@@ -196,7 +198,7 @@
 			(bloom (and idstream (get-bloom idpath))))
 		   (set! registry
 			 (cons-registry slotid spec server pool index slotid 
-					(qc (getopt spec 'slotindex {}))
+					(getopt spec 'slotindex {})
 					idstream bloom))))
 	     (store! registries slotid registry)
 	     registry))))
