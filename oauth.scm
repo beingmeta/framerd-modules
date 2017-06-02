@@ -800,8 +800,7 @@
 				    (cons "Expect" 
 					  (getopt spec 'expect default-expect))) 
 			       'header auth-header
-			       'user-agent (if (getopt spec 'user-agent #f)
-					       (getopt spec 'user-agent #f))
+			       'useragent (getopt spec 'user-agent #f)
 			       'method method)
 		     (curlopen 'header
 			       (and (getopt spec 'expect default-expect)
