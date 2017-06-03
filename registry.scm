@@ -102,7 +102,7 @@
 	  (pick (get registries (getkeys registries))
 		registry-server #f)))
 	((ambiguous? r)
-	 (thread/call registry/save! r))
+	 (thread/wait (thread/call registry/save! r)))
 	((registry-server r)
 	 (logwarn |RemoteRegistry|
 	   "No need to save a remote registry")
@@ -113,7 +113,7 @@
 		     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
 		     (threads (thread/call+ #[logexit #f] commit {pools indexes adjuncts})))
 		(if (exists? threads)
-		    (prog1 (thread/join threads) (save-ids! r))
+		    (prog1 (thread/wait threads) (save-ids! r))
 		    (logwarn |NoRegistry| "Couldn't get a registry to save"))))))
 
 (define (save-ids! r)
