@@ -14,7 +14,6 @@
 (module-export! '{aws/v4/prepare aws/v4/get aws/v4/op v4err}) ;; aws/v4/post
 (module-export! '{derive-key})
 
-(define default-region "us-east-1")
 (define default-service "iam")
 
 (define debug #t)
@@ -129,9 +128,9 @@
 	 (result (urlget url curl))
 	 (status (and result (try (get result 'response) #f))))
     (if (and err status (or (not (number? status)) (not (>= 299 status 200))))
-	(irritant (aws/error result req)
-		  |AWS/V4/Error| aws/v4/get
-		  "endpoint=" endpoint "\nurl=" url "\ncurl=" curl)
+	(irritant (aws/error result req) |AWS/V4/Error| aws/v4/get
+		  ;; "endpoint=" endpoint "\nurl=" url "\ncurl=" curl
+		  )
 	(cons result req))))
 
 (define (aws/v4/op req op endpoint (opts #f)
@@ -183,8 +182,13 @@
   ;; (add! args "Signature" (packet->base64 (getopt req 'signature)))
   ((if (curl-handle? curl) curlsetopt! add!) curl 'method (string->symbol op))
   ;; (add! args "SignatureMethod" "AWS-HMAC-SHA256")
+
+  ;; TODO: For POST methods, the payload here should probably
+  ;; www/url-form-encoded args
   (set! req  (aws/v4/prepare req op endpoint opts
-			     (if (equal? op "GET") (or payload "") payload)
+			     (if (equal? op "GET") 
+				 (or payload "")
+				 (or payload args))
 			     payload-mimetype))
   (when payload
     (add-header! curl "x-amz-content-sha256"
@@ -196,7 +200,9 @@
 	       "Signature=" (downcase (packet->base16 (getopt req 'signature))))
   (let* ((escaped (if (position #\% endpoint) endpoint
 		      (encode-uri endpoint)))
-	 (url (scripturl+ escaped args)))
+	 (url (if (or (overlaps? op '{GET "GET" "get"}) payload)
+		  (scripturl+ escaped args)
+		  escaped)))
     (loginfo |AWS/V4/op| (write op) " " endpoint
 	     "\n  params: " args "\n  headers: " headers "\n  "
 	     (if (and payload (> (length payload) 0))
@@ -208,15 +214,14 @@
     (let* ((result (urlop op url curl payload payload-mimetype))
 	   (err (not (getopt req 'noerr #f)))
 	   (status (get result 'response)))
-      (if (and err status 
-	       (if (equal? op "HEAD") 
-		   (>= status 500)
-		   (or (>= status 400) (< status 200))))
-	  (irritant (aws/error result req)
-		    |AWS/V4/Error| aws/v4/op
-		    "\nop=" op "\nendpoint=" endpoint ", "
-		    "\nurl=" url "\ncurl=" curl)
-	  (cons result req)))))
+      (cond ((not err) (cons result req))
+	    ((and status (equal? op "HEAD") 
+		  (< status 500) (or (>= status 400) (< status 200)))
+	     (cons result req))
+	    (else (irritant (aws/error result req) |AWS/V4/Error| aws/v4/op
+			    ;; "\nop=" op "\nendpoint=" endpoint ", "
+			    ;; "\nurl=" url "\ncurl=" curl
+			    ))))))
 
 (define (process-args args req)
   (do-choices (key (getkeys args))
@@ -253,9 +258,8 @@
 				(gmtimestamp 'seconds)))))
 	 (region (try (getopt req '%region {})
 		      (getopt req 'region {})
-		      (getopt opts 'region
-			      (pick aws-regions search host))
-		      default-region))
+		      (getopt opts 'region (pick aws-regions search host))
+		      aws:region))
 	 (service (try (getopt req '%service {})
 		       (getopt req 'service {})
 		       (getopt opts 'service {})
@@ -277,7 +281,9 @@
       (store! req "X-Amz-SignedHeaders" (signed-headers req)))
     (when (and (test req '%params "X-Amz-Security-Token") awstoken)
       (store! req "X-Amz-Security-Token" awstoken))
-    (let* ((cq (canonical-query-string req))
+    (let* ((cq (if (or payload (eq? method "GET"))
+		   (canonical-query-string req)
+		   ""))
 	   (ch (canonical-headers req))
 	   (sh (signed-headers req))
 	   (creq (stringout method "\n"
@@ -300,6 +306,7 @@
 	"\n  creds=" (write credential)
 	"\n  req=" (write creq)
 	"\n  sts=" (write string-to-sign))
+      (info%watch cq ch sh creq)
       (store! req 'aws:key awskey)
       (when awstoken (store! req 'aws:token awstoken))
       (store! req 'signature signature)
@@ -350,7 +357,9 @@
 	  (subst (not> "\"") ,merge-spaces)))))
 
 (define (trim-header-value value)
-  (trim-spaces (textsubst value trim-rule)))
+  (if (string? value)
+      (trim-spaces (textsubst value trim-rule))
+      value))
   
 (define (canonical-headers args (headers))
   (default! headers 

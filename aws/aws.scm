@@ -13,11 +13,15 @@
 		   aws/refresh aws:token})
 
 (module-export! 
- '{aws:account aws:key aws:secret aws:token aws:expires 
+ '{aws:account aws:key aws:secret aws:token aws:expires
    aws/ok? aws/checkok aws/set-creds! aws/creds!
    aws/datesig aws/datesig/head aws/template
    aws/update-creds!
-   aws/error})
+   aws/error
+   aws:region})
+
+(define aws:region "us-east-1")
+(varconfig! aws:region aws:region)
 
 ;;; Templates source
 (define template-sources
@@ -161,10 +165,25 @@
 (define (aws/error result req)
   (let* ((content (get result '%content))
 	 (ctype (try (get result 'content-type) #f))
-	 (parsed (parse-error content ctype)))
+	 (parsed (parse-error content ctype))
+	 (parsetype (try (get parsed 'parsetype) #f))
+	 (extra #f))
+    (cond ((and (eq? parsetype 'xml) 
+		(exists? (xmlget parsed 'INVALIDSIGNATUREEXCEPTION)))
+	   (set! extra
+		 `#[INVALIDSIGNATUREEXCEPTION 
+		    ,(xmlcontent (xmlget parsed 'INVALIDSIGNATUREEXCEPTION) 'message)
+		    ACTION ,(getopt req "Action")
+		    STRING-TO-SIGN ,(getopt req 'string-to-sign)
+		    CREQ ,(getopt req 'creq)
+		    DATE ,(getopt req 'date)
+		    HEADERS ,(getopt req 'headers)
+		    PARAMS ,(getopt req '%params)])))
     (store! result '%content parsed)
     (store! result 'httpstatus (get result 'response))
-    (cons result req)))
+    (if extra
+	(cons* extra result req)
+	(cons result req))))
 
 (define (parse-error content type)
   (cond ((and type (search "/xml" type))
@@ -184,15 +203,21 @@
 
 (define (xml-error xmlstring)
   (onerror
-      (xmlparse xmlstring '{data slotify})
-    (lambda (ex)
-      (logwarn  (error-condition ex)
-	"Couldn't parse XML error description:\n\t" ex 
-	"\n  " xmlstring))))
+      (let ((err (remove-if string?
+			    (xmlparse xmlstring '{data slotify}))))
+	(store! (car err) 'parsetype 'xml)
+	(car err))
+      (lambda (ex)
+	(logwarn  (error-condition ex)
+	  "Couldn't parse XML error description:\n\t" ex 
+	  "\n  " xmlstring))))
 (define (json-error jsonstring)
   (onerror
-      (jsonparse jsonstring)
-    (lambda (ex)
-      (logwarn  (error-condition ex)
-	"Couldn't parse JSON error description:\n\t" ex 
-	"\n  " jsonstring))))
+      (let ((err (jsonparse jsonstring)))
+	(store! err 'parsetype 'json)
+	err)
+      (lambda (ex)
+	(logwarn  (error-condition ex)
+	  "Couldn't parse JSON error description:\n\t" ex 
+	  "\n  " jsonstring))))
+
