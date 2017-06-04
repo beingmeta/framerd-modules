@@ -81,7 +81,7 @@
 	(else (irritant string |UnhandledProtocol|))))
 
 (define (sns/unsubscribe! arn (opts base-opts))
-  (aws/v4/get #[] (get-endpoint opts) opts `#["Action" "Unsubscribe" ,arn]))
+  (aws/v4/get #[] (get-endpoint opts) opts `#["Action" "Unsubscribe" "SubscriptionArn" ,arn]))
 
 (defambda (sns/permit! topic-arg actions accounts (opts))
   (for-choices topic-arg
