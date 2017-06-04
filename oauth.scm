@@ -56,7 +56,8 @@
    oauth/getaccess oauth/getclient
    oauth/call oauth/call* oauth/call/req
    oauth/get oauth/post oauth/put
-   oauth/sigstring oauth/callsig})
+   oauth/sigstring oauth/callsig
+   oauth/getinfo oauth/setinfo! oauth/known?})
 
 (define-init %loglevel %notice!)
 ;;(set!  %loglevel %debug%)
@@ -114,6 +115,7 @@
   `#[TWITTER
      #[REQUEST "https://api.twitter.com/oauth/request_token"
        VERIFY "https://api.twitter.com/oauth/access_token"
+       ACCESS "https://api.twitter.com/oauth/access_token"
        AUTHORIZE "https://api.twitter.com/oauth/authorize"
        AUTHENTICATE "https://api.twitter.com/oauth/authenticate"
        KEY TWITTER:KEY SECRET TWITTER:SECRET
@@ -715,26 +717,20 @@
 				      (getopt spec 'expect default-expect)))
 			   'header auth-header
 			   'method method))
-	 (req (if (eq? method 'GET)
-		  (urlget (if (pair? args)
-			      (apply scripturl endpoint args)
-			      (scripturl+ endpoint args))
-			  handle)
-		  (if (eq? method 'HEAD)
-		      (urlhead (if (pair? args)
-				   (apply scripturl endpoint args)
-				   (scripturl+ endpoint args))
-			       handle)
-		      (if (eq? method 'POST)
-			  (urlpost endpoint handle (args->post args))
-			  (if (eq? method 'PUT)
-			      (urlput (if (pair? args)
-					  (apply scripturl endpoint args)
-					  (scripturl+ endpoint args))
-				      content ctype handle)
-			      (error OAUTH:BADMETHOD OAUTH/CALL10
-				     "Only GET, HEAD, PUT, and POST are allowed: "
-				     method endpoint args)))))))
+	 (streamfn (getopt spec 'streamfn))
+	 (useurl 
+	  (if (eq? method 'POST) endpoint
+	      (if (pair? args)
+		  (apply scripturl endpoint args)
+		  (scripturl+ endpoint args))))
+	 (req (cond (streamfn (urlstream useurl streamfn handle body))
+		    ((eq? method 'GET) (urlget useurl handle))
+		    ((eq? method 'HEAD) (urlhead useurl handle))
+		    ((eq? method 'POST) (urlpost useurl handle (args->post args)))
+		    ((eq? method 'PUT) (urlput useurl content ctype handle))
+		    (else (error OAUTH:BADMETHOD OAUTH/CALL10
+				 "Only GET, HEAD, PUT, and POST are allowed: "
+			    method endpoint args)))))
     (debug%watch now nonce sig64)
     ;; Keeping these watchpoints separate makes them easier to read
     ;;  (maybe %watch needs a redesign?)
@@ -749,7 +745,7 @@
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
-	    (getreqdata req)
+	    (cons (getreqdata req) spec)
 	    (irritant req OAUTH:REQFAIL OAUTH/CALL1.0
 		      "Failed to " method " at " endpoint
 		      " with " args "\n\t" spec)))))
@@ -775,50 +771,55 @@
 	  (if httpauth
 	      (glom "Authorization: Bearer " (getopt spec 'token))
 	      ""))
+	 (streamfn (getopt spec 'streamfn))
 	 (content (if (pair? body) (car body) body))
-	 (useurl (if (or (eq? method 'get) (eq? method 'put)
-			 (and (eq? method 'post) body))
-		     (if httpauth
-			 (if (or (not args) (null? args)) endpoint
-			     (if (pair? args)
-				 (apply scripturl endpoint args)
-				 (apply scripturl+ endpoint (list args))))
-			 (if (pair? args)
-			     (apply scripturl endpoint
-				    (getopt spec 'access_token "access_token")
-				    (getopt spec 'token)
-				    args)
-			     (if (or (not args) (null? args))
-				 (scripturl endpoint
-				     (getopt spec 'access_token "access_token")
-				   (getopt spec 'token))
-				 (apply scripturl+ endpoint (list args)))))
-		     endpoint))
-	 (handle (if httpauth
-		     (curlopen 'header
-			       (and (getopt spec 'expect default-expect)
-				    (cons "Expect" 
-					  (getopt spec 'expect default-expect))) 
-			       'header auth-header
-			       'useragent (getopt spec 'user-agent #f)
-			       'method method)
-		     (curlopen 'header
-			       (and (getopt spec 'expect default-expect)
-				    (cons "Expect" 
-					  (getopt spec 'expect default-expect)))
-			       'useragent (getopt spec 'user-agent #f)
-			       'method method)))
-	 (req (if (eq? method 'GET) (urlget useurl handle)
-		  (if (eq? method 'HEAD) (urlget useurl handle)
-		      (if (eq? method 'POST)
-			  (if body
-			      (urlput useurl content ctype handle)
-			      (urlpost useurl handle (args->post args)))
-			  (if (eq? method 'PUT)
-			      (urlput useurl content ctype handle)
-			      (error OAUTH:BADMETHOD OAUTH/CALL20
-				     "Only GET, HEAD, PUT, and POST are allowed: "
-				     method endpoint args)))))))
+	 (useurl
+	  (if (or (eq? method 'get) (eq? method 'put)
+		  (and (eq? method 'post) body))
+	      (if httpauth
+		  (if (or (not args) (null? args)) endpoint
+		      (if (pair? args)
+			  (apply scripturl endpoint args)
+			  (apply scripturl+ endpoint (list args))))
+		  (if (pair? args)
+		      (apply scripturl endpoint
+			     (getopt spec 'access_token "access_token")
+			     (getopt spec 'token)
+			     args)
+		      (if (or (not args) (null? args))
+			  (scripturl endpoint
+			      (getopt spec 'access_token "access_token")
+			    (getopt spec 'token))
+			  (apply scripturl+ endpoint (list args)))))
+	      endpoint))
+	 (handle 
+	  (if httpauth
+	      (curlopen 'header
+			(and (getopt spec 'expect default-expect)
+			     (cons "Expect" 
+				   (getopt spec 'expect default-expect))) 
+			'header auth-header
+			'useragent (getopt spec 'user-agent #f)
+			'method method)
+	      (curlopen 'header
+			(and (getopt spec 'expect default-expect)
+			     (cons "Expect" 
+				   (getopt spec 'expect default-expect)))
+			'useragent (getopt spec 'user-agent #f)
+			'method method)))
+	 (req (if streamfn
+		  (urlstream useurl streamfn handle body)
+		  (if (eq? method 'GET) (urlget useurl handle)
+		      (if (eq? method 'HEAD) (urlget useurl handle)
+			  (if (eq? method 'POST)
+			      (if body
+				  (urlput useurl content ctype handle)
+				  (urlpost useurl handle (args->post args)))
+			      (if (eq? method 'PUT)
+				  (urlput useurl content ctype handle)
+				  (error OAUTH:BADMETHOD OAUTH/CALL20
+					 "Only GET, HEAD, PUT, and POST are allowed: "
+				    method endpoint args))))))))
     (debug%watch "OAUTH/CALL20" endpoint auth-header req)
     (when (getopt spec 'lograw lograw)
       (let ((reqid (getuuid)))
@@ -829,7 +830,7 @@
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
-	    (getreqdata req)
+	    (cons (getreqdata req) spec)
 	    (if (and (<= 400 (get req 'response) 499) (getopt spec 'refresh))
 		(begin
 		  (debug%watch 'OAUTH/ERROR "RESPONSE" response req)
@@ -1002,6 +1003,13 @@
 (define-init oauth-info (make-hashtable))
 (define-init oauth-onaccess (make-hashtable))
 
+(define (oauth/getinfo oauth_key)
+  (get oauth-info oauth_key))
+(define (oauth/setinfo! key creds)
+  (store! oauth-info key creds))
+(define (oauth/known? key)
+  (test oauth-info key))
+
 (config-def! 'oauth:onaccess
 	     (lambda (var (val))
 	       (if (bound? val)
@@ -1028,7 +1036,9 @@
 	     (verified (oauth/verify auth-state oauth_verifier)))
 	(oauth/pending! oauth_token) ;; Drop state
 	(store! oauth-info oauth_token (cons verified (cdr auth-state)))
-	(let ((user (getuser verified)))
+	(let ((user (if getuser (getuser verified)
+			(begin (logwarn |NoGetUser| "To handle " verified)
+			  verified))))
 	  (loginfo |OAUTH1/complete| " Got user " user
 		   " verified with\n" (printopts verified 'verified)
 		   " and auth-state\n" (printopts auth-state 'oauth))
