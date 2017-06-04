@@ -10,7 +10,7 @@
 		  twitter/search
 		  twitter/search/n})
 
-(define %loglevel %notice%)
+(define %loglevel %warn%)
 
 ;;(load-config (get-component "listenbot.cfg"))
 
