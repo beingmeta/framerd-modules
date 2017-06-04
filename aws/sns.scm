@@ -9,8 +9,9 @@
 (define-init %loglevel %notice%)
 
 (module-export! '{sns/newtopic sns/topic 
-		  sns/publish sns/subscribe sns/unsubscribe
-		  sns/permit!})
+		  sns/publish 
+		  sns/subscribe! sns/confirm! sns/unsubscribe!
+		  sns/permit! sns/unpermit!})
 
 (define base-opts #[])
 
@@ -55,14 +56,22 @@
     (aws/v4/get #[] (get-endpoint opts) opts
 		`#["Action" "Publish" "Message" ,message "TopicArn" ,arn])))
 
-(define (sns/subscribe! topic-arg opts)
+(define (sns/subscribe! topic-arg endpoint (opts base-opts))
   (let* ((arn (sns/topic topic-arg))
-	 (endpoint (if (string? opts) opts (get-endpoint opts)))
 	 (protocol (get-protocol endpoint))
 	 (args `#["Action" "Subscribe" 
 		  "Endpoint" ,endpoint
 		  "Protocol" ,protocol
 		  "TopicArn" ,arn])
+	 (response (aws/v4/get #[] (get-endpoint opts) opts args)))
+    response))
+
+(define (sns/confirm! topic-arg token (opts base-opts))
+  (let* ((arn (sns/topic topic-arg))
+	 (endpoint (if (string? opts) opts (get-endpoint opts)))
+	 (protocol (get-protocol endpoint))
+	 (args `#["Action" "ConfirmSubscription" 
+		  "Token" ,token "TopicArn" ,arn])
 	 (response (aws/v4/get #[] (get-endpoint opts) opts args)))
     response))
 
