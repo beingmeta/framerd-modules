@@ -10,6 +10,7 @@
 
 (module-export! '{use-registry set-registry!
 		  register registry/ref
+		  registry/repair!
 		  registry/save!})
 
 (module-export! '{registry-slotid registry-spec
@@ -334,6 +335,68 @@
 	     (secs->string (elapsed-time started))))
 	 bloom)
        (make-bloom-filter 8000000 (or error 0.0001))))
+
+
+;;; Checking and repairing registries
+
+(define (registry/check registry (opts #f))
+  (let* ((index (registry-index registry))
+	 (slot (getopt opts 'slotid (registry-slotid registry)))
+	 (keys (pick (getkeys index) slot)))
+    (prefetch-keys! index slot)
+    (let ((trouble (filter-choices (key keys)
+		     (ambiguous? (get index key)))))
+      (if (fail? trouble) #f
+	  (begin (logwarn |RegistryError| 
+		   (choice-size trouble) " of the " (choice-size keys)
+		   " in " registry " have ambiguous references")
+	    (choice-size trouble))))))
+
+(define (registry/errors registry (opts #f))
+  (let* ((index (registry-index registry))
+	 (slot (getopt opts 'slotid (registry-slotid registry)))
+	 (keys (pick (getkeys index) slot)))
+    (prefetch-keys! index slot)
+    (let ((trouble (filter-choices (key keys)
+		     (ambiguous? (get index key)))))
+      (if (fail? trouble)
+	  (fail)
+	  (begin (logwarn |RegistryError| 
+		   (choice-size trouble) " of the " (choice-size keys)
+		   " in " registry " have ambiguous references")
+	    trouble)))))
+
+(define (registry/repair! registry relns (slotid #f))
+  (let* ((index (registry-index registry))
+	 (slot (or slotid (registry-slotid registry)))
+	 (keys (pick (getkeys index) slot)))
+    (%watch "REGISTRY/REPAIR!" 
+      registry index slot "NKEYS" (choice-size keys))
+    (prefetch-keys! index slot)
+    (let ((trouble 
+	   (filter-choices (key keys)
+	     (ambiguous? (get index key)))))
+      (%watch "REGISTRY/REPAIR!" "TROUBLE" (choice-size trouble))
+      (do-choices (key trouble)
+	(let* ((values (get index key))
+	       (keep (smallest values))
+	       (discard (difference values keep)))
+	  (logwarn |FixingRegistry| "Merging into " keep " from " discard)
+	  (do-choices (reln relns)
+	    (let* ((bg (getopt reln 'index))
+		   (findslot (getopt reln 'slotid))
+		   (getslot (getopt reln 'adjslot))
+		   (fix (find-frames bg findslot discard)))
+	      (prefetch-oids! fix)
+	      (lock-oids! fix)
+	      (add! fix slot keep)
+	      (drop! fix slot discard)
+	      (drop! index (cons findslot discard))
+	      (when getslot
+		(add! fix getslot keep)
+		(drop! fix getslot discard)))))))))
+
+
 
 
 
