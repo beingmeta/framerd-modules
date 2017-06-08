@@ -3,13 +3,14 @@
 
 (in-module 'registry)
 
-;;; Simple FIFO queue gated by a condition variable
+;;; Maintaining registries of objects (OIDs) with unique IDs
 
 (use-module '{ezrecords logger varconfig})
 (define %used_modules 'ezrecords)
 
 (module-export! '{use-registry set-registry!
 		  register registry/ref
+		  registry/check registry/errors
 		  registry/repair!
 		  registry/save!})
 
@@ -32,9 +33,11 @@
 (define-init registries (make-hashtable))
 
 (defrecord (registry OPAQUE `(stringfn . registry->string))
-  slotid spec server pool index (slotid #f) (slotindexes {})
-  (idfile #f) (bloom #f)
-  (newids (make-hashset))
+  ;; TODO: Check for duplicate fields in defrecord
+  slotid spec server pool index 
+  (slotindexes {})
+  (oneslot #t) (idfile #f) (bloom #f)
+  (newids #[ids {}])
   (cache (make-hashtable))
   (lock (make-condvar)))
 (module-export! '{registry? registry-pool registry-index registry-server})
@@ -118,8 +121,8 @@
 		    (logwarn |NoRegistry| "Couldn't get a registry to save"))))))
 
 (define (save-ids! r)
-  (let ((elts (hashset-elts (registry-newids r) #t)))
-    (dtype->file+ elts (registry-idfile r))))
+  (dtype->file+ (get (registry-newids r) 'ids) (registry-idfile r))
+  (store! (registry-newids r) 'ids {}))
 
 ;;; The meat of it
 
@@ -133,16 +136,24 @@
 	     (try (find-frames index slotid value)
 		  (dtcall server 'register slotid value))
 	     (let* ((bloom (registry-bloom registry))
-		    (key (if (registry-slotid registry) 
-			     value
-			     (cons slotid value)))
+		    (key (if (registry-oneslot registry) value (cons slotid value)))
 		    (existing (if (and bloom (not (bloom/check bloom key)))
-				  (fail)
+				  (let ((e (find-frames index slotid value)))
+				    (when (exists? e)
+				      (logwarn |BloomingFailure| 
+					"The bloom filter failed to recognize "
+					key " for " registry))
+				    ;; Go ahead and create the
+				    ;; duplicate so we can debug
+				    ;; further
+				    (fail))
 				  (find-frames index slotid value)))
 		    (result (try existing
 				 (tryif create
 				   (frame-create (registry-pool registry)
 				     '%id (list slotid value)
+				     '%session (config 'sessionid)
+				     '%created (timestamp)
 				     slotid value)))))
 	       (when (exists? result)
 		 (when (fail? existing)
@@ -152,7 +163,7 @@
 		     (do-choices (key (getkeys create))
 		       (store! result key (get create key)))))
 		 (when bloom
-		   (hashset-add! (registry-newids registry) key)
+		   (add! (registry-newids registry) 'ids key)
 		   (bloom/add! bloom key))
 		 (store! (registry-cache registry) value result))
 	       result)))))
@@ -183,19 +194,20 @@
 		 ;; bloom filters or idstreams
 		 (set! registry
 		       (cons-registry slotid spec server pool index
-				      (getopt spec 'slotid)
-				      (getopt spec 'slotindex {})))
+				      (getopt spec 'slotindex {})
+				      (getopt spec 'oneslot #t)))
 		 (let* ((ixsource (and index (index-source index)))
 			(idbase (and ixsource 
 				     (not (∃ position {#\: #\@} ixsource))
 				     ixsource))
 			(idpath (getopt spec 'idpath 
 					(get-idpath spec idbase)))
-			(slotid (has-suffix idpath ".ids"))
+			(oneslot (has-suffix idpath ".ids"))
 			(bloom (and idpath (get-bloom idpath))))
 		   (set! registry
-			 (cons-registry slotid spec server pool index slotid 
+			 (cons-registry slotid spec server pool index 
 					(getopt spec 'slotindex {})
+					(getopt spec 'oneslot #t)
 					idpath bloom))))
 	     (store! registries slotid registry)
 	     registry))))
@@ -245,13 +257,17 @@
 (define (get-idpath spec idbase (root))
   (default! root (strip-suffix idbase ".index"))
   (cond ((file-exists? (glom idbase ".keys"))
-	 (when (getopt spec 'slotid)
+	 (when (getopt spec 'oneslot)
 	   (logwarn |MultiSlotRegistry| 
 	     "The registry is already using the multi-slot key file "
 	     (glom idbase ".keys")))
 	 (glom idbase ".keys"))
 	((file-exists? (glom idbase ".ids"))
-	 (glom idbase ".ids"))
+	 (if (getopt spec 'oneslot #t)
+	     (glom idbase ".ids")
+	     (irritant spec |RegistryOneSlot|
+	       "This registry is already using the single slot ID file "
+	       (glom idbase ".ids"))))
 	((file-exists? (glom root ".keys"))
 	 (when (getopt spec 'slotid)
 	   (logwarn |MultiSlotRegistry| 
@@ -259,8 +275,12 @@
 	     (glom idbase ".keys")))
 	 (glom root ".keys"))
 	((file-exists? (glom root ".ids"))
-	 (glom root ".ids"))
-	((getopt spec 'slotid) (glom idbase ".ids"))
+	 (if (getopt spec 'oneslot #t)
+	     (glom root ".ids")
+	     (irritant spec |RegistryOneSlot|
+	       "This registry is already using the single slot ID file "
+	       (glom root ".ids"))))
+	((getopt spec 'oneslot) (glom idbase ".ids"))
 	(else (glom idbase ".keys"))))
 
 (define (registry-opts arg)
@@ -370,31 +390,38 @@
   (let* ((index (registry-index registry))
 	 (slot (or slotid (registry-slotid registry)))
 	 (keys (pick (getkeys index) slot)))
-    (%watch "REGISTRY/REPAIR!" 
+    (debug%watch "REGISTRY/REPAIR!" 
       registry index slot "NKEYS" (choice-size keys))
     (prefetch-keys! index slot)
     (let ((trouble 
 	   (filter-choices (key keys)
 	     (ambiguous? (get index key)))))
-      (%watch "REGISTRY/REPAIR!" "TROUBLE" (choice-size trouble))
+      (debug%watch "REGISTRY/REPAIR!" "TROUBLE" (choice-size trouble))
       (do-choices (key trouble)
 	(let* ((values (get index key))
 	       (keep (smallest values))
 	       (discard (difference values keep)))
 	  (logwarn |FixingRegistry| "Merging into " keep " from " discard)
-	  (do-choices (reln relns)
-	    (let* ((bg (getopt reln 'index))
-		   (findslot (getopt reln 'slotid))
-		   (getslot (getopt reln 'adjslot))
-		   (fix (find-frames bg findslot discard)))
-	      (prefetch-oids! fix)
-	      (lock-oids! fix)
-	      (add! fix slot keep)
-	      (drop! fix slot discard)
-	      (drop! index (cons findslot discard))
-	      (when getslot
-		(add! fix getslot keep)
-		(drop! fix getslot discard)))))))))
+	  (drop! index key discard)
+	  (prefetch-oids! values)
+	  (do-choices (discard discard)
+	    (logwarn |FixingRegistry/Discard|
+	      "Erasing " discard " from existence")
+	    (store! discard '%id '(DISCARDED ,(get discarded)))
+	    (do-choices (reln relns)
+	      (let* ((bg (getopt reln 'index))
+		     (findslot (getopt reln 'slotid))
+		     (getslot (getopt reln 'adjslot))
+		     (fix (find-frames bg findslot discard)))
+		;;(%watch "DISCARD" bg findslot getslot "TOFIX" (choice-size fix))
+		(prefetch-oids! fix)
+		(lock-oids! fix)
+		(add! fix slot keep)
+		(drop! fix slot discard)
+		(drop! bg (cons findslot discard))
+		(when getslot
+		  (add! fix getslot keep)
+		  (drop! fix getslot discard))))))))))
 
 
 
