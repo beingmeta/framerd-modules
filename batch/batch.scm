@@ -17,7 +17,7 @@
 (define-init maxtime #f)
 (varconfig! maxtime maxtime config:interval)
 
-(define-init maxmem (->exact (* 0.9 (physmem))))
+(define-init maxmem (->exact (* 0.5 (physmem))))
 (varconfig! maxmem maxmem config:bytes)
 
 (define-init maxvmem (physmem))
