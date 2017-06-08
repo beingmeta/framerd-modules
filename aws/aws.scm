@@ -8,17 +8,17 @@
 
 (define-init %loglevel %notice%)
 
-(define %nosubst '{aws:account
+(define %nosubst '{aws:account aws:region
 		   aws:key aws:secret aws:expires
 		   aws/refresh aws:token})
 
 (module-export! 
- '{aws:account aws:key aws:secret aws:token aws:expires
+ '{aws:region aws:account aws:key aws:secret
+   aws:token aws:expires
    aws/ok? aws/checkok aws/set-creds! aws/creds!
    aws/datesig aws/datesig/head aws/template
    aws/update-creds!
-   aws/error
-   aws:region})
+   aws/error})
 
 (define aws:region "us-east-1")
 (varconfig! aws:region aws:region)
