@@ -24,7 +24,7 @@
 
 ;; This determines whether the pool should use a bloom filter to
 ;; optimize registration
-(define use-bloom #t)
+(define use-bloom #f)
 (varconfig! registry:bloom use-bloom)
 
 (define (registry->string r)
@@ -35,9 +35,7 @@
 (defrecord (registry OPAQUE `(stringfn . registry->string))
   ;; TODO: Check for duplicate fields in defrecord
   slotid spec server pool index 
-  (slotindexes {})
-  (oneslot #t) (idfile #f) (bloom #f)
-  (newids #[ids {}])
+  (slotindexes {}) (bloom #f)
   (cache (make-hashtable))
   (lock (make-condvar)))
 (module-export! '{registry? registry-pool registry-index registry-server})
@@ -115,14 +113,13 @@
 		     (indexes (registry-index r))
 		     (adjuncts-map (get-adjuncts pools))
 		     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
-		     (threads (thread/call+ #[logexit #f] commit {pools indexes adjuncts})))
+		     (threads (thread/call+ #[logexit #f] commit {pools indexes adjuncts}))
+		     (started (elapsed-time)))
 		(if (exists? threads)
-		    (prog1 (thread/wait threads) (save-ids! r))
+		    (begin (thread/wait threads)
+		      (lognotice |RegistrySaved| 
+			"Saved registry " r " in " (secs->string (elapsed-time started))))
 		    (logwarn |NoRegistry| "Couldn't get a registry to save"))))))
-
-(define (save-ids! r)
-  (dtype->file+ (get (registry-newids r) 'ids) (registry-idfile r))
-  (store! (registry-newids r) 'ids {}))
 
 ;;; The meat of it
 
@@ -130,24 +127,15 @@
   (default! server (registry-server registry))
   (default! index (registry-index registry))
   (info%watch "REGISTRY/GET" registry slotid value create server index)
-  (with-lock (registry-lock registry)
-    (try (get (registry-cache registry) value)
-	 (if server
-	     (try (find-frames index slotid value)
-		  (dtcall server 'register slotid value))
+  (if server
+      (try (find-frames index slotid value)
+	   (dtcall server 'register slotid value))
+      (with-lock (registry-lock registry)
+	(try (get (registry-cache registry) value)
 	     (let* ((bloom (registry-bloom registry))
-		    (key (if (registry-oneslot registry) value (cons slotid value)))
-		    (existing (if (and bloom (not (bloom/check bloom key)))
-				  (let ((e (find-frames index slotid value)))
-				    (when (exists? e)
-				      (logwarn |BloomingFailure| 
-					"The bloom filter failed to recognize "
-					key " for " registry))
-				    ;; Go ahead and create the
-				    ;; duplicate so we can debug
-				    ;; further
-				    (fail))
-				  (find-frames index slotid value)))
+		    (key (cons slotid value))
+		    (existing (tryif (or (not bloom) (bloom/check bloom key)) 
+				(find-frames index slotid value)))
 		    (result (try existing
 				 (tryif create
 				   (frame-create (registry-pool registry)
@@ -159,12 +147,10 @@
 		 (when (fail? existing)
 		   (index-frame index result 'has slotid)
 		   (index-frame index result slotid value)
+		   (when bloom (bloom/add! bloom key))
 		   (when (table? create)
 		     (do-choices (key (getkeys create))
 		       (store! result key (get create key)))))
-		 (when bloom
-		   (add! (registry-newids registry) 'ids key)
-		   (bloom/add! bloom key))
 		 (store! (registry-cache registry) value result))
 	       result)))))
 
@@ -173,15 +159,7 @@
 (defslambda (register-registry-inner slotid spec (replace #f))
   (when replace (drop! registries slotid))
   (try (get registries slotid)
-       (if (registry? spec)
-	   (if (and (registry-slotid spec) 
-		    (not (eq? (registry-slotid spec) slotid)))
-	       (irritant spec
-		   |SingleSlotRegistry| |register-registry| 
-		   "The registry " registry " is configured for the slot "
-		   (registry-slotid spec) " which isn't " slotid)
-	       (begin (store! registries slotid spec)
-		 spec))
+       (if (table? spec)
 	   (let ((server (and (getopt spec 'server)
 			      (if (dtserver? (getopt spec 'server))
 				  (getopt spec 'server)
@@ -194,23 +172,15 @@
 		 ;; bloom filters or idstreams
 		 (set! registry
 		       (cons-registry slotid spec server pool index
+				      (getopt spec 'slotindex {})))
+		 (set! registry
+		       (cons-registry slotid spec server pool index 
 				      (getopt spec 'slotindex {})
-				      (getopt spec 'oneslot #t)))
-		 (let* ((ixsource (and index (index-source index)))
-			(idbase (and ixsource 
-				     (not (∃ position {#\: #\@} ixsource))
-				     ixsource))
-			(idpath (getopt spec 'idpath 
-					(get-idpath spec idbase)))
-			(oneslot (has-suffix idpath ".ids"))
-			(bloom (and idpath (get-bloom idpath))))
-		   (set! registry
-			 (cons-registry slotid spec server pool index 
-					(getopt spec 'slotindex {})
-					(getopt spec 'oneslot #t)
-					idpath bloom))))
+				      (and (getopt spec 'bloom use-bloom)
+					   (get-bloom index slotid)))))
 	     (store! registries slotid registry)
-	     registry))))
+	     registry)
+	   (irritant spec |InvalidRegistrySpec|))))
 
 (define (getsource spec slot)
   (try
@@ -289,7 +259,7 @@
 	((pool? arg)  (registry-opts (strip-suffix (pool-id arg) ".index")))
 	((not (string? arg)) (irritant arg |InvalidRegistrySpec|))
 	((exists position {#\: #\@} arg) `#[server ,arg])
-	(else `#[server #f pool ,arg index ,arg slotid #f])))
+	(else `#[source ,arg])))
 
 (define (fixup-opts opts (source))
   (default! source (getopt opts 'source))
@@ -338,23 +308,21 @@
 
 ;;; Getting the ids for a bloom filter
 
-(define (get-bloom path (error #f))
-  (if (and (string? path) (file-exists? path))
-       (let* ((ids (file->dtypes path))
-	      (bloom (make-bloom-filter (* 8 (max (choice-size ids) 16000)) 
-					(or error 0.0001)))
-	      (started (elapsed-time)))
-	 (lognotice |BloomInit| 
-	   "Initializing bloom filter " path " with " 
-	   (choice-size ids) " items")
-	 (bloom/add! bloom ids)
-	 (when (> (elapsed-time started) 1)
-	   (lognotice |BloomInit| 
-	     "Initialized bloom filter " path " with " 
-	     (choice-size ids) " items in " 
-	     (secs->string (elapsed-time started))))
-	 bloom)
-       (make-bloom-filter 8000000 (or error 0.0001))))
+(define (get-bloom index slotid (room #f) (error 0.000001))
+  (lognotice |BloomInit| 
+    "Initializing bloom filter for " slotid " in " index)
+  (let* ((started (elapsed-time))
+	 (keys (pick (getkeys index) slotid))
+	 (n-keys (choice-size keys))
+	 (bloom-size (or room (* 4 (max n-keys 100000))))
+	 (filter (make-bloom-filter bloom-size error)))    
+    (bloom/add! filter keys)
+    (lognotice |BloomInit| 
+      "Initialized bloom filter with "
+      (choice-size keys) " items in " 
+      (secs->string (elapsed-time started)) 
+      ":\n    " filter)
+    filter))
 
 
 ;;; Checking and repairing registries
