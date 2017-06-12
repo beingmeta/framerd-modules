@@ -20,7 +20,7 @@
 (define-init maxmem (->exact (* 0.5 (physmem))))
 (varconfig! maxmem maxmem config:bytes)
 
-(define-init maxvmem (physmem))
+(define-init maxvmem #f)
 (varconfig! maxvmem maxvmem config:bytes)
 
 (define-init maxload #f)
@@ -33,10 +33,12 @@
 (define-init log-frequency 30)
 (varconfig! logfreq log-frequency config:interval)
 
+(define-init dont-save #f)
 (define-init saving #f)
 (define-init last-save (elapsed-time))
 (define-init save-frequency 300)
 (varconfig! savefreq save-frequency config:interval)
+(varconfig! dontsave dont-save)
 
 (define-init pre-save #f)
 (varconfig! PRESAVE pre-save)
@@ -58,7 +60,7 @@
 		       "Reading batch state from " file)
 		     (file->dtype file))
 		   (apply frame-create #f defaults)))
-	 (state (deep-copy init)))
+	 (state (eval1 (deep-copy init))))
     (store! state 'init init)
     (when file (store! state 'statefile file))
     (nstore! state 'pools (use-pool (get state 'pools)))
@@ -87,7 +89,7 @@
   (when (string? state) 
     (set! state (batch/read-state state)))
   (unless init-state 
-    (set! init-state (try (get state 'init) (deep-copy state))))
+    (set! init-state (try (get state 'init) (eval2 (deep-copy state)))))
   (set! batch-state state)
   (set! start-time (elapsed-time))
   (store! state 'cycle-count (1+ (try (get state 'cycle-count) 0)))
@@ -105,6 +107,7 @@
 
 (define (batch/finished? (state batch-state))
   (or finished
+      (and (config 'stopfile) (file-exists? (config 'stopfile)))
       (exists batch/threshtest "Time" 
 	      (elapsed-time start-time) maxtime secs->string)
       (exists batch/threshtest "Memory" (memusage) maxmem $bytes)
@@ -196,25 +199,25 @@
 	 (let ((threads
 		(choice
 		 (for-choices (pool (get state 'pools))
-		   (threadcall commit-pool pool))
+		   (thread/call commit-pool pool))
 		 (for-choices (index (get state 'indexes))
-		   (threadcall commit index))
+		   (thread/call commit index))
 		 (for-choices (pool (get state 'adjpools))
-		   (threadcall commit pool))
+		   (thread/call commit pool))
 		 (for-choices (index (get (get state 'slotindex)
 					  (get (get state 'slotindex) 'slots)))
-		   (threadcall commit index))
+		   (thread/call commit index))
 		 (for-choices (file.object (get state 'objects))
-		   (threadcall dtype->file 
-			       (deep-copy (cdr file.object))
-			       (car file.object))))))
+		   (thread/call dtype->file 
+		       (eval3 (deep-copy (cdr file.object)))
+		     (car file.object))))))
 	   (lognotice |BatchSave| 
 	     "Using " (choice-size threads) " threads to commit task state")
-	   (thread/join threads)
+	   (thread/wait threads)
 	   (lognotice |BatchSave| 
 	     "Writing out current state to " (get state 'statefile))
 	   (when post-save (post-save state-copy))
-	   (let* ((state-copy (deep-copy state))
+	   (let* ((state-copy (eval4 (deep-copy state)))
 		  (totals (get state-copy 'totals)))
 	     (store! state-copy 'pools
 		     (pool-source (get state-copy 'pools)))
@@ -263,21 +266,21 @@
 	(threads
 	 (choice
 	  (for-choices (pool (get state 'pools))
-	    (threadcall commit-pool pool))
+	    (thread/call commit-pool pool))
 	  (for-choices (index (get state 'indexes))
-	    (threadcall commit index))
+	    (thread/call commit index))
 	  (for-choices (pool (get state 'adjpools))
-	    (threadcall commit pool))
+	    (thread/call commit pool))
 	  (for-choices (index (get (get state 'slotindex)
 				   (get (get state 'slotindex) 'slots)))
-	    (threadcall commit index))
+	    (thread/call commit index))
 	  (for-choices (file.object (get state 'objects))
-	    (threadcall dtype->file 
-			(deep-copy (cdr file.object))
-			(car file.object))))))
+	    (thread/call dtype->file 
+		(eval5 (deep-copy (cdr file.object)))
+	      (car file.object))))))
     (logwarn |BatchSave| 
       "Saving state using " (choice-size threads) " threads")
-    (thread/join threads)
+    (thread/wait threads)
     (logwarn |BatchSave| 
       "Writing out processing state to " (get state 'statefile))
     (when post-save (post-save state-copy))
@@ -287,7 +290,7 @@
 		(+ (get (get state 'totals) slot)
 		   (get state slot)))
 	(store! state slot 0)))
-    (let ((state-copy (deep-copy state)))
+    (let ((state-copy (eval6 (deep-copy state))))
       (store! state-copy 'pools
 	      (pool-source (get state-copy 'pools)))
       (store! state-copy 'indexes
@@ -308,7 +311,8 @@
     (log-resources)))
 
 (defslambda (getsavelock)
-  (and (not saving) 
+  (and (not dont-save)
+       (not saving) 
        (begin (set! saving (threadid)) #t)))
 
 (define (batch/savelock)
