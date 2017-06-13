@@ -17,7 +17,7 @@
 (define-init maxtime #f)
 (varconfig! maxtime maxtime config:interval)
 
-(define-init maxmem (->exact (* 0.5 (physmem))))
+(define-init maxmem (->exact (* 0.75 (physmem))))
 (varconfig! maxmem maxmem config:bytes)
 
 (define-init maxvmem #f)
@@ -36,7 +36,7 @@
 (define-init dont-save #f)
 (define-init saving #f)
 (define-init last-save (elapsed-time))
-(define-init save-frequency 300)
+(define-init save-frequency 180)
 (varconfig! savefreq save-frequency config:interval)
 (varconfig! dontsave dont-save)
 
@@ -112,8 +112,7 @@
 	      (elapsed-time start-time) maxtime secs->string)
       (exists batch/threshtest "Memory" (memusage) maxmem $bytes)
       (and maxvmem (> (vmemusage) maxvmem)
-	   (begin (release-memory)
-	     (exists batch/threshtest "VMEM" (vmemusage) maxvmem $bytes)))
+	   (exists batch/threshtest "VMEM" (vmemusage) maxvmem $bytes))
       (exists batch/threshtest "Progress" (get state 'progress) maxcount)
       (exists batch/threshtest "LOAD" (get (rusage) 'load) maxload)
       (exists test-limit state tasklimits)))
