@@ -18,7 +18,6 @@
     (let ((varname (cadr expr))
 	  (convertfn (and (> (length expr) 2) (third expr)))
 	  (combinefn (and (> (length expr) 3) (fourth expr))))
-      (%watch convertfn combinefn)
       `(let ((_convert (and ,convertfn
 			    (if (applicable? ,convertfn)
 				,convertfn
@@ -28,7 +27,6 @@
 				,combinefn
 				,choice))))
 	 (lambda (var (val))
-	   (%watch var val _convert _combine)
 	   (if (bound? val)
 	       (set! ,varname
 		     ,(cond ((and convertfn combinefn)
@@ -84,14 +82,13 @@
 (define false-values {"0" "off" "disable" "n" "no"})
 
 (define (config:boolean val)
-  (%watch (cond ((not val) #f)
-		((or (string? val) (symbol? val))
-		 (text->boolean (downcase val)))
-		((or (empty? val) (not val)
-		     (and (number? val) (zero? val)))
-		 #f)
-		(else #t))
-    val))
+  (cond ((not val) #f)
+	((or (string? val) (symbol? val))
+	 (text->boolean (downcase val)))
+	((or (empty? val) (not val)
+	     (and (number? val) (zero? val)))
+	 #f)
+	(else #t)))
 (define (config:boolean/not val)
   (not (config:boolean val)))
 (define (config:boolean+ val)
