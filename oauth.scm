@@ -50,6 +50,9 @@
 		  |InvalidLogRaw| "Couldn't use the value for logging raw responses"))))
 (config-def! 'oauth:lograw oauth-lograw-config)
 
+(define-init keep-raw #f)
+(varconfig! oauth:keepraw keep-raw config:boolean)
+
 (module-export!
  '{oauth oauth/spec oauth/start oauth/refresh!
    oauth/request oauth/authurl oauth/verify 
@@ -69,6 +72,28 @@
 	     (threadset! 'curlcache handle)
 	     handle))
       (frame-create #f)))
+
+(define (get-endpoint endpoint args spec)
+  (cond ((not endpoint)
+	 (or (getopt args 'endpoint)
+	     (getopt spec 'endpoint)
+	     (irritant spec |NoEndpoint|)))
+	((not (string? endpoint))
+	 (irritant endpoint |NotAString|))
+	((has-prefix endpoint {"https:" "http:"}) endpoint)
+	(else (let* ((base (or (getopt args 'endpoint)
+			       (getopt spec 'endpoint)))
+		     (parsed (and base (parseuri base))))
+		(if (not parsed)
+		    (or base endpoint)
+		    (if (has-prefix endpoint "/")
+			(glom (get parsed 'scheme) "://"
+			  (get parsed 'hostname)
+			  endpoint)
+			;; TODO: Smarts to strip prefix and suffix
+			(glom base
+			  (and (not (has-suffix base "/")) "/")
+			  endpoint)))))))
 
 (define (getxmldata string)
   (let ((parsed (xmlparse string '{data slotify})))
@@ -249,6 +274,7 @@
        ACCESS "https://www.reddit.com/api/v1/access_token"
        KEY REDDIT:KEY SECRET REDDIT:SECRET
        VERSION "2.0"
+       ENDPOINT "https://oauth.reddit.com/api/v1/"
        ;; SCOPE "r_fullprofile r_network r_emailaddress rw_groups"
        ;; ACCESS_TOKEN "oauth2_access_token"
        ACCESS_TOKEN HTTP
@@ -671,10 +697,7 @@
     (irritant spec OAUTH:NOSECRET OAUTH/CALL
 	      "No OAUTH secret for OAuth1.0 call"))
   (let* ((nonce (getopt spec 'nonce (uuid->string (getuuid))))
-	 (endpoint (or endpoint
-		       (getopt args 'endpoint
-			       (getopt spec 'endpoint
-				       default-endpoint))))
+	 (endpoint (get-endpoint endpoint args spec))
 	 (now (getopt spec 'timestamp (time)))
 	 (sigstring
 	  (oauth/sigstring
@@ -763,9 +786,7 @@
 	     (getopt spec 'ctype
 		     (if (packet? body) "application" "text")))))
   (when (and expires (past? expires)) (oauth/refresh! spec))
-  (let* ((endpoint (or endpoint
-		       (getopt args 'endpoint
-			       (getopt spec 'endpoint default-endpoint))))
+  (let* ((endpoint (get-endpoint endpoint args spec))
 	 (httpauth (testopt spec 'access_token 'http))
 	 (auth-header
 	  (if httpauth
@@ -820,7 +841,8 @@
 				  (error OAUTH:BADMETHOD OAUTH/CALL20
 					 "Only GET, HEAD, PUT, and POST are allowed: "
 				    method endpoint args))))))))
-    (debug%watch "OAUTH/CALL20" endpoint auth-header req)
+    (debug%watch "OAUTH/CALL20" endpoint auth-header)
+    (logdebug |OAuth20/Request| (pprint req))
     (when (getopt spec 'lograw lograw)
       (let ((reqid (getuuid)))
 	(store! lograw reqid req)
@@ -830,7 +852,10 @@
     (if raw req
 	(if (and (test req 'response) (number? (get req 'response))
 		 (<= 200 (get req 'response) 299))
-	    (cons (getreqdata req) spec)
+	    (cons (getreqdata req) 
+		  (if (getopt spec 'keepraw keep-raw)
+		      (cons req spec)
+		      spec))
 	    (if (and (<= 400 (get req 'response) 499) (getopt spec 'refresh))
 		(begin
 		  (debug%watch 'OAUTH/ERROR "RESPONSE" response req)
