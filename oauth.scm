@@ -65,14 +65,6 @@
 (define-init %loglevel %notice!)
 ;;(set!  %loglevel %debug%)
 
-(define (getcurl)
-  (if curlcache
-      (try (threadget 'curlcache)
-	   (let ((handle (curlopen)))
-	     (threadset! 'curlcache handle)
-	     handle))
-      (frame-create #f)))
-
 (define (get-endpoint endpoint args spec)
   (cond ((not endpoint)
 	 (or (getopt args 'endpoint)
@@ -469,7 +461,8 @@
 	    "oauth_consumer_key=\"" ckey "\", "
 	    "oauth_signature=\"" (uriencode sig64) "\", "
 	    "oauth_version=\"" (getopt spec 'version "1.0") "\""))
-	 (handle (curlopen 'header auth-header 'method 'POST))
+	 (handle (curlopen 'header auth-header 'method 'POST
+			   'useragent (getopt spec 'useragent #f)))
 	 (req (urlget endpoint handle)))
     (debug%watch "OAUTH/REQUEST"
       sigstring sig sig64 auth-header
@@ -568,7 +561,8 @@
 	    "oauth_consumer_key=\"" ckey "\", "
 	    "oauth_signature=\"" (uriencode sig64) "\", "
 	    "oauth_version=\"" (getopt spec 'version "1.0") "\""))
-	 (req (urlget endpoint (curlopen 'header auth-header 'method 'POST))))
+	 (req (urlget endpoint (curlopen 'header auth-header 'method 'POST
+					 'useragent (getopt spec 'useragent #f)))))
     (debug%watch "OAUTH/VERIFY" sigstring sig sig64 auth-header)
     (if (test req 'response 200)
 	(let ((info (cgiparse (get req '%content))))
@@ -649,6 +643,7 @@
 	 (req (urlpost (getopt spec 'access)
 		       `#[content-type "application/x-www-form-urlencoded"
 			  basicauth ,(glom ckey ":" csecret)
+			  useragent ,(getopt spec 'useragent #f)
 			  header ,(and (getopt spec 'expect default-expect)
 				       (cons "Expect" 
 					     (getopt spec 'expect default-expect)))]
@@ -738,6 +733,7 @@
 			   (and (getopt spec 'expect default-expect)
 				(cons "Expect" 
 				      (getopt spec 'expect default-expect)))
+			   'useragent (getopt spec 'useragent #f)
 			   'header auth-header
 			   'method method))
 	 (streamfn (getopt spec 'streamfn))
@@ -820,13 +816,13 @@
 			     (cons "Expect" 
 				   (getopt spec 'expect default-expect))) 
 			'header auth-header
-			'useragent (getopt spec 'user-agent #f)
+			'useragent (getopt spec 'useragent #f)
 			'method method)
 	      (curlopen 'header
 			(and (getopt spec 'expect default-expect)
 			     (cons "Expect" 
 				   (getopt spec 'expect default-expect)))
-			'useragent (getopt spec 'user-agent #f)
+			'useragent (getopt spec 'useragent #f)
 			'method method)))
 	 (req (if streamfn
 		  (urlstream useurl streamfn handle body)
@@ -905,6 +901,7 @@
 				      (cons "Expect" 
 					    (getopt spec 'expect default-expect)))
 				 'header auth-header
+				 'useragent (getopt spec 'useragent #f)
 				 'method 'POST)
 		       (scripturl+
 			#f `#["client_id" ,(getckey spec)
