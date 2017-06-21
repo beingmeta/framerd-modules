@@ -4,10 +4,14 @@
 (in-module 'reddit)
 
 (use-module '{fdweb texttools reflection varconfig logger})
-(use-module '{oauth})
+(use-module '{oauth registry})
 
 (module-export! '{reddit/creds reddit.creds reddit.opts
-		  reddit/get reddit/post reddit/thing})
+		  reddit/get reddit/post reddit/more 
+		  reddit/get/n reddit/comments
+		  reddit/thing})
+
+(define %loglevel %notice%)
 
 (define reddit.oauth #f)
 (define reddit.creds #f)
@@ -36,23 +40,103 @@
 		  subreddits/default subreddits/gold
 		  subreddits/subscribed})
 
-(define (reddit/get endpoint (opts #f) (args #f) (conn))
-  (default! conn 
-    (if (testopt opts 'realm) opts
-	(getopt opts 'creds (reddit/creds))))
+(define (reddit/get endpoint (opts #f) (args #[]) (conn))
+  (default! conn (getopt opts 'creds (reddit/creds)))
   (if opts
       (set! opts (cons opts reddit.opts))
       (set! opts reddit.opts))
+  (when (getopt opts 'limit)
+    (store! args "limit" (getopt opts 'limit)))
   (let* ((r (oauth/call conn 'GET endpoint args opts))
-	 (response (car r)))
-    (if (getopt opts 'raw #f)
-	response
-	(reddit/thing response opts))))
+	 (response (car r))
+	 (result (if (getopt opts 'raw #f)
+		     response
+		     (reddit/thing response opts))))
+    (unless (or (getopt opts 'raw #f) (not (table? result))
+		(not (test result 'listing)))
+      (store! result 'endpoint endpoint)
+      (store! result 'creds conn)
+      (store! result 'opts opts)
+      (store! result 'args args)
+      (when (exists? (get result 'listing))
+	(store! result 'count (choice-size (get result 'listing))))
+      (lognotice |REDDIT/GET| 
+	"Got " (choice-size (get result 'listing)) " results"))
+    result))
+
+(define (reddit/more response (endpoint) (opts) (args))
+  (default! endpoint (get response 'endpoint))
+  (default! opts (get response 'opts))
+  (default! args (get response 'args))
+  (store! args "after" (get response 'after))
+  (when (test response 'count)
+    (store! args "count" (get response 'count)))
+  (when (getopt opts 'limit)
+    (store! args "limit" (getopt opts 'limit)))
+  (let* ((conn (getopt response 'creds
+		       (getopt opts 'creds (reddit/creds))))
+	 (r (oauth/call conn 'GET endpoint args opts))
+	 (result (reddit/thing (car r) opts)))
+    (unless (getopt opts 'raw #f)
+      (store! result 'endpoint endpoint)
+      (store! result 'creds conn)
+      (store! result 'opts opts)
+      (store! result 'args args)
+      (lognotice |REDDIT/MORE| 
+	"Got " (choice-size (get result 'listing)) 
+	" results from " endpoint " beyond " (get response 'count))
+      (when (exists? (get result 'listing))
+	(store! result 'count (+ (try (get response 'count) 0)
+				 (choice-size (get result 'listing))))))
+    result))
+
+(define (reddit/get/n endpoint (n 100) (opts #f) (args #[]) (conn) (results {}))
+  (default! conn (getopt opts 'creds (reddit/creds)))
+  (if opts
+      (set! opts (cons opts reddit.opts))
+      (set! opts reddit.opts))
+  (let* ((fetch (reddit/get endpoint
+			     (cons `#[limit ,(min n 100)] opts))))
+    (while (and (exists? (get fetch 'listing))
+		(< (get fetch 'count) n))
+      (set+! results (get fetch 'listing))
+      (set! fetch (reddit/more fetch)))
+    (if (exists? (get fetch 'listing))
+	(set+! results (get fetch 'listing))
+	(logwarn |RedditFailed| 
+	  "Reddit returned no more results"))
+    results))
 
 (define (reddit/post conn endpoint content (args #f))
   (let ((r (oauth/call conn 'GET endpoint args))
 	(response (car r)))
     (reddit/thing response)))
+
+(define (reddit/comments post (opts #f) (args #[]) (endpoint) (conn))
+  (if opts
+      (set! opts (cons opts reddit.opts))
+      (set! opts reddit.opts))
+  (default! conn (getopt opts 'creds (reddit/creds)))
+  (when (getopt opts 'limit)
+    (store! args "limit" (getopt opts 'limit)))
+  (set! endpoint (glom "/" (get post 'subreddit_name_prefixed) "/comments/"
+		   (get post 'id)))
+  (let* ((r (oauth/call conn 'GET endpoint args opts))
+	 (response (car r))
+	 (result (if (getopt opts 'raw #f)
+		     response
+		     (reddit/thing response opts))))
+    (unless (or (getopt opts 'raw #f) (not (table? result))
+		(not (test result 'listing)))
+      (store! result 'endpoint endpoint)
+      (store! result 'creds conn)
+      (store! result 'opts opts)
+      (store! result 'args args)
+      (when (exists? (get result 'listing))
+	(store! result 'count (choice-size (get result 'listing))))
+      (lognotice |REDDIT/GET| 
+	"Got " (choice-size (get result 'listing)) " results"))
+    result))
 
 (define (subreddits/search cl string)
   (oauth/call cl 'GET "/subreddits/search" `#["q" ,string]))
@@ -64,6 +148,10 @@
   (oauth/call cl 'GET "/subreddits/gold"))
 (define (subreddits/default cl)
   (oauth/call cl 'GET "/subreddits/default"))
+
+(define reddit-type-map
+  #["t1_" COMMENT "t2_" ACCOUNT "t3_" LINK "t4_" MESSAGE
+    "t5_" SUBREDDIT "t6_" AWARD "t7_" CAMPAIGN])
 
 (define (reddit/thing json (opts #f))
   (cond ((vector? json) 
@@ -91,12 +179,24 @@
 		     (created (->exact (get json 'created)))
 		     (created_utc (->exact (get json 'created_utc)))
 		     (output (frame-create #f
-			       'reddid name '%id (get json 'name)))
+			       'reddid name '%id (get json 'name)
+			       'type (get reddit-type-map (slice name 0 3))))
 		     (keys (getkeys json))
+		     (xform (getopt opts 'xform {}))
 		     (drop (choice (getopt opts 'drop {})
-				   (cdr (pick (getopt opts 'pref {}) keys)))))
+				   (cdr (pick (getopt opts 'pref {}) keys))
+				   (getkeys xform)
+				   'replies)))
 		(store! output 'created
 			(mktime created_utc 'gmtoff (- created created_utc)))
+		(do-choices (xform-slot (pick keys xform))
+		  (let ((v (get json xform-slot))
+			(handler (get xform xform-slot)))
+		    (cond ((symbol? handler)
+			   (store! output handler v))
+			  ((applicable? handler)
+			   (store! output xform-slot (handler v)))
+			  else)))
 		(do-choices (slot (difference keys drop))
 		  (let ((value (get json slot)))
 		    (cond ((and (not (overlaps? slot reddit:keep))
@@ -108,6 +208,14 @@
 			  ((string? value)
 			   (store! output slot (decode-entities (get json slot))))
 			  ((overlaps? slot '{created created_utc}))
+			  ((not (table? value))
+			   (store! output slot (reddit/thing value opts)))
+			  ((test value 'listing)
+			   (get value 'listing))
 			  (else 
 			   (store! output slot (reddit/thing value opts))))))
-		output))))
+		(if (and (test output 'listing) (singleton (getkeys output)))
+		    (get output 'listing)
+		    output)))))
+
+
