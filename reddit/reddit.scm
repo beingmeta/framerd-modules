@@ -119,24 +119,19 @@
   (default! conn (getopt opts 'creds (reddit/creds)))
   (when (getopt opts 'limit)
     (store! args "limit" (getopt opts 'limit)))
-  (set! endpoint (glom "/" (get post 'subreddit_name_prefixed) "/comments/"
-		   (get post 'id)))
+  (set! endpoint
+	(cond ((and (string? post) (string-starts-with? post #/t[1-7]_/))
+	       (glom "/comments/" (slice post 3)))
+	      ((string? post) (glom "/comments/" post))
+	      (else (glom "/comments/" (get post 'id)))))
   (let* ((r (oauth/call conn 'GET endpoint args opts))
 	 (response (car r))
 	 (result (if (getopt opts 'raw #f)
 		     response
 		     (reddit/thing response opts))))
-    (unless (or (getopt opts 'raw #f) (not (table? result))
-		(not (test result 'listing)))
-      (store! result 'endpoint endpoint)
-      (store! result 'creds conn)
-      (store! result 'opts opts)
-      (store! result 'args args)
-      (when (exists? (get result 'listing))
-	(store! result 'count (choice-size (get result 'listing))))
-      (lognotice |REDDIT/GET| 
-	"Got " (choice-size (get result 'listing)) " results"))
-    result))
+    (if (vector? result)
+	(elts result)
+	result)))
 
 (define (subreddits/search cl string)
   (oauth/call cl 'GET "/subreddits/search" `#["q" ,string]))
