@@ -174,7 +174,7 @@
 		   (if refresh
 		       (store! payload 'exp (time+ refresh))
 		       (drop! payload 'exp))
-		   (set! new (jwt/make payload opts key alg checker issuer)))
+		   (set! new (jwt/make payload opts key alg issuer)))
 		 (loginfo |JWT/refresh| "Refreshed JWT " jwt " ==> " new)
 		 new)
 	       jwt))))
