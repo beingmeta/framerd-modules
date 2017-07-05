@@ -133,6 +133,13 @@
 	(condvar-signal (fifo-state fifo) broadcast))
     (condvar-unlock (fifo-state fifo))))
 
+(define (getlen needed current)
+  (if (< needed current) 
+      current
+      (let ((trylen (* 2 current)))
+	(while (> needed trylen) (set! trylen (* 2 trylen)))
+	trylen)))
+
 (define (fifo-waiting! fifo flag)
   "Declare that a thread is either waiting on the FIFO"
   (if (fifo-debug fifo)
