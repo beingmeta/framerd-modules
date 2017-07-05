@@ -427,7 +427,7 @@
   (set! spec (debug%watch (oauth/spec spec) spec))
   (default! ckey (getckey spec))
   (default! csecret (getcsecret spec))
-  (info%watch "OAUTH/REQUEST" spec ckey cecret)
+  (info%watch "OAUTH/REQUEST" spec ckey csecret)
   (unless (and (getopt spec 'request)
 	       (getopt spec 'authorize)
 	       (getopt spec 'verify))
