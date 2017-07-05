@@ -253,11 +253,11 @@
   (when (and tries (> tries 0)) (sleep (+ tries (getopt opts 'pause 2))))
   (onerror (s3op op bucket path content ctype headers opts args)
     (lambda (ex)
-      (let ((irritant (error-irritant ex)))
+      (let ((irritant (%wc error-irritant ex)))
 	(if (or (not tries) (not max) (>= tries max))
 	    (begin (when max
 		     (logcrit |S3/Failure|
-		       "After " max "tries, couldn't " 
+		       "After "  max " retries, couldn't " 
 		       op " s3://" bucket "/" path 
 		       " given \n  " (pprint opts) "\nlast result:\n  " 
 		       (pprint irritant)))
@@ -271,7 +271,7 @@
 	    (begin
 	      (logwarn |S3/Retry|
 		"Retrying " op " s3://" bucket "/" path
-		" after " tries "/" max " attempts.")
+		" after " (1+ tries) "/" max " attempts.")
 	      (lognotice |S3/Retry| "Last response was:\n  " (pprint irritant))
 	      (tryop (1+ tries) max op bucket path opts content 
 		     ctype headers args)))))))
