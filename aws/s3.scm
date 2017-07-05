@@ -253,7 +253,7 @@
   (when (and tries (> tries 0)) (sleep (+ tries (getopt opts 'pause 2))))
   (onerror (s3op op bucket path content ctype headers opts args)
     (lambda (ex)
-      (let ((irritant (%wc error-irritant ex)))
+      (let ((irritant (error-irritant ex)))
 	(if (or (not tries) (not max) (>= tries max))
 	    (begin (when max
 		     (logcrit |S3/Failure|
