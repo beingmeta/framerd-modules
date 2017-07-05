@@ -10,7 +10,8 @@
 
 (module-export!
  '{fifo/make fifo/close
-   fifo/pop fifo/remove! fifo/push! fifo/jump!  
+   fifo/pop fifo/remove! 
+   fifo/push! fifo/push/n! fifo/jump!  
    fifo/loop fifo/queued fifo/load})
 
 (module-export!
@@ -32,7 +33,8 @@
     ">"))
 
 (defrecord (fifo MUTABLE OPAQUE `(stringfn . fifo->string))
-  name state queue items start end live? (waiting 0) (debug #f))
+  name state queue items start end live? 
+  (waiting 0) (running 0) (debug #f))
 
 (define (fifo/make (name #f) (size #f))
   (cond ((and (number? name) (not size))
@@ -86,13 +88,60 @@
     (condvar-unlock (fifo-state fifo))))
 (define (fifo-push fifo item (broadcast #f)) (fifo/push! fifo item broadcast))
 
+(define (fifo/push/n! fifo items (broadcast #f))
+  (unwind-protect
+      (begin (if (fifo-debug fifo)
+		 (always%watch "FIFO/PUSH/N!" "N" (length items) broadcast fifo)
+		 (debug%watch "FIFO/PUSH/N!" "N" (length items) broadcast fifo))
+	(condvar-lock (fifo-state fifo))
+	(let ((vec (fifo-queue fifo))
+	      (start (fifo-start fifo))
+	      (end (fifo-end fifo))
+	      (add (length items)))
+	  (cond ((< (+ end add) (length vec))
+		 (doseq (item items i)
+		   (vector-set! vec (+ end i) item))
+		 (set-fifo-end! fifo (+ end add)))
+		((< (+ add (- end start)) (length vec))
+		 ;; Move the queue to the start of the vector
+		 (dotimes (i (- end start))
+		   (vector-set! vec i (elt vec (+ start i))))
+		 (let ((zerostart (- end start)))
+		   (dotimes (i (- (length vec) zerostart))
+		     (vector-set! vec (+ zerostart i) #f)))
+		 (set-fifo-start! fifo 0)
+		 (set! end (- end start))
+		 (doseq (item items i)
+		   (vector-set! vec (+ end i) item))
+		 (set-fifo-end! fifo (+ end add)))
+		(else
+		 (let* ((needed (+ (- end start) add 1))
+			(newlen (getlen needed (length vec)))
+			(newvec (make-vector newlen)))
+		   (if (fifo-debug fifo)
+		       (always%watch "FIFO/PUSH!/GROW" fifo)
+		       (debug%watch "FIFO/PUSH!/GROW" fifo))
+		   (debug%watch "FIFO/PUSH!/GROW" fifo)
+		   (dotimes (i (- end start))
+		     (vector-set! newvec i (elt vec (+ start i))))
+		   (set-fifo-queue! fifo newvec)
+		   (set-fifo-start! fifo 0)
+		   (set! end (- end start))
+		   (doseq (item items i)
+		     (vector-set! vec (+ end i) item))
+		   (set-fifo-end! fifo (+ end add))))))
+	(condvar-signal (fifo-state fifo) broadcast))
+    (condvar-unlock (fifo-state fifo))))
+
 (define (fifo-waiting! fifo flag)
- (if (fifo-debug fifo)
-     (always%watch "FIFO-WAITING!" flag (fifo-waiting fifo) fifo)
-     (debug%watch "FIFO-WAITING!" flag (fifo-waiting fifo) fifo))
- (set-fifo-waiting! fifo (+ (if flag 1 -1) (fifo-waiting fifo)))
- (condvar-signal (fifo-state fifo) #t)
- (fifo-waiting fifo))
+  "Declare that a thread is either waiting on the FIFO"
+  (if (fifo-debug fifo)
+      (always%watch "FIFO-WAITING!" flag (fifo-waiting fifo) fifo)
+      (debug%watch "FIFO-WAITING!" flag (fifo-waiting fifo) fifo))
+  (set-fifo-waiting! fifo (+ (if flag 1 -1) (fifo-waiting fifo)))
+  (set-fifo-running! fifo (+ (if flag -1 1) (fifo-running fifo)))
+  (condvar-signal (fifo-state fifo) #t)
+  (fifo-waiting fifo))
 
 (define (fifo/pop fifo)
   (if (fifo-debug fifo)
@@ -135,23 +184,23 @@
   (if (fifo-live? fifo)
       (unwind-protect
 	  (begin (condvar-lock (fifo-state fifo))
-		 (if (and (fifo-live? fifo)
-			  (< (fifo-start fifo) (fifo-end fifo)))
-		     (let* ((vec (fifo-queue fifo))
-			    (start (fifo-start fifo))
-			    (end (fifo-end fifo))
-			    (pos (position item vec start end)))
-		       (if pos
-			   (let ((queued (elt vec pos)))
-			     ;; Move everything else down
-			     (dotimes (i (- end pos))
-			       (vector-set! vec (+ pos i) (elt vec (+ pos i 1))))
-			     (vector-set! vec end #f)
-			     (set-fifo-end! fifo (-1+ end))
-			     (hashset-drop! (fifo-items fifo) item)
-			     queued)
-			   (fail)))
-		     (fail)))
+	    (if (and (fifo-live? fifo)
+		     (< (fifo-start fifo) (fifo-end fifo)))
+		(let* ((vec (fifo-queue fifo))
+		       (start (fifo-start fifo))
+		       (end (fifo-end fifo))
+		       (pos (position item vec start end)))
+		  (if pos
+		      (let ((queued (elt vec pos)))
+			;; Move everything else down
+			(dotimes (i (- end pos))
+			  (vector-set! vec (+ pos i) (elt vec (+ pos i 1))))
+			(vector-set! vec end #f)
+			(set-fifo-end! fifo (-1+ end))
+			(hashset-drop! (fifo-items fifo) item)
+			queued)
+		      (fail)))
+		(fail)))
 	(condvar-unlock (fifo-state fifo)))
       (fail)))
 (define (fifo-jump fifo item) (fifo/remove! fifo item))

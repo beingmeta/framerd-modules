@@ -123,15 +123,18 @@
      "SignedHeaders=" (signed-headers req) ", "
      "Signature=" (downcase (packet->base16 (getopt req 'signature)))))
   (info%watch "AWS/V4/get" endpoint args)
-  (let* ((err (not (getopt req 'noerr #f)))
+  (let* ((err (not (getopt req 'noerr (not (getopt opts 'err #t)))))
 	 (url (scripturl+ endpoint args))
 	 (result (urlget url curl))
 	 (status (and result (try (get result 'response) #f))))
-    (if (and err status (or (not (number? status)) (not (>= 299 status 200))))
-	(irritant (aws/error result req) |AWS/V4/Error| aws/v4/get
-		  ;; "endpoint=" endpoint "\nurl=" url "\ncurl=" curl
-		  )
-	(cons result req))))
+    (info%watch "AWS/V4/GOT" 
+      err status "HEADER" (get result 'header))
+    (if (and status (number? status) (>= 299 status 200))
+	(cons result req)
+	(if err 
+	    (irritant (or (aws/error result req) (cons result req))
+		|AWS/V4/Error| aws/v4/get)
+	    (cons result req)))))
 
 (define (aws/v4/op req op endpoint (opts #f)
 		   (args #[]) (headers #[])
@@ -212,16 +215,26 @@
 		 "no payload")
 	     "\n  url: " url "\n  curl: " curl)
     (let* ((result (urlop op url curl payload payload-mimetype))
-	   (err (not (getopt req 'noerr #f)))
+	   (err (not (getopt req 'noerr (not (getopt opts 'err #t)))))
 	   (status (get result 'response)))
+      (info%watch "AWS/V4/RESULT"
+	err status "HEADER" (get result 'header))
       (cond ((not err) (cons result req))
-	    ((and status (equal? op "HEAD") 
-		  (< status 500) (or (>= status 400) (< status 200)))
+	    ((and status (>= status 200) (< status 300))
+	     ;; If the status is a version of OK, just cons the result
+	     ;; onto the request.
 	     (cons result req))
-	    (else (irritant (aws/error result req) |AWS/V4/Error| aws/v4/op
-			    ;; "\nop=" op "\nendpoint=" endpoint ", "
-			    ;; "\nurl=" url "\ncurl=" curl
-			    ))))))
+	    ((and status (equal? op "HEAD") (>= status 300) (< status 500))
+	     ;; For HEAD requests, don't consider references as
+	     ;; errors. Note that URLGET (in particular, CURL)
+	     ;; automatically handles some number of redirects for non
+	     ;; HEAD requests.
+	     (cons result req))
+	    (else (irritant (or (aws/error result req) (cons result req))
+		      |AWS/V4/Error| aws/v4/op
+		      ;; "\nop=" op "\nendpoint=" endpoint ", "
+		      ;; "\nurl=" url "\ncurl=" curl
+		      ))))))
 
 (define (process-args args req)
   (do-choices (key (getkeys args))

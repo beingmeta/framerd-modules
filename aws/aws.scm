@@ -165,10 +165,13 @@
 (define (aws/error result req)
   (let* ((content (get result '%content))
 	 (ctype (try (get result 'content-type) #f))
-	 (parsed (parse-error content ctype))
-	 (parsetype (try (get parsed 'parsetype) #f))
+	 (parsed (if (or (fail? content) (not content)
+			 (zero? (length content)))
+		     #f
+		     (parse-error content ctype)))
+	 (parsetype (tryif parsed (try (get parsed 'parsetype) #f)))
 	 (extra #f))
-    (cond ((and (eq? parsetype 'xml) 
+    (cond ((and parsed (eq? parsetype 'xml)
 		(exists? (xmlget parsed 'INVALIDSIGNATUREEXCEPTION)))
 	   (set! extra
 		 `#[INVALIDSIGNATUREEXCEPTION 
@@ -179,7 +182,8 @@
 		    DATE ,(getopt req 'date)
 		    HEADERS ,(getopt req 'headers)
 		    PARAMS ,(getopt req '%params)])))
-    (store! result '%content parsed)
+    (when parsed
+      (store! result '%content parsed))
     (store! result 'httpstatus (get result 'response))
     (if extra
 	(cons* extra result req)
@@ -203,21 +207,28 @@
 
 (define (xml-error xmlstring)
   (onerror
-      (let ((err (remove-if string?
-			    (xmlparse xmlstring '{data slotify}))))
+      (let ((err (remove-if string? (xmlparse xmlstring '{data slotify}))))
+	(when (not (pair? err))
+	  (irritant xmlstring |BadXMLErrorValue|))
 	(store! (car err) 'parsetype 'xml)
 	(car err))
       (lambda (ex)
 	(logwarn  (error-condition ex)
 	  "Couldn't parse XML error description:\n\t" ex 
-	  "\n  " xmlstring))))
+	  "\n  " xmlstring)
+	ex)))
 (define (json-error jsonstring)
   (onerror
       (let ((err (jsonparse jsonstring)))
+	(unless (table? err)
+	  (irritant jsonstring |BadJSONErrorValue|))
 	(store! err 'parsetype 'json)
 	err)
       (lambda (ex)
 	(logwarn  (error-condition ex)
 	  "Couldn't parse JSON error description:\n\t" ex 
-	  "\n  " jsonstring))))
+	  "\n  " jsonstring)
+	ex)))
+
+
 
