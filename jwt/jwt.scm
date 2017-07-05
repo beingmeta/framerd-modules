@@ -111,7 +111,9 @@
 (define (jwt/b64.json string)
   (jsonparse
    (packet->string
-    (base64->packet (uridecode (string-subst* string "-" "+"  "_" "/"))))))
+    (base64->packet (uridecode (string-subst* string "-" "+"  "_" "/"))))
+   ;; COLONIZE and SYMBOLIZE
+   #t))
 
 ;;; Working with existing tokens
 
