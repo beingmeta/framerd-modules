@@ -6,7 +6,7 @@
 (use-module '{aws aws/v4 texttools logger fdweb varconfig})
 (define %used_modules '{aws varconfig})
 
-(define-init %loglevel %notice%)
+(define-init %loglevel %warn%)
 
 (module-export! '{sns/newtopic sns/topic 
 		  sns/publish 
@@ -64,6 +64,9 @@
 		  "Protocol" ,protocol
 		  "TopicArn" ,arn])
 	 (response (aws/v4/get #[] (get-endpoint opts) opts args)))
+    (lognotice |SNS/Subscribe| 
+      "Requested subscription to " arn " for " endpoint)
+    (info%watch "SNS/Subscribe" response)
     response))
 
 (define (sns/confirm! topic-arg token (opts base-opts))
@@ -73,6 +76,8 @@
 	 (args `#["Action" "ConfirmSubscription" 
 		  "Token" ,token "TopicArn" ,arn])
 	 (response (aws/v4/get #[] (get-endpoint opts) opts args)))
+    (lognotice |SNS/Confirm| "Confirmed subscription to " arn)
+    (info%watch "SNS/Confirm" response)
     response))
 
 (define (get-protocol string)
@@ -81,7 +86,11 @@
 	(else (irritant string |UnhandledProtocol|))))
 
 (define (sns/unsubscribe! arn (opts base-opts))
-  (aws/v4/get #[] (get-endpoint opts) opts `#["Action" "Unsubscribe" "SubscriptionArn" ,arn]))
+  (let ((response (aws/v4/get #[] (get-endpoint opts) opts
+			      `#["Action" "Unsubscribe" "SubscriptionArn" ,arn])))
+    (lognotice |SNS/Unsubscribe| "Confirmed subscription to " arn)
+    (info%watch "SNS/Unsubscribe" response)
+    response))
 
 (defambda (sns/permit! topic-arg actions accounts (opts))
   (for-choices topic-arg
