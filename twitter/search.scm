@@ -36,7 +36,7 @@
 	 (creds (if (and creds (pair? creds)) creds
 		    (try (get q 'creds) (twitter/creds))))
 	 (r (oauth/call creds 'GET search-endpoint (try (get q 'next) q)))
-	 (tweets (get r 'statuses))
+	 (tweets (getopt r 'statuses '()))
 	 (ids (get (elts tweets) 'id))
 	 (min_id (smallest ids))
 	 (max_id (largest ids)))
@@ -48,7 +48,7 @@
       (pprint q))
     `#[q ,q count ,fetchsize
        creds ,creds min_id ,min_id max_id ,max_id
-       tweets ,(get r 'statuses)
+       tweets ,tweets
        %original ,(get r '%original)
        next #["q" ,(get q "q") "count" ,fetchsize
 	      "max_id" ,(-1+ min_id)]]))
@@ -84,10 +84,8 @@
 			  `#["q" ,qstring "count" ,blocksize])))
     (while (and (exists? result) result (table? result))
       (debug%watch "Twitter/Search/N" done count n 
-		   "n_results" (length (get result 'statuses)))
-      (let* ((tweets (and (exists? result) result (table? result)
-			  (test result 'statuses)
-			  (get result 'statuses)))
+		   "n_results" (length (getopt result 'statuses)))
+      (let* ((tweets (getopt result 'statuses '()))
 	     (metadata (get result 'search_metadata))
 	     (ids (elts (map (lambda (x) (get x 'id)) tweets)))
 	     (min_result (smallest ids))
