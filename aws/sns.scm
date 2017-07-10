@@ -88,21 +88,27 @@
 
 (define (sns/confirm! topic-arg endpoint token (opts base-opts))
   (let* ((arn (sns/topic topic-arg)))
-    (unless (test (get subscriptions (cons arn endpoint)) 'token token)
-      (let* ((protocol (sns-protocol endpoint))
-	     (args `#["Action" "ConfirmSubscription" 
-		      "Token" ,token "TopicArn" ,arn])
-	     (response (aws/v4/get #[] (sns-endpoint opts) opts args))
-	     (parsed (xmlparse (getopt response '%content)))
-	     (subarn (xmlget parsed 'subscriptionarn)))
-	(store! subscriptions (cons arn endpoint)
-		`#[subscription ,subarn 
-		   topic ,arn endpoint ,endpoint
-		   token ,token])
-	(lognotice |SNS/Confirm|
-	  "Confirmed subscription to " arn " with " token ":\n\t" subarn)
-	(info%watch "SNS/Confirm/response" arn subarn token response)
-	response))))
+    (cond ((test (get subscriptions (cons arn endpoint)) 'token token)
+	   (get (get subscriptions (cons arn endpoint))))
+	  (else
+	   (lognotice |SNS/Confirm|
+	     "Confirming subscription to " arn " at " endpoint)
+	   (let* ((protocol (sns-protocol endpoint))
+		  (args `#["Action" "ConfirmSubscription" 
+			   "Token" ,token "TopicArn" ,arn])
+		  (response (aws/v4/get #[] (sns-endpoint opts) opts args))
+		  (parsed (xmlparse (getopt response '%content)))
+		  (subarn (xmlcontent (xmlget parsed 'subscriptionarn)))
+		  (subscription
+		   `#[subscription ,subarn 
+		      topic ,arn endpoint ,endpoint
+		      confirmed ,(timestamp)
+		      token ,token]))
+	     (store! subscriptions (cons arn endpoint) subscription)
+	     (lognotice |SNS/Confirm|
+	       "Confirmed subscription to " arn " at " endpoint " with " token ":\n\t" subarn)
+	     (info%watch "SNS/Confirm/response" arn subarn token response)
+	     subscription)))))
 
 (define (sns/unsubscribe! arn (opts base-opts))
   (let ((response (aws/v4/get #[] (sns-endpoint opts) opts
