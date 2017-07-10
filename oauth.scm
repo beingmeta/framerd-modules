@@ -1,4 +1,4 @@
-;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
+;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2010-2017 beingmeta, inc. All rights reserved
 
 (in-module 'oauth)
@@ -91,13 +91,15 @@
   (let ((parsed (xmlparse string '{data slotify})))
     (reject (elts parsed) string?)))
 
-(define (parsereqdata req (ctype) (content))
+(define (parsereqdata req (ctype) (content) (response))
   (default! ctype (try (get req 'content-type) #f))
   (default! content (try (get req '%content) #f))
-  (if (and (test req 'response) ctype content
-	   (number? (get req 'response))
-	   (>= (get req 'response) 200)
-	   (< (get req 'response) 300))
+  (default! response (try (get req 'response) #f))
+  (debug%watch "PARSEREQDATA" response ctype content)
+  (if (and response ctype content
+	   (number? response)
+	   (>= response 200)
+	   (< response 300))
       (if (search "json" ctype)
 	  (jsonparse content (getopt req 'jsonflags default-json-flags))
 	  (if (search "xml" ctype)
@@ -113,7 +115,10 @@
 			  (jsonparse content (getopt req 'jsonflags default-json-flags))
 			  (cgiparse content)))))
 	  req)
-      (fail)))
+      (frame-create #f
+	'status response
+	'ctype (tryif ctype ctype)
+	'content (or content '()))))
 
 (define (getreqdata req . args)
   (if (and lograw (test req 'reqid))
@@ -824,35 +829,39 @@
 				   (getopt spec 'expect default-expect)))
 			'useragent (getopt spec 'useragent #f)
 			'method method)))
-	 (req (if streamfn
-		  (urlstream useurl streamfn handle body)
-		  (if (eq? method 'GET) (urlget useurl handle)
-		      (if (eq? method 'HEAD) (urlget useurl handle)
-			  (if (eq? method 'POST)
-			      (if body
-				  (urlput useurl content ctype handle)
-				  (urlpost useurl handle (args->post args)))
-			      (if (eq? method 'PUT)
-				  (urlput useurl content ctype handle)
-				  (error OAUTH:BADMETHOD OAUTH/CALL20
-					 "Only GET, HEAD, PUT, and POST are allowed: "
-				    method endpoint args))))))))
+	 (response
+	  (if streamfn
+	      (urlstream useurl streamfn handle body)
+	      (if (eq? method 'GET) (urlget useurl handle)
+		  (if (eq? method 'HEAD) (urlget useurl handle)
+		      (if (eq? method 'POST)
+			  (if body
+			      (urlput useurl content ctype handle)
+			      (urlpost useurl handle (args->post args)))
+			  (if (eq? method 'PUT)
+			      (urlput useurl content ctype handle)
+			      (error OAUTH:BADMETHOD OAUTH/CALL20
+				     "Only GET, HEAD, PUT, and POST are allowed: "
+				method endpoint args))))))))
     (debug%watch "OAUTH/CALL20" endpoint auth-header)
-    (logdebug |OAuth20/Request| (pprint req))
+    (logdebug |OAuth20/Response| (pprint response))
     (when (getopt spec 'lograw lograw)
       (let ((reqid (getuuid)))
 	(store! lograw reqid req)
 	(store! req 'reqid reqid)))
     (when (getopt spec 'jsonflags)
       (store! req 'jsonflags (getopt spec 'jsonflags)))
-    (if raw req
-	(if (and (test req 'response) (number? (get req 'response))
-		 (<= 200 (get req 'response) 299))
-	    (cons (getreqdata req) 
+    (if raw 
+	response
+	(if (and (test response 'response) 
+		 (number? (get response 'response))
+		 (<= 200 (get response 'response) 299))
+	    (cons (getreqdata response) 
 		  (if (getopt spec 'keepraw keep-raw)
-		      (cons req spec)
+		      (cons response spec)
 		      spec))
-	    (if (and (<= 400 (get req 'response) 499) (getopt spec 'refresh))
+	    (if (and (<= 400 (get response 'response) 499) 
+		     (getopt spec 'refresh))
 		(begin
 		  (debug%watch 'OAUTH/ERROR "RESPONSE" response req)
 		  (oauth/refresh! spec)
