@@ -94,7 +94,7 @@
   (add! args "Timestamp" (get date 'isobasic))
   (unless (position #\% endpoint)
     (set! endpoint (encode-uri endpoint)))
-  (debug%watch req endpoint args headers date)
+  (debug%watch "AWS/V4/GET" endpoint date args headers req opts)
   (process-args args req)
   (do-choices (key (getkeys headers))
     (unless (hashset-get hdrset (downcase key))
@@ -156,6 +156,7 @@
   (add! args "AWSAccessKeyId"
 	(getopt req 'aws:key (getopt opts 'aws:key aws:key)))
   (add! args "Timestamp" (get date 'isobasic))
+  (debug%watch "AWS/V4/GET" endpoint date args headers req opts)
   (process-args args req)
   (when (getopt opts 'accept)
     (let ((curslot (pick (getkeys headers) downcase "accept")))
