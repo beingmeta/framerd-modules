@@ -15,24 +15,32 @@
 
 (define base-opts #[])
 
-(define (get-endpoint opts)
+(define-init subscriptions (make-hashtable))
+(define-init subscribe-wait 2000)
+
+(define use-sns-endpoint #f)
+(varconfig! sns:endpoint use-sns-endpoint)
+
+(define (sns-endpoint opts)
   (if (string? opts)
       (glom "https://sns." opts ".amazonaws.com/")
       (getopt opts 'endpoint
-	      (or sns-endpoint
+	      (or use-sns-endpoint
 		  (glom "https://sns." 
 		    (getopt opts 'region aws:region)
 		    ".amazonaws.com/")))))
+
+(define (sns-protocol string)
+  (cond ((has-prefix string "http:") "http")
+	((has-prefix string "https:") "https")
+	(else (irritant string |UnhandledProtocol|))))
 
 (define (arn-region arn)
   (get (text->frames #("arn:aws:sns:" (label region (not> ":"))) arn)
        'region))
 
-(define sns-endpoint #f)
-(varconfig! sns:endpoint sns-endpoint)
-
 (define (sns/newtopic name (opts base-opts))
-  (let* ((req (aws/v4/get #[] (get-endpoint opts) opts
+  (let* ((req (aws/v4/get #[] (sns-endpoint opts) opts
 			  `#["Action" "CreateTopic" "Name" ,name]))
 	 (text (and (pair? req)
 		    (response/ok? (car req))
@@ -53,43 +61,54 @@
 
 (define (sns/publish topic-arg message (opts base-opts))
   (let* ((arn (sns/topic topic-arg)))
-    (aws/v4/get #[] (get-endpoint opts) opts
+    (aws/v4/get #[] (sns-endpoint opts) opts
 		`#["Action" "Publish" "Message" ,message "TopicArn" ,arn])))
 
-(define (sns/subscribe! topic-arg endpoint (opts base-opts))
-  (let* ((arn (sns/topic topic-arg))
-	 (protocol (get-protocol endpoint))
-	 (args `#["Action" "Subscribe" 
-		  "Endpoint" ,endpoint
-		  "Protocol" ,protocol
-		  "TopicArn" ,arn])
-	 (response (aws/v4/get #[] (get-endpoint opts) opts args)))
-    (lognotice |SNS/Subscribe| 
-      "Requested subscription to " arn " for " endpoint)
-    (info%watch "SNS/Subscribe" response)
-    response))
+(define (sns/subscribe! topic-arg endpoint (opts base-opts) (arn))
+  (default! arn (sns/topic topic-arg))
+  (or (getopt (get subscriptions (cons arn endpoint)) 'subscription)
+      (do-subscribe arn endpoint opts)))
 
-(define (sns/confirm! topic-arg token (opts base-opts))
-  (let* ((arn (sns/topic topic-arg))
-	 (endpoint (if (string? opts) opts (get-endpoint opts)))
-	 (protocol (get-protocol endpoint))
-	 (args `#["Action" "ConfirmSubscription" 
-		  "Token" ,token "TopicArn" ,arn])
-	 (response (aws/v4/get #[] (get-endpoint opts) opts args)))
-    (lognotice |SNS/Confirm| "Confirmed subscription to " arn)
-    (info%watch "SNS/Confirm" response)
-    response))
+(defslambda (do-subscribe arn endpoint opts)
+  (or (getopt (get subscriptions (cons arn endpoint)) 'subscription)
+      (let* ((args `#["Action" "Subscribe" 
+		      "Endpoint" ,endpoint
+		      "Protocol" ,(sns-protocol endpoint)
+		      "TopicArn" ,arn])
+	     (response (aws/v4/get #[] (sns-endpoint opts) opts args)))
+	;; TODO: Should handle subscriptions which are immediately returned
+	(store! subscriptions arn 
+		`#[topic ,arn endpoint ,endpoint
+		   requested ,(timestamp)])
+	(if (pair? response) (car response) response)
+	(lognotice |SNS/Subscribe| 
+	  "Requested subscription to " arn " for " endpoint)
+	(info%watch "SNS/Subscribe/response" response)
+	response)))
 
-(define (get-protocol string)
-  (cond ((has-prefix string "http:") "http")
-	((has-prefix string "https:") "https")
-	(else (irritant string |UnhandledProtocol|))))
+(define (sns/confirm! topic-arg endpoint token (opts base-opts))
+  (let* ((arn (sns/topic topic-arg)))
+    (unless (test (get subscriptions (cons arn endpoint)) 'token token)
+      (let* ((protocol (sns-protocol endpoint))
+	     (args `#["Action" "ConfirmSubscription" 
+		      "Token" ,token "TopicArn" ,arn])
+	     (response (aws/v4/get #[] (sns-endpoint opts) opts args))
+	     (parsed (xmlparse (getopt response '%content)))
+	     (subarn (xmlget parsed 'subscriptionarn)))
+	(store! subscriptions (cons arn endpoint)
+		`#[subscription ,subarn 
+		   topic ,arn endpoint ,endpoint
+		   token ,token])
+	(lognotice |SNS/Confirm|
+	  "Confirmed subscription to " arn " with " token ":\n\t" subarn)
+	(info%watch "SNS/Confirm/response" arn subarn token response)
+	response))))
 
 (define (sns/unsubscribe! arn (opts base-opts))
-  (let ((response (aws/v4/get #[] (get-endpoint opts) opts
+  (let ((response (aws/v4/get #[] (sns-endpoint opts) opts
 			      `#["Action" "Unsubscribe" "SubscriptionArn" ,arn])))
     (lognotice |SNS/Unsubscribe| "Confirmed subscription to " arn)
-    (info%watch "SNS/Unsubscribe" response)
+    (info%watch "SNS/Unsubscribe/response" response)
     response))
 
 (defambda (sns/permit! topic-arg actions accounts (opts))
@@ -101,13 +120,13 @@
 	(store! args (glom "ActionName.member." (1+ i)) action))
       (do-choices (account accounts i)
 	(store! args (glom "AWSAccountId.member." (1+ i)) account))
-      (aws/v4/get #[] (get-endpoint opts) opts args))))
+      (aws/v4/get #[] (sns-endpoint opts) opts args))))
 
 (defambda (sns/unpermit! topic-arg label (opts base-opts))
   (for-choices topic-arg
     (let* ((arn (sns/topic topic-arg))
 	   (args `#["Action" "RemovePermission" "TopicArn" ,arn "Label" ,label]))
-      (aws/v4/get #[] (get-endpoint opts) opts args))))
+      (aws/v4/get #[] (sns-endpoint opts) opts args))))
 
 
 
