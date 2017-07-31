@@ -59,8 +59,9 @@
 	 (max (->exact (ceiling (* arg ncpus))) (or maxval 0)))
 	((number? arg) (bad-threadcount arg))
 	((symbol? arg) 
-	 (if (config arg) (mt/threadcount (config arg) maxval)
-	     default-threadcount))
+	 (if (config arg)
+	     (mt/threadcount (config arg) maxval)
+	     (mt/threadcount default-threadcount)))
 	(else (bad-threadcount arg))))
 
 (define (bad-threadcount arg)
@@ -97,7 +98,7 @@
       (let* ((vec (choice->vector choices))
 	     (counter (mt/counter (length vec)))
 	     (ids (mt/nrange 0 n-threads)))
-	(threadjoin
+	(thread/wait
 	 (if logexit
 	     (thread/call threadfcn ids proc vec counter)
 	     (thread/call+ #[logexit #f] threadfcn
