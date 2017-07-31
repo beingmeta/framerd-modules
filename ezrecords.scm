@@ -32,7 +32,12 @@
 (define (fieldname x)
   (if (pair? x) (car x) x))
 
-;(defrecord tag field1 (field2 opt) field3)
+;;(defrecord tag field1 (field2 opt) field3)
+;;(defrecord (tag MUTABLE OPAQUE #[stringfn fifo->string]) #[] . #[]) ...)
+;;(defrecord (tag MUTABLE OPAQUE (stringfn . fifo->string) #[] . #[]) ...)
+;; Note: The opts for a record consist of the CDR of the head spec, if it's a pair.
+;;       The values of these options are inserted directly into the expanded macro, so
+;;       in the example above, 
 (define defrecord
   (macro expr
     (let* ((defspec (cadr expr))
