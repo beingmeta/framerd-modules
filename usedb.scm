@@ -8,7 +8,7 @@
 ;;;  and indexes, but the intent is to keep information relevant to
 ;;;  journalling and syncing in this same data structure.
 
-(module-export! 'usedb)
+(module-export! '{usedb use-component})
 
 (define (use-component usefn name dbname (opts #f) (warn #t))
   (cond ((not (string? name)))
