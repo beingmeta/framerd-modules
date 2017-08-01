@@ -113,13 +113,16 @@
 		     (indexes (registry-index r))
 		     (adjuncts-map (get-adjuncts pools))
 		     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
-		     (threads (thread/call+ #[logexit #f] commit {pools indexes adjuncts}))
-		     (started (elapsed-time)))
-		(if (exists? threads)
-		    (begin (thread/wait threads)
-		      (lognotice |RegistrySaved| 
-			"Saved registry " r " in " (secs->string (elapsed-time started))))
-		    (logwarn |NoRegistry| "Couldn't get a registry to save"))))))
+		     (dbs {pools indexes adjuncts}))
+		(when (exists modified? dbs) 
+		  (let ((threads (thread/call+ #[logexit #f] commit dbs))
+			(started (elapsed-time)))
+		    (Loginfo |SavingRegistry| r)
+		    (if (exists? threads)
+			(begin (thread/wait threads)
+			  (lognotice |RegistrySaved| 
+			    "Saved registry " r " in " (secs->string (elapsed-time started))))
+			(logwarn |NoRegistry| "Couldn't get a registry to save"))))))))
 
 ;;; The meat of it
 
