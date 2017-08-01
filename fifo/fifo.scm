@@ -10,9 +10,9 @@
 
 (module-export!
  '{fifo/make fifo/close
-   fifo/pop fifo/remove! 
-   fifo/push! fifo/push/n! fifo/jump!  
-   fifo/loop fifo/queued fifo/load})
+   fifo/pop fifo/remove!
+   fifo/push! fifo/push/n! fifo/jump! fifo/pause!  
+   fifo/loop fifo/queued fifo/load fifo/paused?})
 
 (module-export!
  '{make-fifo
@@ -33,7 +33,7 @@
     ">"))
 
 (defrecord (fifo MUTABLE OPAQUE `(stringfn . fifo->string))
-  name state queue items start end live? 
+  name state queue items start end live? (pause #f)
   (waiting 0) (running 0) (debug #f))
 
 (define (fifo/make (name #f) (size #f) (data #f) (queue))
@@ -73,12 +73,17 @@
       (vector-set! queue (+ write i) #f))
     write))
 
+(defambda (check-paused fifo flags)
+  (while (overlaps? (fifo-pause fifo) flags)
+    (condvar-wait (fifo-state fifo))))
+
 (define (fifo/push! fifo item (broadcast #f))
   (unwind-protect
       (begin (if (fifo-debug fifo)
 		 (always%watch "FIFO/PUSH!" item broadcast fifo)
 		 (debug%watch "FIFO/PUSH!" item broadcast fifo))
 	(condvar-lock (fifo-state fifo))
+	(check-paused fifo '{write readwrite})
 	(if (hashset-get (fifo-items fifo) item)
 	    (if (fifo-debug fifo)
 		(always%watch "FIFO/PUSH!/REDUNDANT" item fifo)
@@ -124,6 +129,8 @@
 		 (always%watch "FIFO/PUSH/N!" "N" (length items) broadcast fifo)
 		 (debug%watch "FIFO/PUSH/N!" "N" (length items) broadcast fifo))
 	(condvar-lock (fifo-state fifo))
+	(while (overlaps? (fifo-pause fifo) '{write readwrite})
+	  (condvar-wait (fifo-state fifo)))
 	(let ((vec (fifo-queue fifo))
 	      (start (fifo-start fifo))
 	      (end (fifo-end fifo))
@@ -187,13 +194,19 @@
   (if (fifo-live? fifo)
       (unwind-protect
 	  (begin (condvar-lock (fifo-state fifo))
-	    ;; Wait for something to pop
+	    ;; Assert that we're waiting
 	    (fifo-waiting! fifo #t)
+	    ;; Wait if it is paused
+	    (check-paused fifo '{read readwrite})
+	    ;; Wait for data
 	    (while (and (fifo-live? fifo)
-			(= (fifo-start fifo) (fifo-end fifo)))
+			(= (fifo-start fifo) (fifo-end fifo))
+			(not (overlaps? (fifo-pause fifo) '{read readwrite})))
 	      (condvar-wait (fifo-state fifo)))
 	    (fifo-waiting! fifo #f)
+	    (check-paused fifo '{read readwrite})
 	    ;; If it's still alive, do the pop
+	    ;; Wait if it is paused
 	    (if (fifo-live? fifo) 
 		(let* ((vec (fifo-queue fifo))
 		       (start (fifo-start fifo))
@@ -301,5 +314,13 @@
 	(and (not (zero? (fifo-waiting fifo)))
 	     (= (fifo-start fifo) (fifo-end fifo))))
     (condvar-unlock (fifo-state fifo))))
+
+(define (fifo/pause! fifo value)
+  (unwind-protect 
+      (begin (condvar-lock (fifo-state fifo))
+	(set-fifo-pause! fifo value)
+	(condvar-signal (fifo-state fifo) #t))
+    (condvar-unlock (fifo-state fifo))))
+(define (fifo/paused? fifo) (fifo-pause fifo))
 
 (define (fifo/set-debug! fifo (flag #t)) (set-fifo-debug! fifo flag))
