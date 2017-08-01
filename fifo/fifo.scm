@@ -9,10 +9,11 @@
 (define %used_modules 'ezrecords)
 
 (module-export!
- '{fifo/make fifo/close
+ '{fifo/make fifo/opts fifo/close
    fifo/pop fifo/remove!
-   fifo/push! fifo/push/n! fifo/jump! fifo/pause!  
-   fifo/loop fifo/queued fifo/load fifo/paused?})
+   fifo/push! fifo/push/n! fifo/jump! 
+   fifo/wait fifo/pause! fifo/paused?
+   fifo/loop fifo/queued fifo/load})
 
 (module-export!
  '{make-fifo
@@ -33,36 +34,66 @@
     ">"))
 
 (defrecord (fifo MUTABLE OPAQUE `(stringfn . fifo->string))
-  name state queue items start end live? (pause #f)
+  name state queue start end live? (pause #f) opts items
   (waiting 0) (running 0) (debug #f))
 
-(define (fifo/make (name #f) (size #f) (data #f) (queue))
-  (%watch "FIFO/MAKE" name size data)
-  (cond ((and (number? name) (not size))
-	 (set! size name) (set! name #f))
-	((and (vector? name) (not data))
-	 (logwarn |InitialzingFIFOData| name)
-	 (set! data name)
-	 (set! size (length data))
-	 (set! name #f))
-	((and (vector? size) (not data))
-	 (set! data size)
-	 (set! size (length data))))
-  (when (and (not size) (not data)) (set! size 64))
-  (%watch "FIFO/MAKE/later" name size data)
-  (cond ((and (vector? data) (= (length data) size))
-	 (set! queue data))
-	((vector? data)
-	 (set! queue (make-vector size))
-	 (doseq (elt data i) (vector-set! queue i elt)))
-	(else (set! queue (make-vector size #f))))
-  (cons-fifo name (make-condvar) queue (make-hashset)
-	     0
-	     (if data (compact-queue queue) 0)
-	     #t))
+(define (fifo/make . args)
+  "Creates a new FIFO object from its arguments which can be "
+  "strings or symbols (for the name), positive fixnums (for the initial size), "
+  "vectors (for data), or tables (for options). Options provide defaults "
+  "for these other attributes."
+  (let ((size #f) (name #f) (data #f) (opts #f) (queue #f) 
+	(items #f) (debug #f) (init-items 0))
+    (doseq (arg args)
+      (cond ((string? arg)
+	     (if name 
+		 (irritant (cons name arg) |FIFO/AmbiguousSpec/Name|)
+		 (set! name arg)))
+	    ((and (fixnum? arg) (> arg 0))
+	     (if size
+		 (irritant (cons size arg) |FIFO/AmbiguousSpec/Size|)
+		 (set! size arg)))
+	    ((number? arg) (irritant arg |FIFO/BadSpec/Size|))
+	    ((vector? arg)
+	     (if data
+		 (irritant (cons data arg) |FIFO/AmbiguousSpec/Data|)
+		 (set! data arg)))
+	    ((table? arg)
+	     (if opts
+		 (unless (eq? opts arg)
+		   (set! opts (cons arg opts)))
+		 (set! opts arg)))
+	    (else (irritant arg |FIFO/BadSpec|))))
+    (when opts
+      (unless name (set! name (getopt opts 'name #f)))
+      (unless size 
+	(set! size (getopt opts 'size (if data (length data) 64))))
+      (set! debug (getopt opts 'debug #t)))
+    (if (getopt opts 'nodups #t)
+	(set! items (make-hashset))
+	(set! items #f))
+    (cond ((not data)
+	   (set! queue (make-vector (or size 64) #f)))
+	  ((not size)
+	   (set! queue data)
+	   (set! init-items (compact-queue queue))
+	   (set! size (length queue)))
+	  ((not size)
+	   (set! queue data)
+	   (set! init-items (compact-queue queue))
+	   (set! size (length data)))
+	  ((> (length data) size)
+	   (set! size (length data))
+	   (set! queue data)
+	   (set! init-items (compact-queue queue))))
+    (cons-fifo name (make-condvar) 
+	       queue 0 init-items #t #f opts items
+	       0 0 debug)))
 (define (make-fifo (size 64)) (fifo/make size))
 
 (define (compact-queue queue)
+  "Moves all the non #f items in QUEUE (a vector) towards "
+  "the beginning and returns the number of those items."
   (let ((write 0) (len (length queue)))
     (doseq (item queue read)
       (cond ((not item))
@@ -74,17 +105,23 @@
     write))
 
 (defambda (check-paused fifo flags)
+  "Checks whether a FIFO is paused for any of FLAGS "
+  "and blocks until it is un-paused."
   (while (overlaps? (fifo-pause fifo) flags)
     (condvar-wait (fifo-state fifo))))
 
 (define (fifo/push! fifo item (broadcast #f))
+  "Pushes a new item into the FIFO. If *broadcast* is true, "
+  "a broadcast signal is sent to all waiting threads, rather than "
+  "just one."
   (unwind-protect
       (begin (if (fifo-debug fifo)
 		 (always%watch "FIFO/PUSH!" item broadcast fifo)
 		 (debug%watch "FIFO/PUSH!" item broadcast fifo))
 	(condvar-lock (fifo-state fifo))
 	(check-paused fifo '{write readwrite})
-	(if (hashset-get (fifo-items fifo) item)
+	(if (and (fifo-items fifo)
+		 (hashset-get (fifo-items fifo) item))
 	    (if (fifo-debug fifo)
 		(always%watch "FIFO/PUSH!/REDUNDANT" item fifo)
 		(debug%watch "FIFO/PUSH!/REDUNDANT" item fifo))
@@ -121,16 +158,22 @@
 		       (set-fifo-end! fifo (1+ (- end start))))))))
 	(condvar-signal (fifo-state fifo) broadcast))
     (condvar-unlock (fifo-state fifo))))
-(define (fifo-push fifo item (broadcast #f)) (fifo/push! fifo item broadcast))
+(define (fifo-push fifo item (broadcast #f))
+  "Pushes a new item into the FIFO. If *broadcast* is true, "
+  "a broadcast signal is sent to all waiting threads, rather than "
+  "just one."
+  (fifo/push! fifo item broadcast))
 
 (define (fifo/push/n! fifo items (broadcast #f))
+  "Pushes multiple items into the FIFO. If *broadcast* is true, "
+  "a broadcast signal is sent to all waiting threads, rather than "
+  "just one."
   (unwind-protect
       (begin (if (fifo-debug fifo)
 		 (always%watch "FIFO/PUSH/N!" "N" (length items) broadcast fifo)
 		 (debug%watch "FIFO/PUSH/N!" "N" (length items) broadcast fifo))
 	(condvar-lock (fifo-state fifo))
-	(while (overlaps? (fifo-pause fifo) '{write readwrite})
-	  (condvar-wait (fifo-state fifo)))
+	(check-paused fifo '{write readwrite})
 	(let ((vec (fifo-queue fifo))
 	      (start (fifo-start fifo))
 	      (end (fifo-end fifo))
@@ -188,6 +231,9 @@
   (fifo-waiting fifo))
 
 (define (fifo/pop fifo (maxcount 1))
+  "Pops some number of items (at least one) from the FIFO."
+  "The *maxcount* argument specifies the number of maximum number of items "
+  "to be popped."
   (if (fifo-debug fifo)
       (always%watch "FIFO/POP" fifo)
       (debug%watch "FIFO/POP" fifo))
@@ -225,14 +271,20 @@
 		    ;; If we're empty, move the pointers back
 		    (set-fifo-start! fifo 0)
 		    (set-fifo-end! fifo 0))
-		  (hashset-drop! (fifo-items fifo) items)
+		  (when (fifo-items fifo)
+		    (hashset-drop! (fifo-items fifo) items))
 		  items)
 		(fail)))
 	(condvar-unlock (fifo-state fifo)))
       (fail)))
-(define (fifo-pop fifo) (fifo/pop fifo))
+(define (fifo-pop fifo)
+  "Pops some number of items (at least one) from the FIFO."
+  "The *maxcount* argument specifies the number of maximum number of items "
+  "to be popped."
+  (fifo/pop fifo))
 
 (define (fifo/remove! fifo item)
+  "Removes an item from the FIFO"
   (if (fifo-live? fifo)
       (unwind-protect
 	  (begin (condvar-lock (fifo-state fifo))
@@ -249,27 +301,33 @@
 			  (vector-set! vec (+ pos i) (elt vec (+ pos i 1))))
 			(vector-set! vec end #f)
 			(set-fifo-end! fifo (-1+ end))
-			(hashset-drop! (fifo-items fifo) item)
+			(when (fifo-items fifo)
+			  (hashset-drop! (fifo-items fifo) item))
 			queued)
 		      (fail)))
 		(fail)))
 	(condvar-unlock (fifo-state fifo)))
       (fail)))
-(define (fifo-jump fifo item) (fifo/remove! fifo item))
+(define (fifo-jump fifo item)
+  (fifo/remove! fifo item))
 
 (define (fifo/loop fifo handler)
+  "Repeatedly pops items from *fifo* and calls *handler* on them "
+  "until *handler* either fails {} or returns #f"
   (let ((result #t))
     (while (and (exists? result) result)
       (set! result (handler (fifo-pop fifo))))))
-(define (fifo-loop fifo handler) (fifo/loop fifo handler))
+(define (fifo-loop fifo handler)
+  (fifo/loop fifo handler))
 
 (define (fifo/close fifo (broadcast #t) (result #f))
+  "Closes a FIFO, returning a vector of the remaining queued items."
   (unwind-protect
       (begin
 	(condvar-lock (fifo-state fifo))
 	(set! result
-	      (slice (fifo-queue fifo)
-		     (fifo-start fifo) (fifo-end fifo)))
+	  (slice (fifo-queue fifo)
+		 (fifo-start fifo) (fifo-end fifo)))
 	(set-fifo-live?! fifo #f)
 	result)
     (begin
@@ -281,6 +339,7 @@
   (fifo/close fifo broadcast))
 
 (define (fifo/queued fifo (result #f))
+  "Returns a vector of the queued items in a FIFO, in order"
   (unwind-protect
       (begin (condvar-lock (fifo-state fifo))
 	(set! result (subseq (fifo-queue fifo)
@@ -290,11 +349,19 @@
 (define (fifo-queued fifo) (fifo/queued fifo))
 
 (define (fifo/load fifo)
+  "Returns the number of queued items in *fifo*"
   (unwind-protect
       (begin (condvar-lock (fifo-state fifo))
 	     (- (fifo-end fifo) (fifo-start fifo)))
     (condvar-unlock (fifo-state fifo))))
 (define (fifo-load fifo) (- (fifo-end fifo) (fifo-start fifo)))
+
+(define (fifo/wait fifo (state))
+  "Waits for something about *fifo* to change."
+  (default! state (fifo-state fifo))
+  (condvar-lock state)
+  (condvar-wait state)
+  (condvar-unlock state))
 
 (define (fifo/waiting fifo (nonzero #t))
   (unwind-protect
@@ -306,6 +373,8 @@
     (condvar-unlock (fifo-state fifo))))
 
 (define (fifo/idle? fifo)
+  "Returns true if *fifo* is idle, waiting until either the queue is empty "
+  "or no more threads are waiting on the fifo."
   (unwind-protect
       (begin (condvar-lock (fifo-state fifo))
 	(until (and (not (zero? (fifo-waiting fifo)))
@@ -315,12 +384,16 @@
 	     (= (fifo-start fifo) (fifo-end fifo))))
     (condvar-unlock (fifo-state fifo))))
 
-(define (fifo/pause! fifo value)
-  (unwind-protect 
-      (begin (condvar-lock (fifo-state fifo))
-	(set-fifo-pause! fifo value)
-	(condvar-signal (fifo-state fifo) #t))
-    (condvar-unlock (fifo-state fifo))))
+(define (fifo/pause! fifo rdwr)
+  "Pauses operations on *fifo*. *rdwr* can be READ, WRITE, or READWRITE "
+  "to pause the corresponding operations. A value of #f resumes all operations."
+  (if (not (overlaps? rdwr '{#f read write readwrite}))
+      (irritant rdwr |FIFO/BadPauseArg|)
+      (unwind-protect 
+	  (begin (condvar-lock (fifo-state fifo))
+	    (set-fifo-pause! fifo rdwr)
+	    (condvar-signal (fifo-state fifo) #t))
+	(condvar-unlock (fifo-state fifo)))))
 (define (fifo/paused? fifo) (fifo-pause fifo))
 
 (define (fifo/set-debug! fifo (flag #t)) (set-fifo-debug! fifo flag))

@@ -5,7 +5,7 @@
 
 (use-module '{fifo logger optimize})
 
-(module-export! '{fifo/test/start fifo/test/run})
+(module-export! '{fifo/test/start fifo/test/run test-fifo})
 
 (define %loglevel %info%)
 
@@ -26,23 +26,27 @@
     (loginfo |Pop| "Popped " v " from " fifo))
   (sleep wait))
 
-(define (pusher fifo n sleepfor)
-  (dotimes (i n) (random-push fifo (* sleepfor (random 10)))))
-(define (popper fifo n sleepfor)
-  (dotimes (i n) (random-pop fifo (* sleepfor (random 10)))))
+(define (pusher fifo duration sleepfor (start (elapsed-time)))
+  (while (< (elapsed-time start) duration)
+    (random-push fifo (* sleepfor (random 10)))))
+(define (popper fifo duration sleepfor (start (elapsed-time)))
+  (while (< (elapsed-time start) duration)
+    (random-pop fifo (* sleepfor (random 10)))))
 
-(define (parallel-test fifo (n 10) (sleepfor 1.0))
-  (parallel (pusher fifo n sleepfor)
-	    (pusher fifo n sleepfor)
-	    (popper fifo n sleepfor)
-	    (popper fifo n sleepfor)))
+(define (parallel-test fifo (duration 10) (sleepfor 1.0))
+  (parallel (pusher fifo duration sleepfor)
+	    (pusher fifo duration sleepfor)
+	    (popper fifo duration sleepfor)
+	    (popper fifo duration sleepfor)))
 
-(define (fifo/test/run (n (config 'count 30)) (sleepfor (config 'sleep 0.1)))
+(define (fifo/test/run (n (config 'duration 30)) (sleepfor (config 'sleep 0.1)))
   "This should test pausing"
   (let ((fifo (fifo/make "TESTING")))
     (dotimes (i 25) (random-push fifo 0))
     (let ((wrapper-thread (thread/call parallel-test fifo n sleepfor))
 	  (extreme-size (fifo/waiting fifo))))))
 
-(define (fifo/test/start (n (config 'count 30)) (sleepfor (config 'sleep 0.1)))
-  (thread/call parallel-test test-fifo n sleepfor))
+(define (fifo/test/start (n (config 'duration 30)) (sleepfor (config 'sleep 0.1)))
+  (thread/call parallel-test test-fifo n sleepfor)
+  test-fifo)
+
