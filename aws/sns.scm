@@ -89,7 +89,7 @@
 (define (sns/confirm! topic-arg endpoint token (opts base-opts))
   (let* ((arn (sns/topic topic-arg)))
     (cond ((test (get subscriptions (cons arn endpoint)) 'token token)
-	   (get (get subscriptions (cons arn endpoint))))
+	   (get subscriptions (cons arn endpoint)))
 	  (else
 	   (lognotice |SNS/Confirm|
 	     "Confirming subscription to " arn " at " endpoint)
