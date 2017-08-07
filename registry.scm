@@ -113,7 +113,7 @@
 		     (indexes (registry-index r))
 		     (adjuncts-map (get-adjuncts pools))
 		     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
-		     (dbs {pools indexes adjuncts}))
+		     (dbs (pick {pools indexes adjuncts} {pool? index?})))
 		(when (exists modified? dbs) 
 		  (let ((threads (thread/call+ #[logexit #f] commit dbs))
 			(started (elapsed-time)))
