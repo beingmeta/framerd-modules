@@ -18,16 +18,17 @@
 ;; Percentages
 
 (define (get% num (den #f) (prec 2))
-  (if den
-      (inexact->string (/ (* num 100.0) den) prec)
-      (inexact->string (* num 100.0) prec)))
+  (cond ((zero? den) den)
+	(den (inexact->string (/ (* num 100.0) den) prec))
+	(else (inexact->string (* num 100.0) prec))))
 
 (define (show% num (den #f) (prec 2))
-  (printout
-    (if den
-	(inexact->string (/ (* num 100.0) den) prec)
-	(inexact->string (* num 100.0) prec))
-    "%"))
+  (cond ((not den) (printout (inexact->string (* num 100.0) prec) "%"))
+	((zero? den)
+	 (if (zero? num)
+	     (printout "0%")
+	     (printout num "/0%")))
+	(else (printout (inexact->string (/ (* num 100.0) den) prec) "%"))))
 
 ;;; Padded numbers
 
