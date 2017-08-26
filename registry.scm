@@ -109,27 +109,21 @@
 	 (logwarn |RemoteRegistry|
 	   "No need to save a remote registry")
 	 #f)
-	(else (let* ((pools (registry-pool r))
-		     (indexes (registry-index r))
-		     (adjuncts-map (get-adjuncts pools))
-		     (adjuncts (get adjuncts-map (getkeys adjuncts-map)))
-		     (dbs (pick {pools indexes adjuncts} {pool? index?})))
+	(else (Loginfo |SavingRegistry| r)
+	      (commit (registry-pool r))
+	      (commit (registry-index r))
+	      (let* ((adjuncts-map (get-adjuncts (registry-pool r)))
+		     (dbs (pick (get adjuncts-map (getkeys adjuncts-map)) {pool? index?})))
 		(when (exists modified? dbs) 
-		  (let ((threads (thread/call+ #[logexit #f] commit dbs))
-			(started (elapsed-time)))
-		    (Loginfo |SavingRegistry| r)
-		    (if (exists? threads)
-			(begin (thread/wait threads)
-			  (lognotice |RegistrySaved| 
-			    "Saved registry " r " in " (secs->string (elapsed-time started))))
-			(logwarn |NoRegistry| "Couldn't get a registry to save"))))))))
+		  (Loginfo |SavingAdjuncts| r)
+		  (commit dbs))))))
 
 ;;; The meat of it
 
 (define (registry/get registry slotid value (create #f) (server) (index))
   (default! server (registry-server registry))
   (default! index (registry-index registry))
-  (info%watch "REGISTRY/GET" registry slotid value create server index)
+  (debug%watch "REGISTRY/GET" registry slotid value create server index)
   (if server
       (try (find-frames index slotid value)
 	   (dtcall server 'register slotid value))
@@ -137,8 +131,10 @@
 	(try (get (registry-cache registry) value)
 	     (let* ((bloom (registry-bloom registry))
 		    (key (cons slotid value))
-		    (existing (tryif (or (not bloom) (bloom/check bloom key)) 
-				(find-frames index slotid value)))
+		    (existing 
+		     (pick (tryif (or (not bloom) (bloom/check bloom key)) 
+			     (find-frames index slotid value))
+			   slotid value))
 		    (result (try existing
 				 (tryif create
 				   (frame-create (registry-pool registry)
@@ -146,6 +142,7 @@
 				     '%session (config 'sessionid)
 				     '%created (timestamp)
 				     slotid value)))))
+	       (info%watch "REGISTRY/GET" key bloom existing result)
 	       (when (exists? result)
 		 (when (fail? existing)
 		   (index-frame index result 'has slotid)
