@@ -20,7 +20,8 @@
  '{make-fifo
    fifo-push fifo-pop fifo-jump fifo-loop fifo-queued close-fifo
    fifo-fillfn
-   fifo-load fifo-live? fifo-waiting fifo/waiting
+   fifo-load fifo-live? fifo-waiting fifo-running
+   fifo/waiting
    fifo/idle? fifo/set-debug!})
 
 (define-init %loglevel %warn%)
