@@ -70,9 +70,11 @@
 	  combined))))
 
 (define (handle-sqs-error ex method queue)
-  (newerr+ (and (error-irritant? ex) (error-irritant ex))
-	   (glom "SQS/" method "/Failed") queue
-	   "Received from " (getopt irritant 'effective-url)))
+  (if (error-irritant? ex)
+      (irritant (error-irritant ex) |SQS/Failed|
+	"Received from " method " " queue "@" (getopt irritant 'effective-url))
+      (error |SQS/Failed|
+	  "Received from " method " " queue "@" (getopt irritant 'effective-url))))
 
 (define (get-queue-opts (queue #f) (opts #[]) (qopts))
   (default! qopts (try (tryif queue (get queue-opts queue)) #[]))
@@ -174,10 +176,3 @@
       (set! count (1+ count))
       (set! item (sqs/get queue)))
     count))
-
-
-
-
-
-
-
