@@ -4,7 +4,7 @@
 ;;; Core file for accessing Amazon Web Services
 (in-module 'aws)
 
-(use-module '{logger opts texttools fdweb gpath varconfig})
+(use-module '{logger opts texttools fdweb gpath regex varconfig})
 
 (define-init %loglevel %notice%)
 
@@ -56,11 +56,48 @@
 (define-init aws:expires #f)
 (define-init aws/refresh #f)
 
-(when (config 'aws:config)
-  (if (file-exists? (config 'aws:config))
-      (load-config (config 'aws:config))
-      (logwarn |MissingAWSConfig|
-	"The file " (config 'aws:config) "doesn't exist")))
+;;; Other config info
+
+(define key+secret
+  #((label key (isxdigit+)) "#" (label secret (isxdigit+) ->secret)))
+
+(define (set-aws-config val)
+  (cond ((and (pair? val) (string? (car val))
+	      (or (string? (cdr val)) 
+		  (packet? (cdr val))
+		  (mystery? (cdr val))))
+	 (store! aws:config 'aws:key (car val))
+	 (store! aws:config 'aws:secret (cdr val)))
+	((and (pair? val) (string? (car val))
+	      (pair? (cdr val)) (null? (cddr val))
+	      (or (string? (cadr val)) 
+		  (packet? (cadr val))
+		  (mystery? (cadr val))))
+	 (store! aws:config 'aws:key (car val))
+	 (store! aws:config 'aws:secret (cadr val)))
+	((or (slotmap? val) (schemap? val))
+	 (do-choices (key (getkeys val))
+	   (store! aws:config key (get val key))))
+	((and (string? val) (file-exists? val))
+	 (cond ((has-suffix val {".cfg" ".config"})
+		(load-config val))
+	       ((has-suffix val {".dtype" ".ztype"})
+		(set-aws-config (file->dtype val)))
+	       ((has-suffix val {".lsp" ".lisp" ".lispdat"})
+		(set-aws-config (file->dtype val)))))
+	((and (string? val) (exists? (text->frame key+secret val)))
+	 (let ((match (text->frame key+secret val)))
+	   (store! aws:config 'aws:key (get match 'key))
+	   (store! aws:config 'aws:secret (get match 'secret))))
+	(else (logwarn |BadAWSConfig| val))))
+(define-init aws:config #[])
+(config-def! 'aws:config
+	     (lambda (var (val))
+	       (if (not (bound? val))
+		   aws:config
+		   (set-aws-config val))))
+
+;;; Signature support functions
 
 (define (aws/datesig (date (timestamp)) (spec #{}))
   (unless date (set! date (timestamp)))
@@ -76,7 +113,9 @@
     " Signature=" (packet->base64 (aws/datesig date spec))))
 
 (define (aws/ok? (opts #f) (err #f))
-  (if (or (not opts) (not (getopt opts 'aws:secret)))
+  (if (or (not opts) 
+	  (not (getopt opts 'aws:secret
+		       (getopt aws:config aws:secret))))
       (if (not aws:secret)
 	  (and err (error |NoAWSCredentials| opts))
 	  (or (not aws:expires) (> (difftime aws:expires) 3600)
@@ -207,7 +246,11 @@
 
 (define (xml-error xmlstring)
   (onerror
-      (let ((err (remove-if string? (xmlparse xmlstring '{data slotify}))))
+      (let* ((xmlopts (if (or (regex/search #/<html/i xmlstring)
+			      (regex/search #/<body/i xmlstring))
+			  '{sloppy data slotify}
+			  '{data slotify}))
+	     (err (remove-if string? (xmlparse xmlstring xmlopts))))
 	(when (not (pair? err))
 	  (irritant xmlstring |BadXMLErrorValue|))
 	(store! (car err) 'parsetype 'xml)

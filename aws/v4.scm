@@ -62,22 +62,26 @@
   ((if (curl-handle? curl) curlsetopt! add!) 
    curl 'header (apply glom header ": " args)))
 
-(define (urlop op url curl (payload #f) (payload-mimetype #f))
-  (cond ((equal? op "GET") (urlget url curl))
-	((equal? op "HEAD") (urlhead url curl))
-	((equal? op "POST") (urlpost url curl (or payload "")))
-	((equal? op "PUT") 
-	 (urlput url (or payload "") 
-		 payload-mimetype
-		 curl))
-	(else (urlget url curl))))
+(define (urlop req op url curl (payload #f) (payload-mimetype #f))
+  (onerror
+      (cond ((equal? op "GET") (urlget url curl))
+	    ((equal? op "HEAD") (urlhead url curl))
+	    ((equal? op "POST") (urlpost url curl (or payload "")))
+	    ((equal? op "PUT") 
+	     (urlput url (or payload "") 
+		     payload-mimetype
+		     curl))
+	    (else (urlget url curl)))
+      (lambda (ex)
+	(error AWS/V4/FAILED URLOP url req))))
 
 ;;; Doing a GET with AWS4 authentication
 
 (define (aws/v4/get req endpoint (opts #f)
 		    (args #[]) (headers #[]) (payload #f)
-		    (curl (getcurl)) (date (gmtimestamp))
+		    (curl) (date (gmtimestamp))
 		    (token) (hdrset (make-hashset)))
+  (default! curl (getopt opts 'handle (getcurl)))
   (aws/checkok req)
   (unless date (set! date (gmtimestamp)))
   (default! token
@@ -140,8 +144,9 @@
 		   (args #[]) (headers #[])
 		   (payload #f) (payload-mimetype #f)
 		   (date (gmtimestamp 'seconds))
-		   (curl (getcurl))
+		   (curl)
 		   (token) (hdrset (make-hashset)))
+  (default! curl (getopt opts 'handle (getcurl)))
   (aws/checkok req)
   (unless date (set! date (gmtimestamp 'seconds)))
   (default! token
@@ -215,7 +220,7 @@
 		   " of " (or payload-mimetype "stuff"))
 		 "no payload")
 	     "\n  url: " url "\n  curl: " curl)
-    (let* ((result (urlop op url curl payload payload-mimetype))
+    (let* ((result (urlop req op url curl payload payload-mimetype))
 	   (err (not (getopt req 'noerr (not (getopt opts 'err #t)))))
 	   (status (get result 'response)))
       (info%watch "AWS/V4/RESULT"

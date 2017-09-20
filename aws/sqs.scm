@@ -6,7 +6,9 @@
 (use-module '{aws aws/v4 texttools logger varconfig})
 (define %used_modules '{aws varconfig})
 
-(module-export! '{sqs/get sqs/send sqs/list sqs/info sqs/delete
+(module-export! '{sqs/get sqs/list sqs/info
+		  sqs/send! sqs/delete!
+		  sqs/send sqs/delete
 		  sqs/extend sqs/req/extend
 		  sqs/getn sqs/vacuum})
 
@@ -56,6 +58,7 @@
    (sqs-attrib-pattern "DelaySeconds" 'delay #t)})
 
 (define (handle-sqs-response result (extract (qc sqs-fields)))
+  (debug%watch "handle-sqs-response" result)
   (let* ((combined (frame-create #f
 		     'queue (getopt result '%queue {})
 		     'received (gmtimestamp)))
@@ -86,13 +89,11 @@
     (store! args "WaitTimeSeconds" (getopt opts 'wait)))
   (when (getopt opts 'reserve)
     (store! args "VisibilityTimeout" (getopt opts 'reserve)))
-  (onerror
-      (handle-sqs-response 
-       (aws/v4/op (get-queue-opts queue opts)
-		  "GET" queue opts args))
-    (lambda (ex) (handle-sqs-error ex '|ReceiveMessage| queue))))
+  (handle-sqs-response 
+   (aws/v4/op (get-queue-opts queue opts)
+	      "GET" queue opts args)))
 
-(define (sqs/send queue msg (opts #[]) (args `#["Action" "SendMessage"]))
+(define (sqs/send! queue msg (opts #[]) (args `#["Action" "SendMessage"]))
   (store! args "MessageBody" msg)
   (when (getopt opts 'delay) (store! args "DelaySeconds" (getopt opts 'delay)))
   (onerror
@@ -100,6 +101,8 @@
        (aws/v4/get (get-queue-opts queue opts) queue opts args))
     (lambda (ex)
       (handle-sqs-error ex '|SendMessage| queue))))
+(define (sqs/send queue msg (opts #[]) (args `#["Action" "SendMessage"]))
+  (sqs/send! queue msg opts args))
 
 (define (sqs/list (prefix #f) (args #["Action" "ListQueues"]) (opts #[]))
   (when prefix (set! args `#["Action" "ListQueues" "QueueNamePrefix" ,prefix]))
@@ -119,7 +122,7 @@
     (lambda (ex)
       (handle-sqs-error ex '|GetQueueAttributes| queue))))
 
-(define (sqs/delete message (opts #[]))
+(define (sqs/delete! message (opts #[]))
   (onerror
       (handle-sqs-response
        (aws/v4/get (get-queue-opts (get message 'queue))
@@ -127,6 +130,7 @@
 		   `#["Action" "DeleteMessage" "ReceiptHandle" ,(get message 'handle)]))
     (lambda (ex)
       (handle-sqs-error ex '|DeleteMessage| (get message 'queue)))))
+(define (sqs/delete message (opts #[])) (sqs/delete! message opts))
 
 (define (sqs/extend message secs (opts #[]))
   (onerror
