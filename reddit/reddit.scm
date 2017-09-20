@@ -4,7 +4,7 @@
 (in-module 'reddit)
 
 (use-module '{fdweb texttools reflection varconfig logger})
-(use-module '{oauth registry})
+(use-module '{oauth})
 
 (module-export! '{reddit/creds reddit.creds reddit.opts
 		  reddit/get reddit/post reddit/more 

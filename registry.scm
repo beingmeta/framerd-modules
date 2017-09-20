@@ -19,6 +19,8 @@
 
 (define %loglevel %notice%)
 
+(error 'dontuse)
+
 ;; Not yet used
 (define default-registry #f)
 
