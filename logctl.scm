@@ -1,6 +1,12 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2005-2017 beingmeta, inc.  All rights reserved.
 
+;;; DON'T EDIT THIS FILE !!!
+;;;
+;;; The reference version of this module now in the src/libscm
+;;; directory of the FramerD/KNO source tree. Please edit that file
+;;; instead.
+
 (in-module 'logctl)
 
 ;;; Provides module-level logging control together with the LOGGER file

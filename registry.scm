@@ -3,6 +3,10 @@
 
 (in-module 'registry)
 
+;;; BEFORE UPDATING OR USING THIS FILE NOTE:
+;;; The preferred registry package is now storage/registry, which
+;;;  lives in the libscm of the FramerD implementation.
+
 ;;; Maintaining registries of objects (OIDs) with unique IDs
 
 (use-module '{ezrecords logger varconfig})
