@@ -76,7 +76,7 @@
   (if (error-irritant? ex)
       (irritant (error-irritant ex) |SQS/Failed|
 	"Received from " method " " queue "@" (getopt (error-irritant ex) 'effective-url))
-      (error |SQS/Failed| "Received from " method " " queue)))
+      (err |SQS/Failed| "Received from " method " " queue)))
 
 (define (get-queue-opts (queue #f) (opts #[]) (qopts))
   (default! qopts (try (tryif queue (get queue-opts queue)) #[]))
