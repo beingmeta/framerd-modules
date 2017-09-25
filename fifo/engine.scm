@@ -19,6 +19,16 @@
 	(set! start (+ start step))))
     (reverse (->vector batchlist))))
 
+;;; We make this handler unique right now, but it could be engine specific.
+(define-init bump-loop-state
+  (slambda (loop-state (count #f) (thread-time #f))
+    (when thread-time
+      (store! loop-state 'count 
+	      (+ (getopt loop-state 'count 0) count)))
+    (when thread-time
+      (store! loop-state 'vtime 
+	      (+ (getopt loop-state 'vtime 0.0) thread-time)))))
+
 (define (batch-step fcn fifo opts loop-state state
 		    beforefn afterfn progressfn)
   (let* ((batch (fifo/pop fifo))
@@ -30,6 +40,7 @@
       (do-choices (item batch) (fcn item))
       (when afterfn
 	(if state (afterfn (qc batch) state) (afterfn (qc batch))))
+      (bump-loop-state loop-state (choice-size batch) (elapsed-time start))
       (when progressfn
 	(if state
 	    (progressfn (choice-size batch) (elapsed-time start) state)
@@ -40,13 +51,20 @@
 (defambda (fifo/engine fcn items (opts #f))
   (let* ((batchsize (getopt opts 'batchsize (config 'batchsize 10000)))
 	 (nthreads (mt/threadcount (getopt opts 'nthreads (config 'nthreads #t))))
+	 (spacing (getopt opts 'spacing 
+			  (and nthreads (> nthreads 1)
+			       (/~ nthreads (ilog nthreads)))))
 	 (batches (batchup items batchsize nthreads))
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
 	 (progress (getopt opts 'progress #f))
+	 (loop-state (frame-create #f
+		       'started (elapsed-time)
+		       'total (choice-size items)
+		       'n-batches (length batches)
+		       'monitors (getopt opts 'monitors {})))
 	 (state (getopt opts 'state #f))
-	 (loop-state #[])
 	 (threads {})
 	 (count 0))
     (when (and nthreads (> nthreads (length batches)))
@@ -62,7 +80,7 @@
 	    fcn fifo opts 
 	    loop-state state 
 	    before after progress)
-	(sleep nthreads)))
+	(when spacing (sleep spacing))))
     (thread/wait threads)
     (commit)))
 
@@ -89,6 +107,24 @@
 (define (engine/savetable table file)
   (ambda (keys (state #f)) (dtype->file table file)))
 
-(module-export! '{engine/fetchoids engine/fetchkeys 
+(define (engine/interval interval)
+  (let ((last (elapsed-time)))
+    (slambda ((loop-state #f) (state #f))
+      (cond ((> (elapsed-time last) interval)
+	     (set! last (elapsed-time))
+	     #t)
+	    (else #f)))))
+
+(define (engine/memgrowth delta)
+  (let ((last (memusage)))
+    (slambda ((loop-state #f) (state #f)) 
+      (cond ((> (- (memusage) last) delta)
+	     (set! last (memusage))
+	     #t)
+	    (else #f)))))
+
+(module-export! '{engine/interval engine/memgrowth
+		  engine/fetchoids engine/fetchkeys 
 		  engine/poolfetch engine/indexfetch engine/swapout 
 		  engine/savepool engine/saveindex engine/savetable})
+
