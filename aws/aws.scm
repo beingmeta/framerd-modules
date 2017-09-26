@@ -71,7 +71,7 @@
 		  (secret? (cdr val))))
 	 (store! aws:config 'aws:key (car val))
 	 (store! aws:config 'aws:secret (cdr val)))
-	((and (pair? val) (key secret)
+	((and (pair? val)
 	      (or (string? (car val))
 		  (packet? (car val))
 		  (secret? (car val)) (car val))
@@ -85,7 +85,7 @@
 	 ;; #[aws:key vvv aws:secret sss ... ] or
 	 ;; #[key vvv secret sss ... ]
 	 (do-choices (key (getkeys val))
-	   (store! aws:config key (get val key)))
+	   (store! aws:config 'aws:key (get val key)))
 	 (when (and (test val 'key) (not (test val 'aws:key))) 
 	   (store! aws:config 'aws:key (get val 'key)))
 	 (when (and (test val 'secret) (not (test val 'aws:secret))) 
