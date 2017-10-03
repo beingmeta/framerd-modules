@@ -59,18 +59,22 @@
 
 (define (handle-sqs-response result (extract (qc sqs-fields)))
   (debug%watch "handle-sqs-response" result)
-  (let* ((combined (frame-create #f
-		     'queue (getopt result '%queue {})
-		     'received (gmtimestamp)))
-	 (content (getopt result '%content))
-	 (fields (tryif content (text->frames extract content))))
-    (if (or (fail? fields) (fail? (get fields 'msgid)))
-	(begin (debug%watch content fields) #f)
-	(begin (debug%watch fields)
-	  (do-choices (field fields)
-	    (do-choices (key (getkeys field))
-	      (add! combined key (get field key))))
-	  combined))))
+  (if (and result (table? result) (test result 'response)
+	   (>= 299 (get result 'response) 200))
+      (let* ((combined (frame-create #f
+			 'queue (getopt result '%queue {})
+			 'received (gmtimestamp)))
+	     (content (getopt result '%content))
+	     (fields (tryif content (text->frames extract content))))
+	(if (or (fail? fields) (fail? (get fields 'msgid)))
+	    (begin (debug%watch content fields) #f)
+	    (begin (debug%watch fields)
+	      (do-choices (field fields)
+		(do-choices (key (getkeys field))
+		  (add! combined key (get field key))))
+	      combined)))
+      (begin (logwarn |SQSFailure| result)
+	#f)))
 
 (define (handle-sqs-error ex method queue)
   (if (error-irritant? ex)
@@ -80,7 +84,7 @@
 
 (define (get-queue-opts (queue #f) (opts #[]) (qopts))
   (default! qopts (try (tryif queue (get queue-opts queue)) #[]))
-  (frame-create #f '%queue (tryif queue queue)))
+  (frame-create #f '%queue (tryif queue queue) 'err #f))
 
 (define (sqs/get queue (opts #[])
 		 (args `#["Action" "ReceiveMessage" "AttributeName.1" "all"]))
