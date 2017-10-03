@@ -60,8 +60,8 @@
 (define (handle-sqs-response result (opts #f) (extract))
   (default! extract (getopt opts 'extract sqs-fields))
   (debug%watch "handle-sqs-response" result)
-  (if (and result (table? result) (test result 'response)
-	   (>= 299 (get result 'response) 200))
+  (if (and result (table? result) (getopt result 'response)
+	   (>= 299 (getopt result 'response) 200))
       (let* ((combined (frame-create #f
 			 'queue (getopt result '%queue {})
 			 'received (gmtimestamp)))
