@@ -57,7 +57,8 @@
    (sqs-attrib-pattern "ReceiveMessageWaitTimeSeconds" 'timeout #t)
    (sqs-attrib-pattern "DelaySeconds" 'delay #t)})
 
-(define (handle-sqs-response result (extract (qc sqs-fields)))
+(define (handle-sqs-response result (opts #f) (extract))
+  (default! extract (getopt opts 'extract sqs-fields))
   (debug%watch "handle-sqs-response" result)
   (if (and result (table? result) (test result 'response)
 	   (>= 299 (get result 'response) 200))
@@ -73,7 +74,7 @@
 		(do-choices (key (getkeys field))
 		  (add! combined key (get field key))))
 	      combined)))
-      (begin (logwarn |SQSFailure| result)
+      (begin (when (getopt opts 'logerr #t) (loginfo |SQSFailure| result))
 	#f)))
 
 (define (handle-sqs-error ex method queue)
@@ -94,7 +95,8 @@
     (store! args "VisibilityTimeout" (getopt opts 'reserve)))
   (handle-sqs-response 
    (aws/v4/op (get-queue-opts queue opts)
-	      "GET" queue opts args)))
+	      "GET" queue opts args)
+   (cons #[logerr #f] opts)))
 
 (define (sqs/send! queue msg (opts #[]) (args `#["Action" "SendMessage"]))
   (store! args "MessageBody" msg)
