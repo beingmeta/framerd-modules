@@ -73,7 +73,8 @@
 		     curl))
 	    (else (urlget url curl)))
       (lambda (ex)
-	(newerr AWS/V4/FAILED URLOP url req))))
+	(error AWS/V4/FAILED URLOP req 
+	  "Calling " op " on " url " given handle " curl))))
 
 ;;; Doing a GET with AWS4 authentication
 
