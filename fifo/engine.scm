@@ -73,6 +73,7 @@
 			  (and nthreads (> nthreads 1)
 			       (/~ nthreads (ilog nthreads)))))
 	 (batches (batchup items batchsize nthreads))
+	 (rthreads (if (and nthreads (> nthreads (length batches))) (length batches) nthreads))
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
@@ -89,15 +90,14 @@
 		       'opts opts))
 	 (threads {})
 	 (count 0))
-    (when (and nthreads (> nthreads (length batches)))
-      (set! nthreads (length batches)))
+    
     (lognotice |FIFOEngine| 
       "Processing " ($count (choice-size items)) " items "
       "in " ($count (length batches)) " batches " 
       "of up to " nthreads " ❌ " batchsize " items "
-      "using " nthreads " threads "
+      "using " rthreads " threads "
       "with\n   " fcn)
-    (dotimes (i nthreads)
+    (dotimes (i rthreads)
       (set+! threads 
 	(thread/call batch-step 
 	    fcn fifo opts 
