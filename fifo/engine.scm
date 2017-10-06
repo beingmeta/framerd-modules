@@ -105,7 +105,11 @@
 	    before after progress stop)
 	(when spacing (sleep spacing))))
     (thread/wait threads)
-    (commit)))
+    (if (getopt opts 'skipcommit)
+	(lognotice |FIFOEngine| "Skipping final commit for FIFO/ENGINE call")
+	(begin
+	  (lognotice |FIFOEngine| "Doing final commit for FIFO/ENGINE")
+	  (commit)))))
 
 (define (engine/fetchoids oids (state #f))
   (prefetch-oids! oids))
