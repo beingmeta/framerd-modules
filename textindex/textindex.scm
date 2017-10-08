@@ -25,8 +25,7 @@
 ;;;; Simple text analysis
 
 (defambda (textanalyze text
-		       wordrule
-		       stopcache stopwords stoprules
+		       wordrule stopcache stopwords stoprules
 		       rootcache rootset rootmaps rootfns morphrules
 		       phrasemap nameinfo srules xrules xfns
 		       options)
@@ -34,7 +33,7 @@
   ;;  and keep state on the stack
   (for-choices text
     ;; Extract features
-    (let* ((wordv (->vector (gather->list wordrule text)))
+    (let* ((wordv (->vector (gather->list (qc wordrule) text)))
 	   (stopv (forseq (word wordv)
 		    (and (try (get stopcache word) 
 			      (stopcheck word stopcache stopwords stoprules))
@@ -165,8 +164,12 @@
 
 (define (text/keystrings text (options #[]))
   (info%watch "TEXT/KEYSTRINGS" settings)
-  (textanalyze text (try (getopt options 'wordrule
-				 (get text-settings 'default-word-rule)))
+  (textanalyze text
+	       (getopt options 'wordrule
+		       (difference
+			(choice (getopt options '+wordrule {})
+				(get text-settings 'wordrule))
+			(getopt options '-wordrule {})))
 	       (try (getopt options 'stopcache {}) (make-hashtable))
 	       (choice (getopt options 'stopwords {})
 		       (get text-settings 'stopwords))
@@ -203,7 +206,7 @@
 (defambda (text/analyze passages options)
   ;; (info%watch "TEXT/ANALYZE" options)
   (let* ((allkeys (make-hashset))
-	 (text/settings
+	 (settings
 	  (try (getopt options 'text/settings {})
 	       (text/settings (getopt options 'language))
 	       (text/settings (getopt options 'lang))
@@ -211,7 +214,7 @@
 	 (options (cons #[trackposs #t] options))
 	 (localopts (car options))
 	 (table (make-hashtable))
-	 (wordrule (getopt options 'wordrule (get text/settings 'wordrule)))
+	 (wordrule (getopt options 'wordrule (get settings 'wordrule)))
 	 (stopcache (try (getopt options 'stopcache) (make-hashtable)))
 	 (stopwords (choice (getopt options 'stopwords {})
 			    (get text/settings 'stopwords)))
@@ -280,11 +283,29 @@
 
 ;;; Default rules
 
+(define uri-schemes {"https" "http" "ftp" "imap"})
+
 (define default-word-rule
-  '(GREEDY {(isalnum+)
+  `(GREEDY {(isalnum+)
 	    #((isalpha+) "'" (isalpha+))
 	    #((isalnum) (+ #("." (isalnum+))) (opt "."))
-	    (ispunct+)}))
+	    (ispunct+)
+	    ;; URI
+	    #(,uri-schemes "://" 
+	      ;; Credentials (opt)
+	      (opt #((not> ":") ":" (not> "@") "@"))
+	      ;; Host (required)
+	      (+ #((isalnum+) ".")) (isalnum+)
+	      (opt #(":" (isdigit+)))
+	      ;; Path 
+	      (* #("/" (not> {"/" "#" "?"})))
+	      (not> {"?" "#"})
+	      (opt #("?" (not> "#")))
+	      (opt #("#" (rest))))
+	    ;; Email address
+	    #((+ {#(isalnum+) "." "-" "_"}) "@"
+	      (+ #((isalnum+) ".")) (isalnum+))
+	    }))
 
 (define consrules
   (for-choices (letter {"p" "t" "b" "m" "r" "d"})
