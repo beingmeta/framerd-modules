@@ -3,11 +3,14 @@
 
 (in-module 'fifo/engine)
 
-(use-module '{fifo mttools stringfmts logger})
+(use-module '{fifo varconfig mttools stringfmts reflection logger})
 
 (define %loglevel %notice%)
 
 (module-export! '{fifo/engine})
+
+(define engine-log-frequency 60)
+(varconfig! engine:logfreq engine-log-frequency)
 
 ;;; This divides a big set (choice) of items into smaller buckets.
 ;;; The buckets (except for the last one) are all some multiple of
@@ -26,7 +29,8 @@
 ;;; We make this handler unique right now, but it could be engine specific.
 (define-init bump-loop-state
   (slambda (loop-state (count #f) (thread-time #f))
-    (when thread-time
+    (store! loop-state 'batches (1+ (getopt loop-state 'batches 0)))
+    (when count
       (store! loop-state 'count 
 	      (+ (getopt loop-state 'count 0) count)))
     (when thread-time
@@ -44,7 +48,9 @@
       (when afterfn (afterfn (qc batch) loop-state))
       (bump-loop-state loop-state (choice-size batch) (elapsed-time start))
       (when progressfn
-	(progressfn (qc batch) (elapsed-time start) loop-state))
+	(if (= (procedure-arity progressfn) 1)
+	    (progressfn loop-state)
+	    (progressfn (qc batch) (elapsed-time start) loop-state)))
       (if (and stopfn (stopfn loop-state))
 	  (set! batch {})
 	  (let ((monitors (getopt opts 'monitors {})))
@@ -72,7 +78,9 @@
 	 (spacing (getopt opts 'spacing 
 			  (and nthreads (> nthreads 1)
 			       (/~ nthreads (ilog nthreads)))))
-	 (batches (batchup items batchsize nthreads))
+	 (batches (if (= batchsize 1)
+		      (choice->vector items)
+		      (batchup items batchsize nthreads)))
 	 (rthreads (if (and nthreads (> nthreads (length batches))) (length batches) nthreads))
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
 	 (before (getopt opts 'before #f))
@@ -91,10 +99,26 @@
 	 (threads {})
 	 (count 0))
     
+    (unless (and (applicable? fcn)
+		 (= (procedure-min-arity fcn) 1))
+      (irritant fcn |ENGINE/InvalidLoopFn| fifo/engine))
+    (when progress
+      (unless (and (applicable? progress)
+		   (or (= (procedure-arity progress) 1)
+		       (= (procedure-arity progress) 3)))
+	(irritant progress |ENGINE/InvalidProgressFn| fifo/engine)))
+    (when before
+      (unless (and (applicable? before) (= (procedure-min-arity before) 2))
+	(irritant before |ENGINE/InvalidBeforeFn| fifo/engine)))
+    (when after
+      (unless (and (applicable? after) (= (procedure-min-arity after) 2))
+	(irritant before |ENGINE/InvalidBeforeFn| fifo/engine)))
+
     (lognotice |FIFOEngine| 
       "Processing " ($count (choice-size items)) " items "
-      "in " ($count (length batches)) " batches " 
-      "of up to " nthreads " ❌ " batchsize " items "
+      (when (and batchsize (> batchsize 1))
+	(printout "in " ($count (length batches)) " batches " 
+	  "of up to " nthreads " ❌ " batchsize " items "))
       "using " rthreads " threads "
       "with\n   " fcn)
     (dotimes (i rthreads)
@@ -111,12 +135,24 @@
 	  (lognotice |FIFOEngine| "Doing final commit for FIFO/ENGINE")
 	  (commit)))))
 
+;;;; Utility functions
+
 (define (engine/fetchoids oids (state #f))
   (prefetch-oids! oids))
 (define (engine/fetchkeys oids (state #f))
   (prefetch-keys! oids))
 (define (engine/swapout args (state #f))
   (swapout args))
+
+(define (engine/progress loop-state)
+  (lognotice |Progress| 
+    "Processed " ($num (get loop-state 'count)) " items in " 
+    ($num (get loop-state 'batches)) " after "
+    (secs->string (elapsed-time (get loop-state 'started)))))
+
+(module-export! '{engine/fetchoids engine/fetchkeys engine/progress})
+
+;;;; Utility meta-functions
 
 (define (engine/poolfetch pool)
   (ambda (oids (state #f)) (pool-prefetch! pool oids)))
@@ -133,7 +169,7 @@
 (define (engine/savetable table file)
   (ambda (keys (loop-state #f)) (dtype->file table file)))
 
-(define (engine/interval interval)
+(define (engine/interval interval (last (elapsed-time)))
   (slambda ((loop-state #f))
     (cond ((> (elapsed-time last) interval)
 	   (set! last (elapsed-time))
@@ -154,30 +190,82 @@
 	     #t)
 	    (else #f)))))
 
-(define (optconf opts prop (dflt #f) (use-config))
-  (default! use-config
-    (getopt opts 'useconfig (not (getopt opts 'noconfig #f))))
-  (if use-config
-      (getopt opts prop (and use-config (config prop dflt)))
-      (getopt opts prop dflt)))
-
 (define (engine/stopfn (opts #f))
   (let ((maxtime (getopt opts 'maxtime #f))
 	(maxcount (getopt opts 'maxcount #f))
+	(maxbatches (getopt opts 'maxbatches #f))
 	(maxmem (getopt opts 'maxmem #f))
-	(maxload (getopt opts 'maxload #f)))
+	(maxvmem (getopt opts 'maxvmem #f))
+	(maxload (getopt opts 'maxload #f))
+	(stopfile (getopt opts 'stopfile #f))
+	(stopconf (getopt opts 'stopconf #f)))
     (lambda (loop-state)
       (or (test loop-state 'stopped)
-	  (and (or (and maxtime 
+	  (and (or (and maxcount (> (get loop-state 'count) maxcount))
+		   (and maxbatches (> (get loop-state 'batches) maxbatches))
+		   (and maxtime 
 			(> (elapsed-time (get loop-state 'started))
 			   maxtime))
-		   (and maxcount (> (get loop-state 'count) maxcount))
-		   (and maxload (> (rusage 'load) maxload)))
-	       (begin (store! loop-state 'stopped)
+		   (and maxload
+			(if (number? maxload)
+			    (> (getload) maxload)
+			    (and (vector? maxload) (= (length maxload) 1)
+				 (number? (elt maxload 0))
+				 (every? (lambda (loadval) (> loadval (elt maxload 0)))
+					 (rusage 'loadavg)))))
+		   (and maxvmem (> (vmemusage) maxvmem))
+		   (and maxmem (> (memusage) maxmem))
+		   (and stopfile (file-exists? stopfile))
+		   (and stopconf (config stopconf)))
+	       (begin (store! loop-state 'stopped (timestamp))
 		 #t))))))
 
-(module-export! '{engine/interval engine/memgrowth engine/stopfn
-		  engine/fetchoids engine/fetchkeys 
+(define (engine/callif (opts #f) call)
+  (if (not (and (applicable? call) (overlaps? (procedure-arity call) {1 0})))
+      (irritant call |NotApplicable| engine/callif)
+      (let ((maxtime (getopt opts 'maxtime #f))
+	    (maxcount (getopt opts 'maxcount #f))
+	    (maxbatches (getopt opts 'maxbatches #f))
+	    (maxmem (getopt opts 'maxmem #f))
+	    (maxvmem (getopt opts 'maxvmem #f))
+	    (filename (getopt opts 'filename #f))
+	    (confname (getopt opts 'confname #f))
+	    (maxload (getopt opts 'maxload #f))
+	    ;; Keep at least *interval* seconds between calls
+	    (interval (getopt opts 'interval 1))
+	    (last-call #f))
+	(let ((clear?
+	       (slambda ()
+		 (cond ((not interval) #t)
+		       ((< (elapsed-time last-call) interval) #f)
+		       (else (set! last-call (elapsed-time)) #t)))))
+	  (lambda (loop-state)
+	    (unless last-call
+	      (set! last-call (getopt loop-state 'started (elapsed-time))))
+	    (when (or (not interval) 
+		      (and (> (elapsed-time last-call) interval) (clear?)))
+	      (when (or (and maxcount (> (get loop-state 'count) maxcount))
+			(and maxbatches (> (get loop-state 'batches) maxbatches))
+			(and maxtime 
+			     (> (elapsed-time (get loop-state 'started))
+				maxtime))
+			(and maxvmem (> (vmemusage) maxvmem))
+			(and maxmem (> (memusage) maxmem))
+			(and maxload
+			     (if (number? maxload)
+				 (> (getload) maxload)
+				 (and (vector? maxload) (= (length maxload) 1)
+				      (number? (elt maxload 0))
+				      (every? (lambda (loadval) (> loadval (elt maxload 0)))
+					      (rusage 'loadavg)))))
+			(and confname (config confname))
+			(and filename (file-exists? filename)))
+		(if (zero? (procedure-arity call))
+		    (call)
+		    (call loop-state)))))))))
+
+(module-export! '{engine/stopfn engine/callif
+		  engine/interval engine/memgrowth 
 		  engine/poolfetch engine/indexfetch engine/swapout 
 		  engine/savepool engine/saveindex engine/savetable
 		  engine/maxitems})
