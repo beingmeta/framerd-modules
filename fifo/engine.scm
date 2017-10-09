@@ -100,7 +100,7 @@
 	 (count 0))
     
     (unless (and (applicable? fcn)
-		 (= (procedure-min-arity fcn) 1))
+		 (= (procedure-arity fcn) 1))
       (irritant fcn |ENGINE/InvalidLoopFn| fifo/engine))
     (when progress
       (unless (and (applicable? progress)
@@ -108,10 +108,10 @@
 		       (= (procedure-arity progress) 3)))
 	(irritant progress |ENGINE/InvalidProgressFn| fifo/engine)))
     (when before
-      (unless (and (applicable? before) (= (procedure-min-arity before) 2))
+      (unless (and (applicable? before) (= (procedure-arity before) 2))
 	(irritant before |ENGINE/InvalidBeforeFn| fifo/engine)))
     (when after
-      (unless (and (applicable? after) (= (procedure-min-arity after) 2))
+      (unless (and (applicable? after) (= (procedure-arity after) 2))
 	(irritant before |ENGINE/InvalidBeforeFn| fifo/engine)))
 
     (lognotice |FIFOEngine| 
