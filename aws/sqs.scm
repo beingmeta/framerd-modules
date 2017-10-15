@@ -77,10 +77,11 @@
       (begin (when (getopt opts 'logerr #t) (loginfo |SQSFailure| result))
 	#f)))
 
-(define (handle-sqs-error ex method queue)
-  (if (error-irritant? ex)
-      (irritant (error-irritant ex) |SQS/Failed|
-	"Received from " method " " queue "@" (getopt (error-irritant ex) 'effective-url))
+(define (handle-sqs-error ex method queue (trouble))
+  (default! trouble
+    (and (error-irritant? ex) (error-irritant ex)))
+  (if irritant
+      (irritant trouble |SQS/Failed| "Received from " method " " queue)
       (error |SQS/Failed| "Received from " method " " queue)))
 
 (define (get-queue-opts (queue #f) (opts #[]) (qopts))
