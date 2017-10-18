@@ -128,14 +128,26 @@
     (lambda (ex)
       (handle-sqs-error ex '|GetQueueAttributes| queue))))
 
-(define (sqs/delete! message (opts #[]))
+(define (sqs/delete! message (opts #[]) (queue) (handle))
+  (cond ((and (pair? message) (string? (car message)))
+	 (set! queue (car message))
+	 (set! handle (cdr message)))
+	((and (string? message) (has-prefix message "https:")
+	      (position #\| message))
+	 (set! queue (slice message 0 (position #\| message)))
+	 (set! handle (slice message (1+ (position #\| message)))))
+	((and (table? message) (test message 'queue) (test message 'handle)
+	      (string? (get message 'queue))
+	      (string? (get message 'handle)))
+	 (set! queue (get message 'queue))
+	 (set! handle (get message 'handle)))
+	(else (irritant message |BadSQSRef| sqs/delete!)))
   (onerror
       (handle-sqs-response
-       (aws/v4/get (get-queue-opts (get message 'queue))
-		   (get message 'queue) opts
-		   `#["Action" "DeleteMessage" "ReceiptHandle" ,(get message 'handle)]))
-    (lambda (ex)
-      (handle-sqs-error ex '|DeleteMessage| (get message 'queue)))))
+       (aws/v4/get (get-queue-opts queue) queue opts
+		   `#["Action" "DeleteMessage" "ReceiptHandle" ,handle]))
+      (lambda (ex)
+	(handle-sqs-error ex '|DeleteMessage| (get message 'queue)))))
 (define (sqs/delete message (opts #[])) (sqs/delete! message opts))
 
 (define (sqs/extend message secs (opts #[]))
