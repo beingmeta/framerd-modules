@@ -240,38 +240,38 @@ slot of the loop state.
   (swapout args))
 
 (define (engine/progress batch proctime time batch-state loop-state state)
-  (let ((count (get loop-state 'count))
-	(loopmax (getopt loop-state 'total))
-	(total (getopt state 'total))
-	(taskmax (getopt state 'total))
-	(%loglevel (getopt loop-state '%loglevel %loglevel)))
+  (let* ((count (get loop-state 'count))
+	 (loopmax (getopt loop-state 'total))
+	 (total (getopt state 'total))
+	 (taskmax (getopt state 'total))
+	 (rate (/~ (get loop-state 'count) (elapsed-time (get loop-state 'started))))
+	 (%loglevel (getopt loop-state '%loglevel %loglevel)))
     (loginfo |Batch/Progress| 
       "Processed " ($num (choice-size batch)) " items in " 
       (secs->string (elapsed-time (get batch-state 'started))) " or ~"
-      ($num (round (/~ (choice-size batch) (elapsed-time (get batch-state 'started)))))
+      ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
       " items/second for this batch and thread.")
     (lognotice |Engine/Progress| 
       "Processed " ($num (get loop-state 'count)) " items" 
       (when loopmax
 	(printout " (" (show% (get loop-state 'count) loopmax) " of "
 	  ($num loopmax) ")"))
-      " in " (secs->string (elapsed-time (get loop-state 'started))) ". "
-      "Averaging " 
-      ($num (round (/~ (get loop-state 'count) (elapsed-time (get loop-state 'started)))))
-      " items/second in this loop. "
-      (when loopmax
-	(let* ((rate (/~ (get loop-state 'count) (elapsed-time )))
-	       (togo (- loopmax count))
-	       (timeleft (/~ togo rate))
-	       (finished (timestamp+ timeleft)))
-	  (printout "\nAt this range, the loop's " ($num loopmax) " items should be finished in "
-	    "~" (secs->string timeleft) " (~"
-	    (get finished 'timestring) " "
-	    (cond ((equal? (get (timestamp) 'datestring) (get finished 'datestring)))
-		  ((< (difftime finished) (* 24 3600)) "tomorrow")
-		  ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
-		  (else (get finished 'rfc822date)))
-	    ")"))))))
+      " in " (secs->string (elapsed-time (get loop-state 'started))) 
+      (cond (loopmax
+	     (let* ((togo (- loopmax count))
+		    (timeleft (/~ togo rate))
+		    (finished (timestamp+ timeleft)))
+	       (printout "\nAt " (->exact rate 0) " items/sec, "
+		 "the loop's " ($num loopmax) " items should be finished in "
+		 "~" (secs->string timeleft) " (~"
+		 (get finished 'timestring) " "
+		 (cond ((equal? (get (timestamp) 'datestring) (get finished 'datestring)))
+		       ((< (difftime finished) (* 24 3600)) "tomorrow")
+		       ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
+		       (else (get finished 'rfc822date)))
+		 ")")))
+	    (else (printout ", averaging " 
+		    ($num (->exact rate 0)) " items/second in this loop. "))))))
 
 (module-export! '{engine/fetchoids engine/fetchkeys engine/progress})
 
