@@ -18,9 +18,12 @@
 
 (module-export!
  '{make-fifo
-   fifo-push fifo-pop fifo-jump fifo-loop fifo-queued close-fifo
+   fifo-push fifo-pop
+   fifo-loop fifo-jump
+   fifo-queued close-fifo
    fifo-fillfn
-   fifo-load fifo-live? fifo-waiting fifo-running
+   fifo-live?
+   fifo-size fifo-waiting fifo-running
    fifo/waiting
    fifo/idle? fifo/set-debug!})
 
@@ -381,12 +384,13 @@
 (define (fifo-queued fifo) (fifo/queued fifo))
 
 (define (fifo/load fifo)
-  "Returns the number of queued items in *fifo*"
+  "Returns the number of queued items in *fifo*, locking to compute it"
   (unwind-protect
       (begin (condvar-lock (fifo-condvar fifo))
 	     (- (fifo-end fifo) (fifo-start fifo)))
     (condvar-unlock (fifo-condvar fifo))))
 (define (fifo-load fifo) (- (fifo-end fifo) (fifo-start fifo)))
+(define (fifo-size fifo) (length (fifo-queue fifo)))
 
 (define (fifo/wait fifo (state))
   "Waits for something about *fifo* to change."
