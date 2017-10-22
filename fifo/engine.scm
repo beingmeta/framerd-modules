@@ -245,8 +245,11 @@ slot of the loop state.
 	 (total (getopt state 'total))
 	 (taskmax (getopt state 'total))
 	 (rate (/~ (get loop-state 'count) (elapsed-time (get loop-state 'started))))
-	 (%loglevel (getopt loop-state '%loglevel %loglevel)))
+	 (%loglevel (getopt loop-state '%loglevel %loglevel))
+	 (fifo (getopt loop-state 'fifo)))
     (loginfo |Batch/Progress| 
+      (when (testopt (fifo-opts fifo) 'static)
+	(printout "(" (show% (fifo-load fifo) (fifo-size fifo) 2)") "))
       "Processed " ($num (choice-size batch)) " items in " 
       (secs->string (elapsed-time (get batch-state 'started))) " or ~"
       ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
