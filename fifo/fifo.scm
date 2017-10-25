@@ -9,23 +9,36 @@
 (define %used_modules 'ezrecords)
 
 (module-export!
- '{fifo/make fifo/opts fifo/close!
+ '{fifo/make fifo/close!
    fifo/pop fifo/remove!
-   fifo/push! fifo/push/n! fifo/jump! 
-   fifo/wait fifo/pause! fifo/paused?
+   fifo/push!
+   fifo/push/n!
+   fifo/jump! 
+   fifo/wait
+   fifo/pause!
+   fifo/paused?
    fifo/exhausted!
-   fifo/loop fifo/queued fifo/load})
+   fifo/loop
+   fifo/queued
+   fifo/load})
 
 (module-export!
  '{make-fifo
-   fifo-push fifo-pop
-   fifo-loop fifo-jump
-   fifo-queued close-fifo
+   fifo-push
+   fifo-pop
+   fifo-loop
+   fifo-jump
+   fifo-queued
+   close-fifo
    fifo-fillfn
+   fifo-opts
    fifo-live?
-   fifo-size fifo-waiting fifo-running
+   fifo-size
+   fifo-waiting
+   fifo-running
    fifo/waiting
-   fifo/idle? fifo/set-debug!})
+   fifo/idle?
+   fifo/set-debug!})
 
 (define-init %loglevel %warn%)
 
