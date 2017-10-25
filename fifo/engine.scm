@@ -7,9 +7,9 @@
 
 (define %loglevel %notice%)
 
-(module-export! '{fifo/engine})
+(module-export! '{fifo/engine engine/getopt})
 
-(define engine-log-frequency 60)
+(define log-frequency 60)
 (varconfig! engine:logfreq engine-log-frequency)
 
 (define fifo-condvar (within-module 'fifo fifo-condvar))
@@ -31,12 +31,12 @@
 
 ;;; The engine uses a FIFO of batches and a pool of threads pulling
 ;;; batches from the FIFO and processing them. For a single batch,
-;;; there can be serveral phases (this is implemented by BATCH-STEP).
+;;; there can be serveral phases (this is implemented by ENGINE-THREADFN).
 
 #|Markdown
 
 1. BEFOREFN is called on the batch, the batch-state, the loop-state, and the
-   task state)
+task state)
 
 2. PROCESSFN is the item function itself. It is called on each element
 of the batch. If it takes two arguments, it is called on the item and
@@ -44,7 +44,7 @@ the batch state. If it takes 4 arguments, it is called on the item,
 batch state, loop state, and task state.
 
 3. AFTERFN is called on the batch, the batch-state, the loop-state, and the
-   task state)
+task state)
 
 4. The 'loop state' is then 'bumped'. This updates the total
 'count' (number of items processed), total 'batches' (number of
@@ -52,12 +52,12 @@ batches processed), and 'vtime' (how much realtime this thread spent
 on the batch).
 
 5. LOGFN is then called on:
- * the items processed;
- * the clock time spent on PROCESS
- * the clock time spent on BEFORE+PROCESS+AFTER
- * the batch state
- * the loop state
- * the task state
+* the items processed;
+* the clock time spent on PROCESS
+* the clock time spent on BEFORE+PROCESS+AFTER
+* the batch state
+* the loop state
+* the task state
 
 5. The STOPFNs are then called and if any return non-false, the loop
 'stops'. This means that the current thread stops processing batches
@@ -103,28 +103,32 @@ slot of the loop state.
       (store! loop-state 'vtime 
 	      (+ (getopt loop-state 'vtime 0.0) thread-time)))))
 
+(defambda (engine/getopt loop-state optname (default #f))
+  (getopt loop-state optname
+	  (getopt (getopt loop-state 'state) optname
+		  (getopt loop-state 'opts) optname
+		  default)))
+
 (define (dolog? fifo loop-state (freq))
-  (default! freq 
-    (getopt loop-state 'logfreq 
-	    (getopt (getopt loop-state 'state) 'logfreq
-		    log-frequency)))
+  (default! freq (try (get loop-state 'logfreq) #f))
   (with-lock (fifo-condvar fifo)
     (cond ((not freq) #t)
 	  ((not (getopt loop-state 'lastlog))
 	   (store! loop-state 'lastlog (elapsed-time))
-	   #t)
+	   ;; Don't do the first log report because it's almost certainly short
+	   #f)
 	  ((> (elapsed-time (getopt loop-state 'lastlog)) freq)
 	   (store! loop-state 'lastlog (elapsed-time))
 	   #t)
 	  (else #f))))
 
-(define (batch-step iterfn fifo opts loop-state state
-		    beforefn afterfn logfn
-		    stopfn monitors)
+(define (engine-threadfn iterfn fifo opts loop-state state
+			 beforefn afterfn
+			 monitors
+			 stopfn)
   (let* ((batch (fifo/pop fifo))
 	 (batch-state `#[loop ,loop-state started ,(elapsed-time) batchno 1])
 	 (start (get batch-state 'started))
-	 (logfreq (getopt loop-state 'logfreq (getopt state 'logfreq log-frequency)))
 	 (proc-time #f)
 	 (batchno 1))
     (while (and (exists? batch) batch)
@@ -143,23 +147,13 @@ slot of the loop state.
       (when (and  (exists? afterfn) afterfn)
 	(afterfn (qc batch) batch-state loop-state state))
       (bump-loop-state loop-state (choice-size batch) proc-time (elapsed-time start))
-      (cond ((not logfn))
-	    ((not (dolog? fifo loop-state)))
-	    ((and logfreq (batch-log? loop-state )))
-	    ((not (applicable? logfn))
-	     (engine/progress (qc batch) proc-time (elapsed-time start)
-			      batch-state loop-state state))
-	    ((= (procedure-arity logfn) 1)
-	     (logfn loop-state))
-	    ((= (procedure-arity logfn) 3)
-	     (logfn batch-state loop-state state))
-	    ((= (procedure-arity logfn) 6)
-	     (logfn (qc batch) proc-time (elapsed-time start)
-			 batch-state loop-state state)))
+      (when (dolog? fifo loop-state)
+	(engine-logger (qc batch) proc-time (elapsed-time start)
+		       batch-state loop-state state))
       ;; Free some stuff up, maybe
       (set! batch {})
       (let ((stopval (or (test loop-state 'stopped)
-			(and (exists? stopfn) stopfn (exists stopfn loop-state)))))
+			 (and (exists? stopfn) stopfn (exists stopfn loop-state)))))
 	(cond ((and (exists? stopval) stopval)
 	       (store! loop-state 'stopped (timestamp))
 	       (store! loop-state 'stopval stopval))
@@ -198,15 +192,19 @@ slot of the loop state.
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
-	 (logfns (getopt opts 'logfns #f))
 	 (stop (getopt opts 'stopfn #f))
 	 (state (getopt opts 'state #f))
+	 (logfns (getopt opts 'logfns {}))
+	 (checkfns (getopt opts 'checkfns {}))
 	 (loop-state (frame-create #f
 		       'fifo fifo
 		       'started (elapsed-time)
 		       'total (choice-size items)
 		       'n-batches (length batches)
+		       'logfreq (getopt opts 'logfreq log-frequency)
 		       'monitors (getopt opts 'monitors {})
+		       'logfns logfns
+		       'checkfns checkfns
 		       'state state
 		       'opts opts))
 	 (threads {})
@@ -215,10 +213,6 @@ slot of the loop state.
     (do-choices fcn
       (unless (and (applicable? fcn) (overlaps? (procedure-arity fcn) {1 2 4}))
 	(irritant fcn |ENGINE/InvalidLoopFn| fifo/engine)))
-    (when (and (exists? logfns) logfns)
-      (do-choices (logfn (difference logfns #t))
-	(unless (and (applicable? logfn) (overlaps? (procedure-arity logfn) {1 3 6}))
-	  (irritant logfn |ENGINE/InvalidLogfn| fifo/engine))))
     (when (and (exists? before) before)
       (do-choices before
 	(when before
@@ -228,37 +222,57 @@ slot of the loop state.
       (do-choices after
 	(unless (and (applicable? after) (= (procedure-arity after) 4))
 	  (irritant after |ENGINE/InvalidAfterFn| fifo/engine))))
+
+    (when (and (exists? logfns) logfns)
+      (do-choices (logfn (difference logfns #t))
+	(unless (and (applicable? logfn) (overlaps? (procedure-arity logfn) {1 3 6}))
+	  (irritant logfn |ENGINE/InvalidLogfn| fifo/engine))))
+
     (lognotice |FIFOEngine| 
       "Processing " ($count (choice-size items)) " items "
       (when (and batchsize (> batchsize 1))
-	(printout "in " ($count (length batches)) " batches " 
-	  "of up to " nthreads " ❌ " batchsize " items "))
-      "using " rthreads " threads "
-      "with\n   " fcn)
+	(printout "in " ($count (length batches)) " batches "))
+      "using " rthreads " threads with " fcn)
     (dotimes (i rthreads)
       (set+! threads 
-	(thread/call batch-step 
+	(thread/call engine-threadfn 
 	    fcn fifo opts 
 	    loop-state state 
-	    (qc before) (ac after) (qc logfns)
-	    stop (getopt opts 'monitors))
+	    (qc before) (qc after)
+	    (getopt opts 'monitors)
+	    stop)
 	(when spacing (sleep spacing))))
     (thread/wait threads)
-    (if (getopt opts 'skipcommit)
-	(lognotice |FIFOEngine| "Skipping final commit for FIFO/ENGINE call")
+    (if (getopt opts 'finalcheck)
 	(begin
-	  (lognotice |FIFOEngine| "Doing final commit for FIFO/ENGINE")
-	  (commit)))))
+	  (lognotice |FIFOEngine| "Doing final checkpoint for FIFO/ENGINE")
+	  (commit))
+	(lognotice |FIFOEngine| "Skipping final checkpoint for FIFO/ENGINE call"))))
 
-;;;; Utility functions
+;;;; Logging
 
-(define (engine/fetchoids oids (batch-state #f) (loop-state #f) (state #f))
-  (prefetch-oids! oids))
-(define (engine/fetchkeys oids (batch-state #f) (loop-state #f) (state #f))
-  (prefetch-keys! oids))
-(define (engine/swapout args (batch-state #f) (loop-state #f) (state #f))
-  (swapout args))
+(define (engine-logger batch proc-time time batch-state loop-state state)
+  (let ((logfns (get loop-state 'logfns)))
+    (when (overlaps? #t logfns)
+      (engine/progress (qc batch) proc-time time
+		       batch-state loop-state state))
+    (do-choices (logfn (difference logfns #t #f))
+      (cond ((not (applicable? logfn))
+	     (logwarn |Engine/BadLogFn| 
+	       "Couldn't apply the log function " logfn)
+	     (drop! loop-state 'logfns logfn))
+	    ((= (procedure-arity logfn) 1)
+	     (logfn loop-state))
+	    ((= (procedure-arity logfn) 3)
+	     (logfn batch-state loop-state state))
+	    ((= (procedure-arity logfn) 6)
+	     (logfn (qc batch) proc-time time batch-state loop-state state))
+	    (else
+	     (logwarn |Engine/BadLogFn| 
+	       "Couldn't use the log function " logfn)
+	     (drop! loop-state 'logfns logfn))))))
 
+;;; The default log function
 (define (engine/progress batch proctime time batch-state loop-state state)
   (let* ((count (get loop-state 'count))
 	 (loopmax (getopt loop-state 'total))
@@ -269,7 +283,7 @@ slot of the loop state.
 	 (fifo (getopt loop-state 'fifo)))
     (loginfo |Batch/Progress| 
       (when (testopt (fifo-opts fifo) 'static)
-	(printout "(" (show% (fifo-load fifo) (fifo-size fifo) 2)") "))
+	(printout "(" (show% (fifo/load fifo) (fifo-size fifo) 2)") "))
       "Processed " ($num (choice-size batch)) " items in " 
       (secs->string (elapsed-time (get batch-state 'started))) " or ~"
       ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
@@ -283,18 +297,28 @@ slot of the loop state.
       (cond (loopmax
 	     (let* ((togo (- loopmax count))
 		    (timeleft (/~ togo rate))
-		    (finished (timestamp+ timeleft)))
-	       (printout "\nAt " (->exact rate 0) " items/sec, "
+		    (finished (timestamp+ timeleft))
+		    (timetotal (/~ loopmax rate)))
+	       (printout "\nAt " ($num (->exact rate 0)) " items/sec, "
 		 "the loop's " ($num loopmax) " items should be finished in "
-		 "~" (secs->string timeleft) " (~"
+		 "~" (secs->string timeleft 0) " (~"
 		 (get finished 'timestring) " "
 		 (cond ((equal? (get (timestamp) 'datestring) (get finished 'datestring)))
 		       ((< (difftime finished) (* 24 3600)) "tomorrow")
 		       ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
 		       (else (get finished 'rfc822date)))
-		 ")")))
+		 ") after " (secs->string timetotal 0))))
 	    (else (printout ", averaging " 
 		    ($num (->exact rate 0)) " items/second in this loop. "))))))
+
+;;;; Utility functions
+
+(define (engine/fetchoids oids (batch-state #f) (loop-state #f) (state #f))
+  (prefetch-oids! oids))
+(define (engine/fetchkeys oids (batch-state #f) (loop-state #f) (state #f))
+  (prefetch-keys! oids))
+(define (engine/swapout args (batch-state #f) (loop-state #f) (state #f))
+  (swapout args))
 
 (module-export! '{engine/fetchoids engine/fetchkeys engine/progress})
 
