@@ -10,7 +10,10 @@
 (module-export! '{fifo/engine engine/getopt})
 
 (define log-frequency 60)
-(varconfig! engine:logfreq engine-log-frequency)
+(varconfig! engine:logfreq log-frequency)
+
+(define check-frequency 300)
+(varconfig! engine:checkfreq check-frequency)
 
 (define fifo-condvar (within-module 'fifo fifo-condvar))
 
@@ -109,19 +112,6 @@ slot of the loop state.
 		  (getopt loop-state 'opts) optname
 		  default)))
 
-(define (dolog? fifo loop-state (freq))
-  (default! freq (try (get loop-state 'logfreq) #f))
-  (with-lock (fifo-condvar fifo)
-    (cond ((not freq) #t)
-	  ((not (getopt loop-state 'lastlog))
-	   (store! loop-state 'lastlog (elapsed-time))
-	   ;; Don't do the first log report because it's almost certainly short
-	   #f)
-	  ((> (elapsed-time (getopt loop-state 'lastlog)) freq)
-	   (store! loop-state 'lastlog (elapsed-time))
-	   #t)
-	  (else #f))))
-
 (define (engine-threadfn iterfn fifo opts loop-state state
 			 beforefn afterfn
 			 monitors
@@ -170,14 +160,16 @@ slot of the loop state.
 				  (action testval loop-state)
 				  (logwarn |BadMonitorAction| action))))))
 		       (else (logwarn |BadMonitor| monitor))))))
-	(if (getopt loop-state 'stopped)
-	    (set! batch {})
-	    (begin
-	      (set! batch (fifo/pop fifo))
-	      (set! batchno (1+ batchno))
-	      (set! start (elapsed-time))
-	      (set! batch-state
-		`#[loop ,loop-state started ,start batchno ,batchno])))))))
+	(cond ((getopt loop-state 'stopped)
+	       (set! batch {}))
+	      (else
+	       (when (or (test loopstate 'checknow) (docheck? fifo loop-state))
+		 (thread/wait! (thread/call engine/checkpoint fifo loop-state)))
+	       (set! batch (fifo/pop fifo))
+	       (set! batchno (1+ batchno))
+	       (set! start (elapsed-time))
+	       (set! batch-state
+		 `#[loop ,loop-state started ,start batchno ,batchno])))))))
 
 (defambda (fifo/engine fcn items (opts #f))
   (let* ((batchsize (getopt opts 'batchsize (config 'batchsize 1024)))
@@ -195,16 +187,17 @@ slot of the loop state.
 	 (stop (getopt opts 'stopfn #f))
 	 (state (getopt opts 'state #f))
 	 (logfns (getopt opts 'logfns {}))
-	 (checkfns (getopt opts 'checkfns {}))
+	 (checkstate (getopt opts 'checkstate {}))
 	 (loop-state (frame-create #f
 		       'fifo fifo
 		       'started (elapsed-time)
 		       'total (choice-size items)
 		       'n-batches (length batches)
 		       'logfreq (getopt opts 'logfreq log-frequency)
+		       'checkfreq (getopt opts 'checkfreq check-frequency)
 		       'monitors (getopt opts 'monitors {})
 		       'logfns logfns
-		       'checkfns checkfns
+		       'checkstate checkstate
 		       'state state
 		       'opts opts))
 	 (threads {})
@@ -246,15 +239,29 @@ slot of the loop state.
     (if (getopt opts 'finalcheck)
 	(begin
 	  (lognotice |FIFOEngine| "Doing final checkpoint for FIFO/ENGINE")
+	  (engine/checkpoint fifo loop-state)
 	  (commit))
 	(lognotice |FIFOEngine| "Skipping final checkpoint for FIFO/ENGINE call"))))
 
 ;;;; Logging
 
+(define (dolog? fifo loop-state (freq))
+  (default! freq (try (get loop-state 'logfreq) #f))
+  (with-lock (fifo-condvar fifo)
+    (cond ((not freq) #t)
+	  ((not (getopt loop-state 'lastlog))
+	   (store! loop-state 'lastlog (elapsed-time))
+	   ;; Don't do the first log report because it's almost certainly short
+	   #f)
+	  ((> (elapsed-time (getopt loop-state 'lastlog)) freq)
+	   (store! loop-state 'lastlog (elapsed-time))
+	   #t)
+	  (else #f))))
+
 (define (engine-logger batch proc-time time batch-state loop-state state)
   (let ((logfns (get loop-state 'logfns)))
     (when (overlaps? #t logfns)
-      (engine/progress (qc batch) proc-time time
+      (engine/log (qc batch) proc-time time
 		       batch-state loop-state state))
     (do-choices (logfn (difference logfns #t #f))
       (cond ((not (applicable? logfn))
@@ -273,7 +280,7 @@ slot of the loop state.
 	     (drop! loop-state 'logfns logfn))))))
 
 ;;; The default log function
-(define (engine/progress batch proctime time batch-state loop-state state)
+(define (engine/log batch proctime time batch-state loop-state state)
   (let* ((count (get loop-state 'count))
 	 (loopmax (getopt loop-state 'total))
 	 (total (getopt state 'total))
@@ -288,7 +295,7 @@ slot of the loop state.
       (secs->string (elapsed-time (get batch-state 'started))) " or ~"
       ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
       " items/second for this batch and thread.")
-    (lognotice |Engine/Progress| 
+    (lognotice |Engine/Log| 
       "Processed " ($num (get loop-state 'count)) " items" 
       (when loopmax
 	(printout " (" (show% (get loop-state 'count) loopmax) " of "
@@ -311,6 +318,32 @@ slot of the loop state.
 	    (else (printout ", averaging " 
 		    ($num (->exact rate 0)) " items/second in this loop. "))))))
 
+;;; Checkpointing
+
+(define (docheck? fifo loop-state (freq))
+  (default! freq (try (get loop-state 'checkfreq) #f))
+  (with-lock (fifo-condvar fifo)
+    (cond ((not freq) #t)
+	  ((not (getopt loop-state 'lastcheck))
+	   (store! loop-state 'lastcheck (elapsed-time))
+	   ;; Don't do the first log report because it's almost certainly short
+	   #f)
+	  ((> (elapsed-time (getopt loop-state 'lastcheck)) freq)
+	   (store! loop-state 'lastcheck (elapsed-time))
+	   #t)
+	  (else #f))))
+
+(define (engine/checkpoint fifo loop-state (success #f))
+  (unwind-protect 
+      (begin 
+	(lognotice |Engine/Checkpoint| fifo)
+	(fifo/pause! fifo 'readwrite)
+	(flex/save! (get loop-state 'checkstate))
+	(set! success #t))
+    (begin (unless success (logwarn |Engine/Checkpoint/Failed| fifo))
+      ;; This may not be the right thing
+      (fifo/pause! fifo #f))))
+
 ;;;; Utility functions
 
 (define (engine/fetchoids oids (batch-state #f) (loop-state #f) (state #f))
@@ -320,7 +353,7 @@ slot of the loop state.
 (define (engine/swapout args (batch-state #f) (loop-state #f) (state #f))
   (swapout args))
 
-(module-export! '{engine/fetchoids engine/fetchkeys engine/progress})
+(module-export! '{engine/fetchoids engine/fetchkeys engine/log})
 
 ;;;; Utility meta-functions
 
