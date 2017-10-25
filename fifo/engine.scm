@@ -12,6 +12,8 @@
 (define engine-log-frequency 60)
 (varconfig! engine:logfreq engine-log-frequency)
 
+(define fifo-condvar (within-module 'fifo fifo-condvar))
+
 ;;; This is a task loop engine where a task applies a function to a
 ;;;  bunch of data items organized into batches.
 
@@ -49,7 +51,7 @@ batch state, loop state, and task state.
 batches processed), and 'vtime' (how much realtime this thread spent
 on the batch).
 
-5. PROGRESSFN is then called on:
+5. LOGFN is then called on:
  * the items processed;
  * the clock time spent on PROCESS
  * the clock time spent on BEFORE+PROCESS+AFTER
@@ -101,12 +103,28 @@ slot of the loop state.
       (store! loop-state 'vtime 
 	      (+ (getopt loop-state 'vtime 0.0) thread-time)))))
 
+(define (dolog? fifo loop-state (freq))
+  (default! freq 
+    (getopt loop-state 'logfreq 
+	    (getopt (getopt loop-state 'state) 'logfreq
+		    log-frequency)))
+  (with-lock (fifo-condvar fifo)
+    (cond ((not freq) #t)
+	  ((not (getopt loop-state 'lastlog))
+	   (store! loop-state 'lastlog (elapsed-time))
+	   #t)
+	  ((> (elapsed-time (getopt loop-state 'lastlog)) freq)
+	   (store! loop-state 'lastlog (elapsed-time))
+	   #t)
+	  (else #f))))
+
 (define (batch-step iterfn fifo opts loop-state state
-		    beforefn afterfn progressfn
+		    beforefn afterfn logfn
 		    stopfn monitors)
   (let* ((batch (fifo/pop fifo))
 	 (batch-state `#[loop ,loop-state started ,(elapsed-time) batchno 1])
 	 (start (get batch-state 'started))
+	 (logfreq (getopt loop-state 'logfreq (getopt state 'logfreq log-frequency)))
 	 (proc-time #f)
 	 (batchno 1))
     (while (and (exists? batch) batch)
@@ -125,16 +143,18 @@ slot of the loop state.
       (when (and  (exists? afterfn) afterfn)
 	(afterfn (qc batch) batch-state loop-state state))
       (bump-loop-state loop-state (choice-size batch) proc-time (elapsed-time start))
-      (cond ((not progressfn))
-	    ((not (applicable? progressfn))
+      (cond ((not logfn))
+	    ((not (dolog? fifo loop-state)))
+	    ((and logfreq (batch-log? loop-state )))
+	    ((not (applicable? logfn))
 	     (engine/progress (qc batch) proc-time (elapsed-time start)
 			      batch-state loop-state state))
-	    ((= (procedure-arity progressfn) 1)
-	     (progressfn loop-state))
-	    ((= (procedure-arity progressfn) 3)
-	     (progressfn batch-state loop-state state))
-	    ((= (procedure-arity progressfn) 6)
-	     (progressfn (qc batch) proc-time (elapsed-time start)
+	    ((= (procedure-arity logfn) 1)
+	     (logfn loop-state))
+	    ((= (procedure-arity logfn) 3)
+	     (logfn batch-state loop-state state))
+	    ((= (procedure-arity logfn) 6)
+	     (logfn (qc batch) proc-time (elapsed-time start)
 			 batch-state loop-state state)))
       ;; Free some stuff up, maybe
       (set! batch {})
@@ -178,7 +198,7 @@ slot of the loop state.
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
-	 (progress (getopt opts 'progress #f))
+	 (logfns (getopt opts 'logfns #f))
 	 (stop (getopt opts 'stopfn #f))
 	 (state (getopt opts 'state #f))
 	 (loop-state (frame-create #f
@@ -195,10 +215,10 @@ slot of the loop state.
     (do-choices fcn
       (unless (and (applicable? fcn) (overlaps? (procedure-arity fcn) {1 2 4}))
 	(irritant fcn |ENGINE/InvalidLoopFn| fifo/engine)))
-    (when (and (exists? progress) progress)
-      (do-choices (progressfn (difference progress #t))
-	(unless (and (applicable? progressfn) (overlaps? (procedure-arity progressfn) {1 3 6}))
-	  (irritant progress |ENGINE/InvalidProgressFn| fifo/engine))))
+    (when (and (exists? logfns) logfns)
+      (do-choices (logfn (difference logfns #t))
+	(unless (and (applicable? logfn) (overlaps? (procedure-arity logfn) {1 3 6}))
+	  (irritant logfn |ENGINE/InvalidLogfn| fifo/engine))))
     (when (and (exists? before) before)
       (do-choices before
 	(when before
@@ -220,7 +240,7 @@ slot of the loop state.
 	(thread/call batch-step 
 	    fcn fifo opts 
 	    loop-state state 
-	    before after progress
+	    (qc before) (ac after) (qc logfns)
 	    stop (getopt opts 'monitors))
 	(when spacing (sleep spacing))))
     (thread/wait threads)
