@@ -4,6 +4,7 @@
 (in-module 'fifo/engine)
 
 (use-module '{fifo varconfig mttools stringfmts reflection logger})
+(use-module '{storage/flex})
 
 (define %loglevel %notice%)
 
@@ -163,7 +164,7 @@ slot of the loop state.
 	(cond ((getopt loop-state 'stopped)
 	       (set! batch {}))
 	      (else
-	       (when (or (test loopstate 'checknow) (docheck? fifo loop-state))
+	       (when (or (test loop-state 'checknow) (docheck? fifo loop-state))
 		 (thread/wait! (thread/call engine/checkpoint fifo loop-state)))
 	       (set! batch (fifo/pop fifo))
 	       (set! batchno (1+ batchno))
@@ -226,6 +227,7 @@ slot of the loop state.
       (when (and batchsize (> batchsize 1))
 	(printout "in " ($count (length batches)) " batches "))
       "using " rthreads " threads with " fcn)
+
     (dotimes (i rthreads)
       (set+! threads 
 	(thread/call engine-threadfn 
@@ -235,7 +237,9 @@ slot of the loop state.
 	    (getopt opts 'monitors)
 	    stop)
 	(when spacing (sleep spacing))))
+
     (thread/wait threads)
+    
     (if (getopt opts 'finalcheck)
 	(begin
 	  (lognotice |FIFOEngine| "Doing final checkpoint for FIFO/ENGINE")
@@ -292,7 +296,7 @@ slot of the loop state.
       (when (testopt (fifo-opts fifo) 'static)
 	(printout "(" (show% (fifo/load fifo) (fifo-size fifo) 2)") "))
       "Processed " ($num (choice-size batch)) " items in " 
-      (secs->string (elapsed-time (get batch-state 'started))) " or ~"
+      (secs->string (elapsed-time (get batch-state 'started)) 1) " or ~"
       ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
       " items/second for this batch and thread.")
     (lognotice |Engine/Log| 
@@ -300,7 +304,7 @@ slot of the loop state.
       (when loopmax
 	(printout " (" (show% (get loop-state 'count) loopmax) " of "
 	  ($num loopmax) ")"))
-      " in " (secs->string (elapsed-time (get loop-state 'started))) 
+      " in " (secs->string (elapsed-time (get loop-state 'started)) 1) 
       (cond (loopmax
 	     (let* ((togo (- loopmax count))
 		    (timeleft (/~ togo rate))
@@ -308,30 +312,32 @@ slot of the loop state.
 		    (timetotal (/~ loopmax rate)))
 	       (printout "\nAt " ($num (->exact rate 0)) " items/sec, "
 		 "the loop's " ($num loopmax) " items should be finished in "
-		 "~" (secs->string timeleft 0) " (~"
+		 "~" (secs->string timeleft 1) " (~"
 		 (get finished 'timestring) " "
 		 (cond ((equal? (get (timestamp) 'datestring) (get finished 'datestring)))
 		       ((< (difftime finished) (* 24 3600)) "tomorrow")
 		       ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
 		       (else (get finished 'rfc822date)))
-		 ") after " (secs->string timetotal 0))))
+		 ") after " (secs->string timetotal 1))))
 	    (else (printout ", averaging " 
 		    ($num (->exact rate 0)) " items/second in this loop. "))))))
 
 ;;; Checkpointing
 
-(define (docheck? fifo loop-state (freq))
+(define (docheck? fifo loop-state (freq) (fns))
   (default! freq (try (get loop-state 'checkfreq) #f))
-  (with-lock (fifo-condvar fifo)
-    (cond ((not freq) #t)
-	  ((not (getopt loop-state 'lastcheck))
-	   (store! loop-state 'lastcheck (elapsed-time))
-	   ;; Don't do the first log report because it's almost certainly short
-	   #f)
-	  ((> (elapsed-time (getopt loop-state 'lastcheck)) freq)
-	   (store! loop-state 'lastcheck (elapsed-time))
-	   #t)
-	  (else #f))))
+  (and (exists? (get loop-state 'checkstate))
+       (get loop-state 'checkstate)
+       (with-lock (fifo-condvar fifo)
+	 (cond ((not freq) #t)
+	       ((not (getopt loop-state 'lastcheck))
+		(store! loop-state 'lastcheck (elapsed-time))
+		;; Don't do the first log report because it's almost certainly short
+		#f)
+	       ((> (elapsed-time (getopt loop-state 'lastcheck)) freq)
+		(store! loop-state 'lastcheck (elapsed-time))
+		#t)
+	       (else #f)))))
 
 (define (engine/checkpoint fifo loop-state (success #f))
   (unwind-protect 
