@@ -79,9 +79,9 @@ slot of the loop state.
 
 |#
 
-;;; This divides a big set (choice) of items into smaller buckets.
-;;; The buckets (except for the last one) are all some multiple of
-;;; *batchsize* items; the multiple is in the range [1,N].
+;;; These functions divide big sets (choice or vector) of items into smaller batches.
+;;; The batches (except for the last one) are all some multiple of
+;;; *batchsize* items; the multiple is in the range [1,*batchrange*].
 ;;; It returns a vector of those batches.
 (defambda (batchup items batchsize batchrange)
   (let ((n (choice-size items))
@@ -90,6 +90,16 @@ slot of the loop state.
     (while (< start n)
       (let ((step (* (1+ (random batchrange)) batchsize)))
 	(set! batchlist (cons (qc (pick-n items step start)) batchlist))
+	(set! start (+ start step))))
+    (reverse (->vector batchlist))))
+
+(define (batchup-vector items batchsize batchrange)
+  (let ((n (length items))
+	(batchlist '())
+	(start 0))
+    (while (< start n)
+      (let ((step (* (1+ (random batchrange)) batchsize)))
+	(set! batchlist (cons (slice items start (+ start step)) batchlist))
 	(set! start (+ start step))))
     (reverse (->vector batchlist))))
 
@@ -175,24 +185,32 @@ slot of the loop state.
 (defambda (fifo/engine fcn items (opts #f))
   (let* ((batchsize (getopt opts 'batchsize (config 'batchsize 1024)))
 	 (nthreads (mt/threadcount (getopt opts 'nthreads (config 'nthreads #t))))
+	 (vector-items  (and (singleton? items) (vector? items)))
 	 (spacing (getopt opts 'spacing 
 			  (and nthreads (> nthreads 1)
 			       (/~ nthreads (ilog nthreads)))))
 	 (batches (if (= batchsize 1)
-		      (choice->vector items)
-		      (batchup items batchsize nthreads)))
+		      (if vector-items items (choice->vector items))
+		      (if vector-items
+			  (batchup-vector items batchsize nthreads)
+			  (batchup items batchsize nthreads))))
+	 (n-items (if vector-items (length items) (choice-size items)))
 	 (rthreads (if (and nthreads (> nthreads (length batches))) (length batches) nthreads))
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
 	 (stop (getopt opts 'stopfn #f))
-	 (state (getopt opts 'state #f))
+	 (state (getopt opts 'state
+			(and (getopt opts 'statefile)
+			     (if (file-exists? (getopt opts 'statefile))
+				 (file->dtype (getopt opts 'statefile))
+				 #[]))))
 	 (logfns (getopt opts 'logfns {}))
 	 (checkstate (getopt opts 'checkstate {}))
 	 (loop-state (frame-create #f
 		       'fifo fifo
 		       'started (elapsed-time)
-		       'total (choice-size items)
+		       'total n-items
 		       'n-batches (length batches)
 		       'logfreq (getopt opts 'logfreq log-frequency)
 		       'checkfreq (getopt opts 'checkfreq check-frequency)
@@ -223,7 +241,7 @@ slot of the loop state.
 	  (irritant logfn |ENGINE/InvalidLogfn| fifo/engine))))
 
     (lognotice |FIFOEngine| 
-      "Processing " ($count (choice-size items)) " items "
+      "Processing " ($count n-items) " items "
       (when (and batchsize (> batchsize 1))
 	(printout "in " ($count (length batches)) " batches "))
       "using " rthreads " threads with " fcn)
@@ -235,8 +253,8 @@ slot of the loop state.
 	    loop-state state 
 	    (qc before) (qc after)
 	    (getopt opts 'monitors)
-	    stop)
-	(when spacing (sleep spacing))))
+	    stop))
+      (when spacing (sleep spacing)))
 
     (thread/wait threads)
     
@@ -345,6 +363,10 @@ slot of the loop state.
 	(lognotice |Engine/Checkpoint| fifo)
 	(fifo/pause! fifo 'readwrite)
 	(flex/save! (get loop-state 'checkstate))
+	(when (and (test loop-state 'state) (get loop-state 'state)
+		   (testopt (get loop-state 'opts) 'statefile))
+	  (dtype->file (get loop-state 'state)
+		       (getopt (get loop-state 'opts) 'statefile)))
 	(set! success #t))
     (begin (unless success (logwarn |Engine/Checkpoint/Failed| fifo))
       ;; This may not be the right thing
