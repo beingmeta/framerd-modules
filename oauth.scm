@@ -847,10 +847,10 @@
     (logdebug |OAuth20/Response| (pprint response))
     (when (getopt spec 'lograw lograw)
       (let ((reqid (getuuid)))
-	(store! lograw reqid req)
-	(store! req 'reqid reqid)))
+	(store! lograw reqid response)
+	(store! response 'reqid reqid)))
     (when (getopt spec 'jsonflags)
-      (store! req 'jsonflags (getopt spec 'jsonflags)))
+      (store! response 'jsonflags (getopt spec 'jsonflags)))
     (if raw 
 	response
 	(if (and (test response 'response) 
@@ -863,11 +863,11 @@
 	    (if (and (<= 400 (get response 'response) 499) 
 		     (getopt spec 'refresh))
 		(begin
-		  (debug%watch 'OAUTH/ERROR "RESPONSE" response req)
+		  (debug%watch 'OAUTH/ERROR "RESPONSE" response spec)
 		  (oauth/refresh! spec)
 		  (oauth/call20 spec method endpoint args
 				body ctype raw ckey csecret))
-		(irritant req OAUTH:REQFAIL OAUTH/CALL20
+		(irritant response OAUTH:REQFAIL OAUTH/CALL20
 			  method " at " endpoint " with " args
 			  "\n\t" spec))))))
 
@@ -953,6 +953,8 @@
   (default! ckey (getckey spec))
   (default! csecret (getcsecret spec))
   (default! raw (getopt spec 'noparse))
+  (unless (has-prefix endpoint {"http:" "https:"})
+    (set! endpoint (mkpath (getopt spec 'endpoint) (strip-prefix endpoint "/"))))
   (if (testopt spec 'version "1.0")
       (oauth/call10 spec method endpoint args body ctype raw ckey csecret)
       (oauth/call20 spec method endpoint args body ctype raw ckey csecret)))
