@@ -16,6 +16,15 @@
 (define reddit.oauth #f)
 (define reddit.creds #f)
 
+(define reddit.agent "FramerD/4Reddit")
+(varconfig! reddit:agent reddit.agent)
+
+;; For use with script authentication
+(define reddit.username #f)
+(varconfig! reddit:username reddit.username)
+(define reddit.password #f)
+(varconfig! reddit:password reddit.password)
+
 (define-init reddit.opts #[])
 
 (define reddit:keep {})
@@ -23,10 +32,30 @@
 (define reddit:drop {})
 (varconfig! reddit:drop reddit:drop)
 
-(define (reddit/creds)
-  (or (and reddit.creds
+(define (reddit/creds (skip-cached #f))
+  (or (and (not skip-cached) reddit.creds
 	   (future? (getopt reddit.creds 'expires))
 	   reddit.creds)
+      (and reddit.username reddit.password
+	   (let* ((provider (oauth/provider 'reddit))
+		  (response (urlpost (getopt provider 'access)
+				     `#[useragent ,reddit.agent
+					basicauth
+					,(glom (config 'reddit:key) ":" (config 'reddit:secret))]
+				     `#["grant_type" "password"
+					"username" ,reddit.username
+					"password" ,reddit.password]
+				     ))
+		  (parsed (and (test response 'response 200)
+			       (jsonparse (get response '%content)))))
+	     (and parsed (test parsed 'access_token)
+		  (let ((creds (cons `#[token ,(get parsed 'access_token)
+					expires ,(timestamp+ (get parsed 'expires_in))
+					scope ,(get parsed 'scope)
+					useragent ,reddit.agent]
+				     provider)))
+		    (set! reddit.creds creds)
+		    creds))))
       (let* ((spec (if reddit.oauth
 		       (if (pair? reddit.oauth)
 			   reddit.oauth
@@ -108,8 +137,8 @@
     results))
 
 (define (reddit/post conn endpoint content (args #f))
-  (let ((r (oauth/call conn 'GET endpoint args))
-	(response (car r)))
+  (let* ((r (oauth/call conn 'GET endpoint args))
+	 (response (car r)))
     (reddit/thing response)))
 
 (define (reddit/comments post (opts #f) (args #[]) (endpoint) (conn))
