@@ -222,7 +222,7 @@ slot of the loop state.
 	(unless (and (applicable? logfn) (overlaps? (procedure-arity logfn) {1 3 6}))
 	  (irritant logfn |ENGINE/InvalidLogfn| fifo/engine))))
 
-    (lognotice |FIFOEngine| 
+    (lognotice |Engine| 
       "Processing " ($count (choice-size items)) " items "
       (when (and batchsize (> batchsize 1))
 	(printout "in " ($count (length batches)) " batches "))
@@ -242,10 +242,10 @@ slot of the loop state.
     
     (if (getopt opts 'finalcheck)
 	(begin
-	  (lognotice |FIFOEngine| "Doing final checkpoint for FIFO/ENGINE")
+	  (lognotice |Engine| "Doing final checkpoint for FIFO/ENGINE")
 	  (engine/checkpoint fifo loop-state)
 	  (commit))
-	(lognotice |FIFOEngine| "Skipping final checkpoint for FIFO/ENGINE call"))))
+	(lognotice |Engine| "Skipping final checkpoint for FIFO/ENGINE call"))))
 
 ;;;; Logging
 
