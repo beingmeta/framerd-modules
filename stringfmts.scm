@@ -70,8 +70,8 @@
 	       num)))))
 
 (define (getpad num)
-  (if (> num 100) ""
-      (if (> num 10) "0" "00")))
+  (if (>= num 100) ""
+      (if (>= num 10) "0" "00")))
 
 (define (numstring . args) (stringout (apply printnum args)))
 (define ($numstring . args) (stringout (apply printnum args)))
