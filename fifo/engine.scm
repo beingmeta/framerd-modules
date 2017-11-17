@@ -8,7 +8,7 @@
 
 (define %loglevel %notice%)
 
-(module-export! '{fifo/engine engine/getopt})
+(module-export! '{fifo/engine engine/getopt batchup})
 
 (define log-frequency 60)
 (varconfig! engine:logfreq log-frequency)
@@ -83,7 +83,7 @@ slot of the loop state.
 ;;; The batches (except for the last one) are all some multiple of
 ;;; *batchsize* items; the multiple is in the range [1,*batchrange*].
 ;;; It returns a vector of those batches.
-(defambda (batchup items batchsize batchrange)
+(defambda (batchup items batchsize (batchrange 1))
   (let ((n (choice-size items))
 	(batchlist '())
 	(start 0))
@@ -93,7 +93,7 @@ slot of the loop state.
 	(set! start (+ start step))))
     (reverse (->vector batchlist))))
 
-(define (batchup-vector items batchsize batchrange)
+(define (batchup-vector items batchsize (batchrange 1))
   (let ((n (length items))
 	(batchlist '())
 	(start 0))
@@ -137,7 +137,7 @@ slot of the loop state.
       (when (and (exists? beforefn) beforefn)
 	(beforefn (qc batch) batch-state loop-state state))
       (set! proc-time (elapsed-time))
-      (if (getopt opts 'ndcall #f)
+      (if (getopt opts 'batchcall (non-deterministic? iterfn))
 	  (if (non-deterministic? iterfn)
 	      (cond ((= (procedure-arity iterfn) 1) (iterfn batch))
 		    ((= (procedure-arity iterfn) 2) (iterfn batch batch-state))
@@ -199,11 +199,12 @@ slot of the loop state.
 	 (spacing (getopt opts 'spacing 
 			  (and nthreads (> nthreads 1)
 			       (/~ nthreads (ilog nthreads)))))
+	 (batchrange (getopt opts 'batchrange (config 'batchrange nthreads)))
 	 (batches (if (= batchsize 1)
 		      (if vector-items items (choice->vector items))
 		      (if vector-items
-			  (batchup-vector items batchsize nthreads)
-			  (batchup items batchsize nthreads))))
+			  (batchup-vector items batchsize batchrange)
+			  (batchup items batchsize batchrange))))
 	 (n-items (if vector-items (length items) (choice-size items)))
 	 (rthreads (if (and nthreads (> nthreads (length batches))) (length batches) nthreads))
 	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
@@ -268,6 +269,15 @@ slot of the loop state.
 
     (thread/wait threads)
     
+    (let* ((elapsed (elapsed-time (get loop-state 'started)))
+	   (rate (/ n-items elapsed)))
+      (lognotice |Engine| 
+	"Finished " ($count n-items) " items "
+	(when (and batchsize (> batchsize 1))
+	  (printout "across " ($count (length batches)) " batches "))
+	"in " (secs->string elapsed) " "
+	"averaging " ($num (->exact rate 0)) " items/sec"))
+
     (if (getopt opts 'finalcheck)
 	(begin
 	  (lognotice |Engine| "Doing final checkpoint for FIFO/ENGINE")
@@ -346,7 +356,7 @@ slot of the loop state.
 		       ((< (difftime finished) (* 24 3600)) "tomorrow")
 		       ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
 		       (else (get finished 'rfc822date)))
-		 ") after " (secs->string timetotal 1))))
+		 ") totalling " (secs->string timetotal 1))))
 	    (else (printout ", averaging " 
 		    ($num (->exact rate 0)) " items/second in this loop. "))))))
 
