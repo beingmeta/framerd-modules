@@ -207,7 +207,7 @@ slot of the loop state.
 			  (batchup items batchsize batchrange))))
 	 (n-items (if vector-items (length items) (choice-size items)))
 	 (rthreads (if (and nthreads (> nthreads (length batches))) (length batches) nthreads))
-	 (fifo (fifo/make batches `#[fillfn ,fifo/exhausted!]))
+	 (fifo (fifo/make batches `#[fillfn ,(getopt opts 'fillfn fifo/exhausted!)]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
 	 (stop (getopt opts 'stopfn #f))
@@ -229,6 +229,7 @@ slot of the loop state.
 		       'logfns logfns
 		       'checkstate checkstate
 		       'state state
+		       'nthreads nthreads
 		       'opts opts))
 	 (threads {})
 	 (count 0))
