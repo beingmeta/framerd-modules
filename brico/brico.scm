@@ -16,6 +16,8 @@
 ;; For custom methods
 (use-module 'rulesets)
 
+(define %loglevel %notify%)
+
 ;;; Configuring bricosource
 
 (define bricosource #f)
@@ -38,9 +40,10 @@
     (cond ((eq? val 'unbound) bricosource)
 	  ((equal? val bricosource)
 	   bricosource)
-	  ((exists? brico-pool)
-	   (logwarn BRICOSOURCE
-		    "Redundant configuration "
+	  ((and (exists? brico-pool) brico-pool
+		(equal? val (pool-source brico-pool))))
+	  ((and (exists? brico-pool) brico-pool)
+	   (logwarn |Brico| "Redundant BRICO configuration "
 		    "from " val " \&mdash; "
 		    "BRICO is already provided from "
 		    (pool-source brico-pool))
@@ -48,6 +51,7 @@
 	  ((and (string? val)
 		(or (has-suffix val ".db")
 		    (file-exists? (string-append val ".db"))))
+	   (lognotice |Brico| "Using BRICO database from " val)
 	   (set! bricosource val)
 	   (set! brico.db (usedb val `#[readonly ,brico-readonly]))
 	   (set! brico-index (get brico.db '%indexes))
@@ -59,6 +63,7 @@
 	       (begin (set! brico-index {})
 		      #f)))
 	  (else
+	   (lognotice |Brico| "Using BRICO database from " val)
 	   (set! bricosource val)
 	   (use-pool val `#[readonly ,brico-readonly])
 	   (set! brico-index (onerror (use-index val `#[readonly ,brico-readonly]) #f))
@@ -66,7 +71,7 @@
 	   (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
 	   (set! names-pool (name->pool "namedb.beingmeta.com"))
 	   (set! places-pool (name->pool "placedb.beingmeta.com"))
-	   (when (position #\@ val)
+	   (when #f ;; (position #\@ val)
 	     (onerror
 	      (set+! absfreqs
 		     (open-index (string-append "absfreqs@" val)))
