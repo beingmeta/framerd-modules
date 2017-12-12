@@ -83,12 +83,26 @@ slot of the loop state.
 ;;; The batches (except for the last one) are all some multiple of
 ;;; *batchsize* items; the multiple is in the range [1,*batchrange*].
 ;;; It returns a vector of those batches.
+
+(define (batch-factor (batchrange 1))
+  (if (number? batchrange)
+      (1+ (random batchrange))
+      (if (and (pair? batchrange) 
+	       (number? (car batchrange))
+	       (number? (cdr batchrange)))
+	  (+ (car batchrange) (random (- (cdr batchrange) (car batchrange))))
+	  (if (and (pair? batchrange) (pair? (cdr batchrange)) 
+		   (number? (car batchrange))
+		   (number? (cadr batchrange)))
+	      (+ (car batchrange) (random (- (cadr batchrange) (car batchrange))))
+	      1))))
+
 (defambda (batchup items batchsize (batchrange 1))
   (let ((n (choice-size items))
 	(batchlist '())
 	(start 0))
     (while (< start n)
-      (let ((step (* (1+ (random batchrange)) batchsize)))
+      (let ((step (* (batch-factor batchrange) batchsize)))
 	(set! batchlist (cons (qc (pick-n items step start)) batchlist))
 	(set! start (+ start step))))
     (reverse (->vector batchlist))))
@@ -98,14 +112,14 @@ slot of the loop state.
 	(batchlist '())
 	(start 0))
     (while (< start n)
-      (let ((step (* (1+ (random batchrange)) batchsize)))
+      (let ((step (* (batch-factor batchrange) batchsize)))
 	(set! batchlist (cons (slice items start (+ start step)) batchlist))
 	(set! start (+ start step))))
     (reverse (->vector batchlist))))
 
 ;;; We make this handler unique right now, but it could be engine specific.
 (define-init bump-loop-state
-  (slambda (loop-state (count #f) (proc-time #f) (thread-time #f))
+  (slambda (batch-state loop-state (count #f) (proc-time #f) (thread-time #f))
     (store! loop-state 'batches (1+ (getopt loop-state 'batches 0)))
     (when count
       (store! loop-state 'count 
@@ -115,7 +129,11 @@ slot of the loop state.
 	      (+ (getopt loop-state 'vproctime 0.0) proc-time)))
     (when thread-time
       (store! loop-state 'vtime 
-	      (+ (getopt loop-state 'vtime 0.0) thread-time)))))
+	      (+ (getopt loop-state 'vtime 0.0) thread-time)))
+    (do-choices (counter (get loop-state 'counters))
+      (store! loop-state counter
+	      (+ (try (get loop-state counter) 0)
+		 (try (get batch-state counter) 0))))))
 
 (defambda (engine/getopt loop-state optname (default #f))
   (getopt loop-state optname
@@ -157,7 +175,10 @@ slot of the loop state.
       (set! proc-time (elapsed-time proc-time))
       (when (and  (exists? afterfn) afterfn)
 	(afterfn (qc batch) batch-state loop-state state))
-      (bump-loop-state loop-state (choice-size batch) proc-time (elapsed-time start))
+      (bump-loop-state batch-state loop-state 
+		       (choice-size batch)
+		       proc-time
+		       (elapsed-time start))
       (when (dolog? fifo loop-state)
 	(engine-logger (qc batch) proc-time (elapsed-time start)
 		       batch-state loop-state state))
@@ -199,7 +220,7 @@ slot of the loop state.
 	 (spacing (getopt opts 'spacing 
 			  (and nthreads (> nthreads 1)
 			       (/~ nthreads (ilog nthreads)))))
-	 (batchrange (getopt opts 'batchrange (config 'batchrange nthreads)))
+	 (batchrange (getopt opts 'batchrange (config 'batchrange (or nthreads 1))))
 	 (batches (if (= batchsize 1)
 		      (if vector-items items (choice->vector items))
 		      (if vector-items
@@ -218,8 +239,10 @@ slot of the loop state.
 				 #[]))))
 	 (logfns (getopt opts 'logfns {}))
 	 (checkstate (getopt opts 'checkstate {}))
+	 (counters {(getopt state 'counters {}) (getopt opts 'counters {})})
 	 (loop-state (frame-create #f
 		       'fifo fifo
+		       'counters counters
 		       'started (elapsed-time)
 		       'total n-items
 		       'n-batches (length batches)
@@ -231,7 +254,6 @@ slot of the loop state.
 		       'state state
 		       'nthreads nthreads
 		       'opts opts))
-	 (threads {})
 	 (count 0))
     
     (do-choices fcn
@@ -258,17 +280,24 @@ slot of the loop state.
 	(printout "in " ($count (length batches)) " batches "))
       "using " rthreads " threads with " fcn)
 
-    (dotimes (i rthreads)
-      (set+! threads 
-	(thread/call engine-threadfn 
-	    fcn fifo opts 
-	    loop-state state 
-	    (qc before) (qc after)
-	    (getopt opts 'monitors)
-	    stop))
-      (when spacing (sleep spacing)))
-
-    (thread/wait threads)
+    (if (and rthreads (> rthreads 1))
+	(let ((threads {}))
+	  (dotimes (i rthreads)
+	    (set+! threads 
+	      (thread/call engine-threadfn 
+		  fcn fifo opts 
+		  loop-state state 
+		  (qc before) (qc after)
+		  (getopt opts 'monitors)
+		  stop))
+	    (when spacing (sleep spacing)))
+	  (thread/wait threads))
+	(engine-threadfn 
+	 fcn fifo opts 
+	 loop-state state 
+	 (qc before) (qc after)
+	 (getopt opts 'monitors)
+	 stop))
     
     (let* ((elapsed (elapsed-time (get loop-state 'started)))
 	   (rate (/ n-items elapsed)))
@@ -284,7 +313,13 @@ slot of the loop state.
 	  (lognotice |Engine| "Doing final checkpoint for FIFO/ENGINE")
 	  (engine/checkpoint fifo loop-state)
 	  (commit))
-	(lognotice |Engine| "Skipping final checkpoint for FIFO/ENGINE call"))))
+	(begin
+	  (lognotice |Engine| "Skipping final checkpoint for FIFO/ENGINE call")
+	  (do-choices (counter counters)
+	    (store! state counter 
+		    (+ (try (get state counter) 0)
+		       (try (get loop-state counter) 0))))))
+    state))
 
 ;;;; Logging
 
