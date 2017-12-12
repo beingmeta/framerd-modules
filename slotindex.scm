@@ -116,7 +116,8 @@
 	     (let ((opts (cons `#[type ,(getopt opts 'indextype 'hashindex)
 				  size ,(getopt opts 'size 1000000)
 				  offtype ,(getopt opts 'offtype 'b40)
-				  slotids #(,slot)]
+				  slotids #(,slot)
+				  keyslot ,slot]
 			       opts))
 		   (baseoids {(getopt opts 'baseoids {})
 			      (get-baseoids pools)}))
@@ -202,20 +203,21 @@
       (unsafe-hashtable table)))
 
 (define (slotindex/branch slotindex (opts #f))
-  (let* ((branchopts
-	  (if (and opts (test slotindex 'opts))
-	      (cons opts (get slotindex 'opts))
-	      (or opts
-		  (try (get slotindex 'opts) #f))))
-	 (branch (frame-create #f 
-		   'slotindex 'slotindex
-		   'slots (get slotindex 'slots)
-		   'root slotindex
-		   'opts opts)))
-    (do-choices (slot (get slotindex 'slots))
-      (let ((index (slot->index slotindex slot)))
-	(store! branch slot (branch-table (getopt branch 'opts)))))
-    branch))
+  (and slotindex
+       (let* ((branchopts
+	       (if (and opts (test slotindex 'opts))
+		   (cons opts (get slotindex 'opts))
+		   (or opts
+		       (try (get slotindex 'opts) #f))))
+	      (branch (frame-create #f 
+			'slotindex 'slotindex
+			'slots (get slotindex 'slots)
+			'root slotindex
+			'opts opts)))
+	 (do-choices (slot (get slotindex 'slots))
+	   (let ((index (slot->index slotindex slot)))
+	     (store! branch slot (branch-table (getopt branch 'opts)))))
+	 branch)))
 
 (defslambda (setup-branch-index branch-index slot)
   (try
