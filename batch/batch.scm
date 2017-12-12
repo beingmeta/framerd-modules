@@ -3,7 +3,7 @@
 
 (in-module 'batch)
 
-(use-module '{logger stringfmts varconfig slotindex})
+(use-module '{logger stringfmts varconfig slotindex storage/flex})
 
 (define %volatile '{maxtime maxmem maxvmem maxload maxcount 
 		    saving last-save save-frequency
@@ -63,9 +63,9 @@
 	 (state (eval1 (deep-copy init))))
     (store! state 'init init)
     (when file (store! state 'statefile file))
-    (nstore! state 'pools (use-pool (get state 'pools)))
-    (nstore! state 'indexes (open-index (get state 'indexes)))
-    (nstore! state 'adjpools (open-pool (get state 'adjpools) #[adjunct #t]))
+    (nstore! state 'pools (pool/ref (get state 'pools)))
+    (nstore! state 'indexes (index/ref (get state 'indexes)))
+    (nstore! state 'adjpools (pool/ref (get state 'adjpools) #[adjunct #t]))
     (nstore! state 'objects
 	     (for-choices (obj (get state 'objects))
 	       (if (and (string? obj) (file-exists? obj))
