@@ -28,7 +28,7 @@
 ;;; (process) parallelism. There are three levels:
 
 ;;; 1. Task (outermost, cross-process)
-;;; 2. Loop (single process, single invocation of fifo/engine, often one invocation per process)
+;;; 2. Loop (single process, single invocation of engine/run, often one invocation per process)
 ;;; 3. Batch (single thread, set of items)
 
 ;;; While running, a table (slotmap) is associated with each of the
@@ -182,7 +182,7 @@ slot of the loop state.
 		       (choice-size batch)
 		       proc-time
 		       (elapsed-time start))
-      (when (dolog? fifo loop-state)
+      (when (dolog? loop-state fifo)
 	(engine-logger (qc batch) proc-time (elapsed-time start)
 		       batch-state loop-state state))
       ;; Free some stuff up, maybe
@@ -235,7 +235,8 @@ slot of the loop state.
 			  (batchup items batchsize batchrange))))
 	 (n-items (if vector-items (length items) (choice-size items)))
 	 (rthreads (if (and nthreads (> nthreads (length batches))) (length batches) nthreads))
-	 (fifo (fifo/make batches `#[fillfn ,(getopt opts 'fillfn fifo/exhausted!)]))
+	 (fifo (fifo/make batches `#[fillfn ,(getopt opts 'fillfn fifo/exhausted!) 
+				     name ,(getopt opts 'name (or (procedure-name fcn) {}))]))
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
 	 (stop (getopt opts 'stopfn #f))
@@ -245,7 +246,6 @@ slot of the loop state.
 				 (file->dtype (getopt opts 'statefile))
 				 #[]))))
 	 (logfns (getopt opts 'logfns {}))
-	 (checkstate (getopt opts 'checkstate {}))
 	 (counters {(getopt state 'counters {}) (getopt opts 'counters {})})
 	 (loop-state (frame-create #f
 		       'fifo fifo
@@ -253,11 +253,13 @@ slot of the loop state.
 		       'started (elapsed-time)
 		       'total n-items
 		       'n-batches (length batches)
+		       '%loglevel (getopt opts 'loglevel {})
 		       'logfreq (getopt opts 'logfreq log-frequency)
 		       'checkfreq (getopt opts 'checkfreq check-frequency)
+		       'checktests (getopt opts 'checktests {})
+		       'checkstate (getopt opts 'checkstate {})
 		       'monitors (getopt opts 'monitors {})
 		       'logfns logfns
-		       'checkstate checkstate
 		       'state state
 		       'nthreads nthreads
 		       'opts opts))
@@ -270,21 +272,21 @@ slot of the loop state.
 
     (do-choices fcn
       (unless (and (applicable? fcn) (overlaps? (procedure-arity fcn) {1 2 4}))
-	(irritant fcn |ENGINE/InvalidLoopFn| fifo/engine)))
+	(irritant fcn |ENGINE/InvalidLoopFn| engine/run)))
     (when (and (exists? before) before)
       (do-choices before
 	(when before
 	  (unless (and (applicable? before) (= (procedure-arity before) 4))
-	    (irritant before |ENGINE/InvalidBeforeFn| fifo/engine)))))
+	    (irritant before |ENGINE/InvalidBeforeFn| engine/run)))))
     (when (and (exists? after) after)
       (do-choices after
 	(unless (and (applicable? after) (= (procedure-arity after) 4))
-	  (irritant after |ENGINE/InvalidAfterFn| fifo/engine))))
+	  (irritant after |ENGINE/InvalidAfterFn| engine/run))))
 
     (when (and (exists? logfns) logfns)
       (do-choices (logfn (difference logfns #t))
 	(unless (and (applicable? logfn) (overlaps? (procedure-arity logfn) {1 3 6}))
-	  (irritant logfn |ENGINE/InvalidLogfn| fifo/engine))))
+	  (irritant logfn |ENGINE/InvalidLogfn| engine/run))))
 
     (lognotice |Engine| 
       "Processing " ($count n-items) " items "
@@ -322,11 +324,11 @@ slot of the loop state.
 
     (if (getopt opts 'finalcheck #t)
 	(begin
-	  (lognotice |Engine| "Doing final checkpoint for FIFO/ENGINE")
+	  (lognotice |Engine| "Doing final checkpoint for ENGINE/RUN")
 	  (engine/checkpoint loop-state fifo)
 	  (commit))
 	(begin
-	  (lognotice |Engine| "Skipping final checkpoint for FIFO/ENGINE call")
+	  (lognotice |Engine| "Skipping final checkpoint for ENGINE/RUN")
 	  (do-choices (counter counters)
 	    (store! state counter 
 		    (+ (try (get state counter) 0)
@@ -336,7 +338,8 @@ slot of the loop state.
 
 ;;;; Logging
 
-(define (dolog? fifo loop-state (freq))
+(define (dolog? loop-state fifo (freq))
+  (default! fifo (get loop-state 'fifo))
   (default! freq (try (get loop-state 'logfreq) #f))
   (with-lock (fifo-condvar fifo)
     (cond ((not freq) #t)
@@ -441,25 +444,34 @@ slot of the loop state.
 	  (store! loop-state 'checkthread (threadid))
 	  #t))))
 
-(define (engine/checkpoint loop-state (fifo) (success #f))
+(define (engine/checkpoint loop-state (fifo))
   (default! fifo (get loop-state 'fifo))
-  (if (check/start! loop-state)
-      (unwind-protect 
-	  (begin 
-	    (lognotice |Engine/Checkpoint| fifo)
-	    (when fifo (fifo/pause! fifo 'readwrite))
-	    (flex/save! (get loop-state 'checkstate))
-	    (when (and (test loop-state 'state) (get loop-state 'state)
-		       (testopt (get loop-state 'opts) 'statefile))
-	      (dtype->file (get loop-state 'state)
-			   (getopt (get loop-state 'opts) 'statefile)))
-	    (set! success #t))
-	(begin (unless success (logwarn |Engine/Checkpoint/Failed| fifo))
-	  (drop! loop-state '{checkstart checkthread})
-	  (when fifo (fifo/pause! fifo #f))))
-      (logwarn |BadCheck| 
-	"Declining to checkpoint because check/start! failed: state =\n  "
-	(pprint loop-state))))
+  (let ((%loglevel (getopt loop-state '%loglevel %loglevel))
+	(started (elapsed-time))
+	(success #f))
+    (loginfo |Engine/Checkpoint| 
+      "Starting checkpoint for " (pprint loop-state))
+    (if (check/start! loop-state)
+	(unwind-protect 
+	    (begin 
+	      (debug%watch "Engine/Checkpoint" fifo)
+	      (when fifo (fifo/pause! fifo 'readwrite))
+	      (flex/save! (get loop-state 'checkstate))
+	      (when (and (test loop-state 'state) (get loop-state 'state)
+			 (testopt (get loop-state 'opts) 'statefile))
+		(dtype->file (get loop-state 'state)
+			     (getopt (get loop-state 'opts) 'statefile)))
+	      (set! success #t))
+	  (begin (if success
+		     (lognotice |Engine/Checkpoint| 
+		       "Finished in " (secs->string (elapsed-time started)) " for " fifo)
+		     (logwarn |Engine/Checkpoint/Failed| 
+		       "After " (secs->string (elapsed-time started)) " for " fifo))
+	    (drop! loop-state '{checkstart checkthread})
+	    (when fifo (fifo/pause! fifo #f))))
+	(logwarn |BadCheck| 
+	  "Declining to checkpoint because check/start! failed: state =\n  "
+	  (pprint loop-state)))))
 
 ;;;; Utility functions
 
