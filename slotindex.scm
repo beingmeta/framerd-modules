@@ -113,7 +113,10 @@
 	   (lognotice |UsingIndex| "Using the index at " path " for " slot))
 	 (if (file-exists? path)
 	     (set! index (open-index path opts))
-	     (let ((opts (cons `#[type ,(getopt opts 'indextype 'hashindex)
+	     (let ((opts (cons `#[type ,(getopt opts 'indextype 
+						(getopt opts 'type
+							(getopt opts 'module 'hashindex)))
+				  module ,(getopt opts 'module)
 				  size ,(getopt opts 'size 1000000)
 				  offtype ,(getopt opts 'offtype 'b40)
 				  slotids #(,slot)
