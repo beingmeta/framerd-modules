@@ -158,23 +158,30 @@ slot of the loop state.
       (when (and (exists? beforefn) beforefn)
 	(beforefn (qc batch) batch-state loop-state state))
       (set! proc-time (elapsed-time))
-      (if (getopt opts 'batchcall (non-deterministic? iterfn))
-	  (if (non-deterministic? iterfn)
-	      (cond ((= (procedure-arity iterfn) 1) (iterfn batch))
-		    ((= (procedure-arity iterfn) 2) (iterfn batch batch-state))
-		    ((= (procedure-arity iterfn) 4) (iterfn batch batch-state loop-state state))
-		    (else (iterfn batch)))
-	      (cond ((= (procedure-arity iterfn) 1) (iterfn (qc batch)))
-		    ((= (procedure-arity iterfn) 2) (iterfn (qc batch) batch-state))
-		    ((= (procedure-arity iterfn) 4) (iterfn (qc batch) batch-state loop-state state))
-		    (else (iterfn (qc batch)))))
-	  (cond ((= (procedure-arity iterfn) 1)
-		 (do-choices (item batch) (iterfn item)))
-		((= (procedure-arity iterfn) 2)
-		 (do-choices (item batch) (iterfn item batch-state)))
-		((= (procedure-arity iterfn) 4)
-		 (do-choices (item batch) (iterfn item batch-state loop-state state)))
-		(else (do-choices (item batch) (iterfn item)))))
+      (cond ((singleton? batch)
+	     (cond ((= (procedure-arity iterfn) 1) (iterfn batch))
+		   ((= (procedure-arity iterfn) 2) (iterfn batch batch-state))
+		   ((= (procedure-arity iterfn) 4) (iterfn batch batch-state loop-state state))
+		   (else (iterfn batch))))
+	    ((and (getopt opts 'batchcall (non-deterministic? iterfn))
+		  (non-deterministic? iterfn))
+	     (cond ((= (procedure-arity iterfn) 1) (iterfn batch))
+		   ((= (procedure-arity iterfn) 2) (iterfn batch batch-state))
+		   ((= (procedure-arity iterfn) 4) (iterfn batch batch-state loop-state state))
+		   (else (iterfn batch))))
+	    ((getopt opts 'batchcall (non-deterministic? iterfn))
+	     (cond ((= (procedure-arity iterfn) 1) (iterfn (qc batch)))
+		   ((= (procedure-arity iterfn) 2) (iterfn (qc batch) batch-state))
+		   ((= (procedure-arity iterfn) 4) (iterfn (qc batch) batch-state loop-state state))
+		   (else (iterfn (qc batch)))))
+	    (else
+	     (cond ((= (procedure-arity iterfn) 1)
+		    (do-choices (item batch) (iterfn item)))
+		   ((= (procedure-arity iterfn) 2)
+		    (do-choices (item batch) (iterfn item batch-state)))
+		   ((= (procedure-arity iterfn) 4)
+		    (do-choices (item batch) (iterfn item batch-state loop-state state)))
+		   (else (do-choices (item batch) (iterfn item))))))
       (set! proc-time (elapsed-time proc-time))
       (when (and  (exists? afterfn) afterfn)
 	(afterfn (qc batch) batch-state loop-state state))
@@ -206,6 +213,11 @@ slot of the loop state.
 				  (logwarn |BadMonitorAction| action))))))
 		       (else (logwarn |BadMonitor| monitor))))))
 	(cond ((getopt loop-state 'stopped)
+	       (set! batch {}))
+	      ((zero? (fifo/load fifo))
+	       ;; Don't consider checkpointing unless there is more
+	       ;; work to do, expecting that the final checkpoint will
+	       ;; handle it.
 	       (set! batch {}))
 	      (else
 	       (when (or (test loop-state 'checknow) 
@@ -322,9 +334,12 @@ slot of the loop state.
 	"in " (secs->string elapsed) " "
 	"averaging " ($num (->exact rate 0)) " items/sec"))
 
+    (unless (test loop-state 'stopped)
+      (store! loop-state 'stopped (timestamp))
+      (store! loop-state 'stopval 'final))
+
     (if (getopt opts 'finalcheck #t)
 	(begin
-	  (lognotice |Engine| "Doing final checkpoint for ENGINE/RUN")
 	  (engine/checkpoint loop-state fifo)
 	  (commit))
 	(begin
@@ -449,12 +464,16 @@ slot of the loop state.
   (let ((%loglevel (getopt loop-state '%loglevel %loglevel))
 	(started (elapsed-time))
 	(success #f))
-    (loginfo |Engine/Checkpoint| 
-      "Starting checkpoint for " (pprint loop-state))
+    (if (test loop-state 'stopped)
+	(lognotice |Engine/Checkpoint| 
+	  "Starting final checkpoint for " fifo)
+	(loginfo |Engine/Checkpoint| 
+	  "Starting incremental checkpoint for " fifo))
     (if (check/start! loop-state)
 	(unwind-protect 
 	    (begin 
-	      (debug%watch "Engine/Checkpoint" fifo)
+	      (logdebug |Engine/Checkpoint| 
+		"For " fifo "\n  " (pprint loop-state))
 	      (when fifo (fifo/pause! fifo 'readwrite))
 	      (flex/save! (get loop-state 'checkstate))
 	      (when (and (test loop-state 'state) (get loop-state 'state)
