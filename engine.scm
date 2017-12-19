@@ -54,7 +54,7 @@ batch state, loop state, and task state.
 task state)
 
 4. The 'loop state' is then 'bumped'. This updates the total
-'count' (number of items processed), total 'batches' (number of
+'items' (number of items processed), total 'batches' (number of
 batches processed), and 'vtime' (how much realtime this thread spent
 on the batch).
 
@@ -125,8 +125,8 @@ slot of the loop state.
   (slambda (batch-state loop-state (count #f) (proc-time #f) (thread-time #f))
     (store! loop-state 'batches (1+ (getopt loop-state 'batches 0)))
     (when count
-      (store! loop-state 'count 
-	      (+ (getopt loop-state 'count 0) count)))
+      (store! loop-state 'items 
+	      (+ (getopt loop-state 'items 0) count)))
     (when proc-time
       (store! loop-state 'vproctime 
 	      (+ (getopt loop-state 'vproctime 0.0) proc-time)))
@@ -252,11 +252,7 @@ slot of the loop state.
 	 (before (getopt opts 'before #f))
 	 (after (getopt opts 'after #f))
 	 (stop (getopt opts 'stopfn #f))
-	 (state (getopt opts 'state
-			(and (getopt opts 'statefile)
-			     (if (file-exists? (getopt opts 'statefile))
-				 (file->dtype (getopt opts 'statefile))
-				 #[]))))
+	 (state (getopt opts 'state (init-state opts)))
 	 (logfns (getopt opts 'logfns {}))
 	 (counters {(getopt state 'counters {}) (getopt opts 'counters {})})
 	 (loop-state (frame-create #f
@@ -272,9 +268,11 @@ slot of the loop state.
 		       'checkstate (getopt opts 'checkstate {})
 		       'monitors (getopt opts 'monitors {})
 		       'logfns logfns
-		       'state state
+		       'init state
+		       'state (deep-copy state)
 		       'nthreads nthreads
-		       'opts opts))
+		       'opts opts
+		       'cycles 1))
 	 (count 0))
     
     (do-choices (loop-init (getopt opts 'loop {}))
@@ -351,6 +349,21 @@ slot of the loop state.
 
     loop-state))
 
+(define (init-state opts)
+  (let ((state (or (and (getopt opts 'statefile)
+			(if (file-exists? (getopt opts 'statefile))
+			    (file->dtype (getopt opts 'statefile))
+			    #[]))
+		   #[])))
+    (do-choices (counter {(getopt opts 'counters) (get state 'counters)
+			  'items 'batches 'cycles})
+      (unless (test state counter) (store! state counter 0)))
+    (unless (test state 'started) (store! state 'started (timestamp)))
+    (when (getopt opts 'statefile)
+      (store! state 'statefile (getopt opts 'statefile))
+      (dtype->file state (getopt opts 'statefile)))
+    state))
+
 ;;;; Logging
 
 (define (dolog? loop-state fifo (freq))
@@ -390,11 +403,11 @@ slot of the loop state.
 
 ;;; The default log function
 (define (engine/log batch proctime time batch-state loop-state state)
-  (let* ((count (get loop-state 'count))
+  (let* ((count (getopt loop-state 'items 0))
 	 (loopmax (getopt loop-state 'total))
 	 (total (getopt state 'total))
 	 (taskmax (getopt state 'total))
-	 (rate (/~ (get loop-state 'count) (elapsed-time (get loop-state 'started))))
+	 (rate (/~ (getopt loop-state 'items 0) (elapsed-time (get loop-state 'started))))
 	 (%loglevel (getopt loop-state '%loglevel %loglevel))
 	 (fifo (getopt loop-state 'fifo)))
     (loginfo |Batch/Progress| 
@@ -405,9 +418,9 @@ slot of the loop state.
       ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
       " items/second for this batch and thread.")
     (lognotice |Engine/Log| 
-      "Processed " ($num (get loop-state 'count)) " items" 
+      "Processed " ($num (getopt loop-state 'items 0)) " items" 
       (when loopmax
-	(printout " (" (show% (get loop-state 'count) loopmax) " of "
+	(printout " (" (show% (getopt loop-state 'items 0) loopmax) " of "
 	  ($num loopmax) ")"))
       " in " (secs->string (elapsed-time (get loop-state 'started)) 1) 
       (cond (loopmax
@@ -418,7 +431,8 @@ slot of the loop state.
 	       (printout "\nAt " ($num (->exact rate 0)) " items/sec, "
 		 "the loop's " ($num loopmax) " items should be finished in "
 		 "~" (secs->string timeleft 1) " (~"
-		 (get finished 'timestring) " "
+		 (get finished 'timestring) 
+		 (if (not (equal? (get (timestamp) 'datestring) (get finished 'datestring))) " ")
 		 (cond ((equal? (get (timestamp) 'datestring) (get finished 'datestring)))
 		       ((< (difftime finished) (* 24 3600)) "tomorrow")
 		       ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
@@ -459,9 +473,21 @@ slot of the loop state.
 	  (store! loop-state 'checkthread (threadid))
 	  #t))))
 
+(define (update-task-state loop-state)
+  (let ((state (get loop-state 'state))
+	(init (get loop-state 'init))
+	(opts (get loop-state 'opts)))
+    (do-choices (counter {(getopt opts 'counters) (get state 'counters)
+			  'items 'batches 'cycles})
+      (when (test loop-state counter)
+	(store! state counter (+ (try (get init counter) 0)
+				 (get loop-state counter)))))
+    state))
+
 (define (engine/checkpoint loop-state (fifo))
   (default! fifo (get loop-state 'fifo))
   (let ((%loglevel (getopt loop-state '%loglevel %loglevel))
+	(state (and (test loop-state 'state) (get loop-state 'state)))
 	(started (elapsed-time))
 	(success #f))
     (if (test loop-state 'stopped)
@@ -476,14 +502,14 @@ slot of the loop state.
 		"For " fifo "\n  " (pprint loop-state))
 	      (when fifo (fifo/pause! fifo 'readwrite))
 	      (flex/save! (get loop-state 'checkstate))
-	      (when (and (test loop-state 'state) (get loop-state 'state)
-			 (testopt (get loop-state 'opts) 'statefile))
+	      (when state (update-task-state loop-state))
+	      (when (and state (testopt (get loop-state 'opts) 'statefile))
 		(dtype->file (get loop-state 'state)
 			     (getopt (get loop-state 'opts) 'statefile)))
 	      (set! success #t))
 	  (begin (if success
 		     (lognotice |Engine/Checkpoint| 
-		       "Finished in " (secs->string (elapsed-time started)) " for " fifo)
+		       "Saved state in " (secs->string (elapsed-time started)) " for " fifo)
 		     (logwarn |Engine/Checkpoint/Failed| 
 		       "After " (secs->string (elapsed-time started)) " for " fifo))
 	    (drop! loop-state '{checkstart checkthread})
@@ -529,7 +555,7 @@ slot of the loop state.
 
 (define (engine/maxitems max-count)
   (slambda ((loop-state #f))
-    (cond ((> (getopt loop-state 'count 0) max-count)
+    (cond ((> (getopt loop-state 'items 0) max-count)
 	   #t)
 	  (else #f))))
 
@@ -552,7 +578,7 @@ slot of the loop state.
 	(stopconf (getopt opts 'stopconf #f)))
     (lambda (loop-state)
       (or (test loop-state 'stopped)
-	  (and (or (and maxcount (> (get loop-state 'count) maxcount))
+	  (and (or (and maxcount (> (getopt loop-state 'items 0) maxcount))
 		   (and maxbatches (> (get loop-state 'batches) maxbatches))
 		   (and maxtime 
 			(> (elapsed-time (get loop-state 'started))
@@ -595,7 +621,7 @@ slot of the loop state.
 	      (set! last-call (getopt loop-state 'started (elapsed-time))))
 	    (when (or (not interval) 
 		      (and (> (elapsed-time last-call) interval) (clear?)))
-	      (when (or (and maxcount (> (get loop-state 'count) maxcount))
+	      (when (or (and maxcount (> (getopt loop-state 'items 0) maxcount))
 			(and maxbatches (> (get loop-state 'batches) maxbatches))
 			(and maxtime 
 			     (> (elapsed-time (get loop-state 'started))
