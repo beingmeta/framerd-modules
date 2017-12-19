@@ -361,6 +361,7 @@ slot of the loop state.
     (unless (test state 'started) (store! state 'started (timestamp)))
     (when (getopt opts 'statefile)
       (store! state 'statefile (getopt opts 'statefile))
+      (store! state 'updated (timestamp))
       (dtype->file state (getopt opts 'statefile)))
     state))
 
@@ -482,6 +483,7 @@ slot of the loop state.
       (when (test loop-state counter)
 	(store! state counter (+ (try (get init counter) 0)
 				 (get loop-state counter)))))
+    (store! state 'updated (timestamp))
     state))
 
 (define (engine/checkpoint loop-state (fifo))
