@@ -19,6 +19,9 @@
 (define check-frequency 300)
 (varconfig! engine:checkfreq check-frequency)
 
+(define check-spacing 60)
+(varconfig! engine:checkspace check-spacing)
+
 (define fifo-condvar (within-module 'fifo fifo-condvar))
 
 ;;; This is a task loop engine where a task applies a function to a
@@ -220,9 +223,9 @@ slot of the loop state.
 	       ;; handle it.
 	       (set! batch {}))
 	      (else
-	       (when (or (test loop-state 'checknow) 
-			 (and (docheck? loop-state fifo) (check/save? loop-state)))
-		 (thread/wait! (thread/call engine/checkpoint loop-state fifo)))
+	       (when (or (test loop-state 'checknow) (docheck? loop-state fifo))
+		 (when (or (test loop-state 'checknow) (check/save? loop-state))
+		   (thread/wait! (thread/call engine/checkpoint loop-state fifo))))
 	       (set! batch (fifo/pop fifo))
 	       (set! batchno (1+ batchno))
 	       (set! start (elapsed-time))
@@ -255,6 +258,7 @@ slot of the loop state.
 	 (state (getopt opts 'state (init-state opts)))
 	 (logfns (getopt opts 'logfns {}))
 	 (counters {(getopt state 'counters {}) (getopt opts 'counters {})})
+	 (loop-init (getopt opts 'loop))
 	 (loop-state (frame-create #f
 		       'fifo fifo
 		       'counters counters
@@ -264,22 +268,24 @@ slot of the loop state.
 		       '%loglevel (getopt opts 'loglevel {})
 		       'logfreq (getopt opts 'logfreq log-frequency)
 		       'checkfreq (getopt opts 'checkfreq check-frequency)
+		       'checkspace (getopt opts 'checkspace check-spacing)
 		       'checktests (getopt opts 'checktests {})
-		       'checkstate (getopt opts 'checkstate {})
+		       'checkpoint (getopt opts 'checkpoint {})
+		       'checksync (getopt opts 'checksync {})
 		       'monitors (getopt opts 'monitors {})
 		       'logfns logfns
-		       'init state
+		       'init (deep-copy state)
 		       'state (deep-copy state)
 		       'nthreads nthreads
 		       'opts opts
 		       'cycles 1))
 	 (count 0))
     
-    (do-choices (loop-init (getopt opts 'loop {}))
-      (when (table? loop-init)
-	(do-choices (key (getkeys loop-init))
+    (when (table? loop-init)
+      (do-choices (key (getkeys loop-init))
+	(unless (test loop-state key)
 	  (add! loop-state key (get loop-init key)))))
-
+  
     (do-choices fcn
       (unless (and (applicable? fcn) (overlaps? (procedure-arity fcn) {1 2 4}))
 	(irritant fcn |ENGINE/InvalidLoopFn| engine/run)))
@@ -338,7 +344,7 @@ slot of the loop state.
 
     (if (getopt opts 'finalcheck #t)
 	(begin
-	  (engine/checkpoint loop-state fifo)
+	  (engine/checkpoint loop-state fifo #t)
 	  (commit))
 	(begin
 	  (lognotice |Engine| "Skipping final checkpoint for ENGINE/RUN")
@@ -427,7 +433,7 @@ slot of the loop state.
       (cond (loopmax
 	     (let* ((togo (- loopmax count))
 		    (timeleft (/~ togo rate))
-		    (finished (timestamp+ timeleft))
+		    (finished (timestamp+ (timestamp) timeleft))
 		    (timetotal (/~ loopmax rate)))
 	       (printout "\nAt " ($num (->exact rate 0)) " items/sec, "
 		 "the loop's " ($num loopmax) " items should be finished in "
@@ -444,21 +450,29 @@ slot of the loop state.
 
 ;;; Checkpointing
 
-(define (docheck? loop-state (fifo) (freq))
+;;; This is called whenever a batch finishes and returns #t (roughly)
+;;; every freq seconds. Note that if there are checktests, they are
+;;; actually run (by check/save? below) to determine whether to do a
+;;; checkpoint.
+(define (docheck? loop-state (fifo) (freq) (space))
   (default! fifo (get loop-state 'fifo))
   (default! freq (try (get loop-state 'checkfreq) #f))
-  (and (exists? (get loop-state 'checkstate))
-       (get loop-state 'checkstate)
+  (default! space (try (get loop-state 'checkspace) #f))
+  (and (exists? (get loop-state 'checkpoint))
+       (get loop-state 'checkpoint)
+       (not (test loop-state 'checkthread))
+       ;; (or (not (get loop-state 'checkdone)) (not space) (> (elapsed-time (get loop-state 'checkdone)) space))
        (with-lock (fifo-condvar fifo)
 	 (cond ((not freq) #t)
-	       ((not (getopt loop-state 'lastcheck))
-		(store! loop-state 'lastcheck (elapsed-time))
+	       ((not (getopt loop-state 'checking))
+		(store! loop-state 'checking (elapsed-time))
 		#t)
-	       ((> (elapsed-time (getopt loop-state 'lastcheck)) freq)
-		(store! loop-state 'lastcheck (elapsed-time))
+	       ((> (elapsed-time (getopt loop-state 'checking)) freq)
+		(store! loop-state 'checking (elapsed-time))
 		#t)
 	       (else #f)))))
 
+;;; Tests whether to actually do a checkpoint
 (define (check/save? loop-state (fns))
   (default! fns (get loop-state 'checktests))
   (if (fail? fns) #t
@@ -466,9 +480,13 @@ slot of the loop state.
 	     (tryif (fn loop-state) fn))
 	   #f)))
 
+;; This is called by the checkpointing thread and avoids having two
+;; checkpointing threads at the same time.
 (define-init check/start!
   (slambda (loop-state)
-    (if (getopt loop-state 'checkstart) #f
+    (if (and (getopt loop-state 'checkthread)
+	     (not (test loop-state 'checkthread (threadid))))
+	#f
 	(begin 
 	  (store! loop-state 'checkstart (elapsed-time))
 	  (store! loop-state 'checkthread (threadid))
@@ -486,35 +504,45 @@ slot of the loop state.
     (store! state 'updated (timestamp))
     state))
 
-(define (engine/checkpoint loop-state (fifo))
+(define (engine/checkpoint loop-state (fifo) (force #f))
   (default! fifo (get loop-state 'fifo))
   (let ((%loglevel (getopt loop-state '%loglevel %loglevel))
 	(state (and (test loop-state 'state) (get loop-state 'state)))
 	(started (elapsed-time))
 	(success #f))
-    (if (test loop-state 'stopped)
-	(lognotice |Engine/Checkpoint| 
-	  "Starting final checkpoint for " fifo)
-	(loginfo |Engine/Checkpoint| 
-	  "Starting incremental checkpoint for " fifo))
-    (if (check/start! loop-state)
+    (if (or force (check/start! loop-state))
 	(unwind-protect 
 	    (begin 
 	      (logdebug |Engine/Checkpoint| 
-		"For " fifo "\n  " (pprint loop-state))
-	      (when fifo (fifo/pause! fifo 'readwrite))
-	      (flex/save! (get loop-state 'checkstate))
+		"For " fifo " loop state=\n  " (void (pprint loop-state)))
+	      (when fifo 
+		(fifo/pause! fifo 'readwrite)
+		(when (and (not force)
+			   (getopt loop-state 'checksync)
+			   (not (fifo-pause fifo)))
+		  (let ((wait-start (elapsed-time)))
+		    (until (fifo/paused? fifo)
+		      (condvar-wait (fifo-condvar fifo)))
+		    (when (> (elapsed-time wait-start) 1)
+		      (lognotice |Engine/Checkpoint| 
+			"Waited " (secs->string (elapsed-time wait-start))
+			" for FIFO to pause")))))
+	      (if (test loop-state 'stopped)
+		  (lognotice |Engine/Checkpoint| "Starting final checkpoint for " fifo)
+		  (loginfo |Engine/Checkpoint| "Starting incremental checkpoint for " fifo))
+	      (flex/save! (get loop-state 'checkpoint))
 	      (when state (update-task-state loop-state))
 	      (when (and state (testopt (get loop-state 'opts) 'statefile))
 		(dtype->file (get loop-state 'state)
 			     (getopt (get loop-state 'opts) 'statefile)))
 	      (set! success #t))
-	  (begin (if success
-		     (lognotice |Engine/Checkpoint| 
-		       "Saved state in " (secs->string (elapsed-time started)) " for " fifo)
-		     (logwarn |Engine/Checkpoint/Failed| 
-		       "After " (secs->string (elapsed-time started)) " for " fifo))
-	    (drop! loop-state '{checkstart checkthread})
+	  (begin (drop! loop-state 'checkthread) ;; lets check/start! work again
+	    (store! loop-state 'checkdone (elapsed-time))
+	    (if success
+		(lognotice |Engine/Checkpoint| 
+		  "Saved state in " (secs->string (elapsed-time started)) " for " fifo)
+		(logwarn |Engine/Checkpoint/Failed| 
+		  "After " (secs->string (elapsed-time started)) " for " fifo))
 	    (when fifo (fifo/pause! fifo #f))))
 	(logwarn |BadCheck| 
 	  "Declining to checkpoint because check/start! failed: state =\n  "
