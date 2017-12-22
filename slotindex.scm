@@ -205,22 +205,28 @@
       table
       (unsafe-hashtable table)))
 
+(define-init slotindex-roots (make-hashtable))
+
 (define (slotindex/branch slotindex (opts #f))
   (and slotindex
-       (let* ((branchopts
-	       (if (and opts (test slotindex 'opts))
-		   (cons opts (get slotindex 'opts))
-		   (or opts
-		       (try (get slotindex 'opts) #f))))
-	      (branch (frame-create #f 
-			'slotindex 'slotindex
-			'slots (get slotindex 'slots)
-			'root slotindex
-			'opts opts)))
-	 (do-choices (slot (get slotindex 'slots))
-	   (let ((index (slot->index slotindex slot)))
-	     (store! branch slot (branch-table (getopt branch 'opts)))))
-	 branch)))
+       (if (index? slotindex) 
+	   (let ((branch (make-hashtable)))
+	     (store! slotindex-roots branch slotindex)
+	     branch) 
+	   (let* ((branchopts
+		   (if (and opts (test slotindex 'opts))
+		       (cons opts (get slotindex 'opts))
+		       (or opts
+			   (try (get slotindex 'opts) #f))))
+		  (branch (frame-create #f 
+			    'slotindex 'slotindex
+			    'slots (get slotindex 'slots)
+			    'root slotindex
+			    'opts opts)))
+	     (do-choices (slot (get slotindex 'slots))
+	       (let ((index (slot->index slotindex slot)))
+		 (store! branch slot (branch-table (getopt branch 'opts)))))
+	     branch))))
 
 (defslambda (setup-branch-index branch-index slot)
   (try
@@ -230,27 +236,31 @@
      (get branch-index slot))))
 
 (define (slotindex/merge! branch (parallel #f) (root) (count 0))
-  (when (and (test branch 'slotindex 'slotindex)
-	     (test branch 'root)
-	     (test (get branch 'root) 'slotindex 'slotindex))
-    (set! root (get branch 'root))
-    (if parallel
-	(choice-size
-	 (thread/wait
-	  (for-choices (slot (get branch 'slots))
-	    (let ((table (get branch slot)))
-	      (tryif (modified? table)
-		(begin 
-		  (store! branch slot 
-			  (branch-table (getopt branch 'opts)
-					(table-size table)))
-		  (thread/call index-merge! (get root slot) table)))))))
-	(begin (do-choices (slot (get branch 'slots))
-		 (let ((table (get branch slot)))
-		   (when (modified? table)
-		     (store! branch slot 
-			     (branch-table (getopt branch 'opts)
-					   (table-size table)))
-		     (index-merge! (get root slot) table)
-		     (set! count (1+ count)))))
-	  count))))
+  (if (test slotindex-roots branch)
+      (begin (index-merge! (get slotindex-roots branch) branch)
+	(drop! slotindex-roots branch))
+      (when (and (test branch 'slotindex 'slotindex)
+		 (test branch 'root)
+		 (test (get branch 'root) 'slotindex 'slotindex))
+	(set! root (get branch 'root))
+	(if parallel
+	    (choice-size
+	     (thread/wait
+	      (for-choices (slot (get branch 'slots))
+		(let ((table (get branch slot)))
+		  (tryif (modified? table)
+		    (begin 
+		      (store! branch slot 
+			      (branch-table (getopt branch 'opts)
+					    (table-size table)))
+		      (thread/call index-merge! (get root slot) table)))))))
+	    (begin (do-choices (slot (get branch 'slots))
+		     (let ((table (get branch slot)))
+		       (when (modified? table)
+			 (store! branch slot 
+				 (branch-table (getopt branch 'opts)
+					       (table-size table)))
+			 (index-merge! (get root slot) table)
+			 (set! count (1+ count)))))
+	      count)))))
+
