@@ -457,11 +457,9 @@ slot of the loop state.
 (define (docheck? loop-state (fifo) (freq) (space))
   (default! fifo (get loop-state 'fifo))
   (default! freq (try (get loop-state 'checkfreq) #f))
-  (default! space (try (get loop-state 'checkspace) #f))
   (and (exists? (get loop-state 'checkpoint))
        (get loop-state 'checkpoint)
        (not (test loop-state 'checkthread))
-       ;; (or (not (get loop-state 'checkdone)) (not space) (> (elapsed-time (get loop-state 'checkdone)) space))
        (with-lock (fifo-condvar fifo)
 	 (cond ((not freq) #t)
 	       ((not (getopt loop-state 'checking))
@@ -483,13 +481,17 @@ slot of the loop state.
 ;; This is called by the checkpointing thread and avoids having two
 ;; checkpointing threads at the same time.
 (define-init check/start!
-  (slambda (loop-state)
+  (slambda (loop-state (last) (space) (wait))
+    (default! last (getopt loop-state 'checkdone))
+    (default! space (getopt loop-state 'checkspace check-spacing))
+    (set! wait (and last (- space (elapsed-time last))))
     (if (and (getopt loop-state 'checkthread)
 	     (not (test loop-state 'checkthread (threadid))))
 	#f
 	(begin 
-	  (store! loop-state 'checkstart (elapsed-time))
 	  (store! loop-state 'checkthread (threadid))
+	  (when (and wait (> wait 0)) (sleep wait))
+	  (store! loop-state 'checkstart (elapsed-time))
 	  #t))))
 
 (define (update-task-state loop-state)
