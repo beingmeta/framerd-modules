@@ -424,7 +424,7 @@ slot of the loop state.
       (secs->string (elapsed-time (get batch-state 'started)) 1) " or ~"
       ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
       " items/second for this batch and thread.")
-    (lognotice |Engine/Log| 
+    (lognotice |Engine/Progress|
       "Processed " ($num (getopt loop-state 'items 0)) " items" 
       (when loopmax
 	(printout " (" (show% (getopt loop-state 'items 0) loopmax) " of "
@@ -447,6 +447,23 @@ slot of the loop state.
 		 ") totalling " (secs->string timetotal 1))))
 	    (else (printout ", averaging " 
 		    ($num (->exact rate 0)) " items/second in this loop. "))))))
+
+(define (engine/logrates batch proctime time batch-state loop-state state)
+  (let ((elapsed (elapsed-time (get loop-state 'started)))
+	(items (get loop-state 'items)))
+    (lognotice |Engine/Counts|
+      ($num items) " items in " (secs->string elapsed) 
+      " @ " ($num (->exact (/ items elapsed))) " items/sec, "
+      (stringout 
+	(do-choices (counter (difference (get loop-state 'counters) 'items) i)
+	  (let* ((count (get loop-state counter))
+		 (rate (->exact (/~ count elapsed))))
+	    (printout (if (zero? (remainder i 3)) "\n   " ", ")
+	      ($num count) " " (downcase counter)
+	      " (" ($num rate) " " (downcase counter) "/sec)")))))))
+(define (engine/logrates+ batch proctime time batch-state loop-state state)
+  (engine/log (qc batch) proctime time batch-state loop-state state)
+  (engine/logrates (qc batch) proctime time batch-state loop-state state))
 
 ;;; Checkpointing
 
@@ -481,16 +498,12 @@ slot of the loop state.
 ;; This is called by the checkpointing thread and avoids having two
 ;; checkpointing threads at the same time.
 (define-init check/start!
-  (slambda (loop-state (last) (space) (wait))
-    (default! last (getopt loop-state 'checkdone))
-    (default! space (getopt loop-state 'checkspace check-spacing))
-    (set! wait (and last (- space (elapsed-time last))))
+  (slambda (loop-state)
     (if (and (getopt loop-state 'checkthread)
 	     (not (test loop-state 'checkthread (threadid))))
 	#f
 	(begin 
 	  (store! loop-state 'checkthread (threadid))
-	  (when (and wait (> wait 0)) (sleep wait))
 	  (store! loop-state 'checkstart (elapsed-time))
 	  #t))))
 
@@ -559,7 +572,8 @@ slot of the loop state.
 (define (engine/swapout args (batch-state #f) (loop-state #f) (state #f))
   (swapout args))
 
-(module-export! '{engine/fetchoids engine/fetchkeys engine/log})
+(module-export! '{engine/fetchoids engine/fetchkeys engine/log 
+		  engine/logrates engine/logrates+})
 
 ;;;; Utility meta-functions
 
@@ -578,9 +592,11 @@ slot of the loop state.
 (define (engine/savetable table file)
   (ambda (keys (loop-state #f)) (dtype->file table file)))
 
-(define (engine/interval interval (last (elapsed-time)))
-  (slambda ((loop-state #f))
-    (cond ((> (elapsed-time last) interval)
+(define (engine/interval interval (slot #f) (last (elapsed-time)))
+  (defsync (engine/interval/wait (loop-state #f))
+    (cond ((and slot (test loop-state slot))
+	   (> (elapsed-time (get loop-state slot)) interval))
+	  ((> (elapsed-time last) interval)
 	   (set! last (elapsed-time))
 	   #t)
 	  (else #f))))
