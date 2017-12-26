@@ -747,7 +747,7 @@
 	      (if (pair? args)
 		  (apply scripturl endpoint args)
 		  (scripturl+ endpoint args))))
-	 (req (cond (streamfn (urlstream useurl streamfn handle body))
+	 (req (cond (streamfn (urlstream useurl streamfn body handle))
 		    ((eq? method 'GET) (urlget useurl handle))
 		    ((eq? method 'HEAD) (urlhead useurl handle))
 		    ((eq? method 'POST) (urlpost useurl handle (args->post args)))
@@ -831,7 +831,7 @@
 			'method method)))
 	 (response
 	  (if streamfn
-	      (urlstream useurl streamfn handle body)
+	      (urlstream useurl streamfn body handle)
 	      (if (eq? method 'GET) (urlget useurl handle)
 		  (if (eq? method 'HEAD) (urlget useurl handle)
 		      (if (eq? method 'POST)
