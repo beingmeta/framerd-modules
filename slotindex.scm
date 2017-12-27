@@ -110,7 +110,10 @@
 	 (when (and (getopt opts 'initialize 
 			    (config:boolean (config 'slotindex:initialize #f))) 
 		    (file-exists? path))
-	   (remove-file path))
+	   (if (file-directory? path)
+	       (begin (remove-file (getfiles path))
+		 (rmdir path))
+	       (remove-file path)))
 	 (when (file-exists? path)
 	   (lognotice |UsingIndex| "Using the index at " path " for " slot))
 	 (if (file-exists? path)
