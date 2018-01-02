@@ -414,7 +414,9 @@ slot of the loop state.
 	 (loopmax (getopt loop-state 'total))
 	 (total (getopt state 'total))
 	 (taskmax (getopt state 'total))
-	 (rate (/~ (getopt loop-state 'items 0) (elapsed-time (get loop-state 'started))))
+	 (items (try (get loop-state 'items) 0))
+	 (elapsed (elapsed-time (get loop-state 'started)))
+	 (rate (/~ items elapsed))
 	 (%loglevel (getopt loop-state '%loglevel %loglevel))
 	 (fifo (getopt loop-state 'fifo)))
     (loginfo |Batch/Progress| 
@@ -422,7 +424,8 @@ slot of the loop state.
 	(printout "(" (show% (fifo/load fifo) (fifo-size fifo) 2)") "))
       "Processed " ($num (choice-size batch)) " items in " 
       (secs->string (elapsed-time (get batch-state 'started)) 1) " or ~"
-      ($num (->exact (/~ (choice-size batch) (elapsed-time (get batch-state 'started))) 0))
+      ($num (->exact (/~ (choice-size batch)
+			 (elapsed-time (get batch-state 'started))) 0))
       " items/second for this batch and thread.")
     (lognotice |Engine/Progress|
       "Processed " ($num (getopt loop-state 'items 0)) " items" 
@@ -430,6 +433,13 @@ slot of the loop state.
 	(printout " (" (show% (getopt loop-state 'items 0) loopmax) " of "
 	  ($num loopmax) ")"))
       " in " (secs->string (elapsed-time (get loop-state 'started)) 1) 
+      ", averaging " ($num (->exact rate 0)) " items/second."
+      (do-choices (counter (difference (get loop-state 'counters) 'items) i)
+	(let* ((count (get loop-state counter))
+	       (rate (->exact (/~ count elapsed))))
+	  (printout (if (zero? (remainder i 3)) "\n   " ", ")
+	    ($num count) " " (downcase counter)
+	    " (" ($num rate) " " (downcase counter) "/sec)")))
       (cond (loopmax
 	     (let* ((togo (- loopmax count))
 		    (timeleft (/~ togo rate))
@@ -439,14 +449,15 @@ slot of the loop state.
 		 "the loop's " ($num loopmax) " items should be finished in "
 		 "~" (secs->string timeleft 1) " (~"
 		 (get finished 'timestring) 
-		 (if (not (equal? (get (timestamp) 'datestring) (get finished 'datestring))) " ")
-		 (cond ((equal? (get (timestamp) 'datestring) (get finished 'datestring)))
+		 (if (not (equal? (get (timestamp) 'datestring)
+				  (get finished 'datestring))) " ")
+		 (cond ((equal? (get (timestamp) 'datestring)
+				(get finished 'datestring)))
 		       ((< (difftime finished) (* 24 3600)) "tomorrow")
-		       ((< (difftime finished) (* 24 4 3600)) (get finished 'weekday-long))
+		       ((< (difftime finished) (* 24 4 3600))
+			(get finished 'weekday-long))
 		       (else (get finished 'rfc822date)))
-		 ") totalling " (secs->string timetotal 1))))
-	    (else (printout ", averaging " 
-		    ($num (->exact rate 0)) " items/second in this loop. "))))))
+		 ") totalling " (secs->string timetotal 1))))))))
 
 (define (engine/logrates batch proctime time batch-state loop-state state)
   (let ((elapsed (elapsed-time (get loop-state 'started)))
