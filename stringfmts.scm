@@ -66,7 +66,9 @@
 	(else 
 	 (printout (if pad (getpad num))
 	   (if (and prec (inexact? num))
-	       (inexact->string num prec)
+	       (if (> num 1)
+		   (inexact->string num prec)
+		   (inexact->string num))
 	       num)))))
 
 (define (getpad num)
