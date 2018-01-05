@@ -345,14 +345,20 @@ slot of the loop state.
 
     (if (getopt opts 'finalcheck #t)
 	(begin
+	  (engine-logger (qc) 0 (elapsed-time (get loop-state 'started))
+			 #[] loop-state state)
 	  (engine/checkpoint loop-state fifo #t)
-	  (commit))
+	  (commit)
+	  (engine-logger (qc) 0 (elapsed-time (get loop-state 'started))
+			 #[] loop-state state))
 	(begin
 	  (lognotice |Engine| "Skipping final checkpoint for ENGINE/RUN")
 	  (do-choices (counter counters)
 	    (store! state counter 
 		    (+ (try (get state counter) 0)
-		       (try (get loop-state counter) 0))))))
+		       (try (get loop-state counter) 0))))
+	  (engine-logger (qc) 0 (elapsed-time (get loop-state 'started))
+			 #[] loop-state state)))
 
     loop-state))
 
@@ -484,6 +490,18 @@ slot of the loop state.
   (engine/log (qc batch) proctime time batch-state loop-state state)
   (engine/logrates (qc batch) proctime time batch-state loop-state state))
 
+(define (engine/logrusage batch proctime time batch-state loop-state state)
+  (let* ((usage (rusage))
+	 (load (get usage 'loadavg)))
+    (lognotice |Engine/Resources|
+      "Load: " (first load) " · " (second load) " · " (third load) ";  "
+      "mem=" ($bytes (memusage)) ", vmem=" ($bytes (vmemusage)) "; "
+      "cpu=" ($num (get usage 'cpu%) 2) "%; "
+      "runtime=" ($num (get usage 'utime) 2) "s/" 
+      ($num (get usage 'stime) 2) "s/" 
+      ($num (get usage 'clock) 2) "s "
+      "user/system/clock.")))
+
 ;;; Checkpointing
 
 ;;; This is called whenever a batch finishes and returns #t (roughly)
@@ -561,6 +579,8 @@ slot of the loop state.
 		      (lognotice |Engine/Checkpoint| 
 			"Waited " (secs->string (elapsed-time wait-start))
 			" for FIFO to pause")))))
+	      (engine-logger (qc) 0 (elapsed-time (get loop-state 'started)) 
+			     #[] loop-state (get loop-state 'state))
 	      (if (test loop-state 'stopped)
 		  (lognotice |Engine/Checkpoint| "Starting final checkpoint for " fifo)
 		  (loginfo |Engine/Checkpoint| "Starting incremental checkpoint for " fifo))
@@ -591,7 +611,8 @@ slot of the loop state.
 (define (engine/swapout args (batch-state #f) (loop-state #f) (state #f))
   (swapout args))
 
-(module-export! '{engine/fetchoids engine/fetchkeys engine/log 
+(module-export! '{engine/fetchoids engine/fetchkeys 
+		  engine/log engine/logrusage 
 		  engine/logrates engine/logrates+})
 
 ;;;; Utility meta-functions
