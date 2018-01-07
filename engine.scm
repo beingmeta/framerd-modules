@@ -10,6 +10,7 @@
 
 (module-export! '{engine/run  
 		  engine/checkpoint
+		  engine/usage
 		  engine/getopt
 		  batchup})
 
@@ -345,12 +346,8 @@ slot of the loop state.
 
     (if (getopt opts 'finalcheck #t)
 	(begin
-	  (engine-logger (qc) 0 (elapsed-time (get loop-state 'started))
-			 #[] loop-state state)
 	  (engine/checkpoint loop-state fifo #t)
-	  (commit)
-	  (engine-logger (qc) 0 (elapsed-time (get loop-state 'started))
-			 #[] loop-state state))
+	  (commit))
 	(begin
 	  (lognotice |Engine| "Skipping final checkpoint for ENGINE/RUN")
 	  (do-choices (counter counters)
@@ -398,7 +395,7 @@ slot of the loop state.
   (let ((logfns (get loop-state 'logfns)))
     (when (or (fail? logfns) (overlaps? #t logfns))
       (engine/log (qc batch) proc-time time
-		       batch-state loop-state state))
+		  batch-state loop-state state))
     (do-choices (logfn (difference logfns #t #f))
       (cond ((not (applicable? logfn))
 	     (logwarn |Engine/BadLogFn| 
@@ -493,14 +490,14 @@ slot of the loop state.
 (define (engine/logrusage batch proctime time batch-state loop-state state)
   (let* ((usage (rusage))
 	 (load (get usage 'loadavg)))
-    (lognotice |Engine/Resources|
-      "Load: " (first load) " · " (second load) " · " (third load) ";  "
-      "mem=" ($bytes (memusage)) ", vmem=" ($bytes (vmemusage)) "; "
+    (lognotice |Engine/Resources| 
       "cpu=" ($num (get usage 'cpu%) 2) "%; "
-      "runtime=" ($num (get usage 'utime) 2) "s/" 
-      ($num (get usage 'stime) 2) "s/" 
-      ($num (get usage 'clock) 2) "s "
-      "user/system/clock.")))
+      "mem=" ($bytes (memusage)) ", vmem=" ($bytes (vmemusage)) "; "
+      "\n    "
+      "Load: " (first load) " · " (second load) " · " (third load) "; "
+      "utime=" ($num (get usage 'utime) 2) "secs; "
+      "stime=" ($num (get usage 'stime) 2) "secs; "
+      "elapsed=" (secs->string (get usage 'clock)))))
 
 ;;; Checkpointing
 
@@ -579,8 +576,9 @@ slot of the loop state.
 		      (lognotice |Engine/Checkpoint| 
 			"Waited " (secs->string (elapsed-time wait-start))
 			" for FIFO to pause")))))
-	      (engine-logger (qc) 0 (elapsed-time (get loop-state 'started)) 
-			     #[] loop-state (get loop-state 'state))
+	      (when (getopt (get loop-state 'opts) 'logchecks #f)
+		(engine-logger (qc) 0 (elapsed-time (get loop-state 'started)) 
+			       #[] loop-state (get loop-state 'state)))
 	      (if (test loop-state 'stopped)
 		  (lognotice |Engine/Checkpoint| "Starting final checkpoint for " fifo)
 		  (loginfo |Engine/Checkpoint| "Starting incremental checkpoint for " fifo))
@@ -589,6 +587,9 @@ slot of the loop state.
 	      (when (and state (testopt (get loop-state 'opts) 'statefile))
 		(dtype->file (get loop-state 'state)
 			     (getopt (get loop-state 'opts) 'statefile)))
+	      (when (getopt (get loop-state 'opts) 'logchecks #f)
+		(engine-logger (qc) 0 (elapsed-time (get loop-state 'started)) 
+			       #[] loop-state (get loop-state 'state)))
 	      (set! success #t))
 	  (begin (drop! loop-state 'checkthread) ;; lets check/start! work again
 	    (store! loop-state 'checkdone (elapsed-time))
@@ -640,6 +641,9 @@ slot of the loop state.
 	   (set! last (elapsed-time))
 	   #t)
 	  (else #f))))
+
+(define (engine/usage field max)
+  (lambda ((loop-state #f)) (> (rusage field) max)))
 
 (define (engine/maxitems max-count)
   (slambda ((loop-state #f))
