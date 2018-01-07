@@ -301,7 +301,7 @@
       (store! req "X-Amz-SignedHeaders" (signed-headers req)))
     (when (and (test req '%params "X-Amz-Security-Token") awstoken)
       (store! req "X-Amz-Security-Token" awstoken))
-    (let* ((cq (if (or payload (eq? method "GET"))
+    (let* ((cq (if (or payload (equal? method "GET"))
 		   (canonical-query-string req)
 		   ""))
 	   (ch (canonical-headers req))
@@ -322,7 +322,9 @@
 	    (printout "\n  " (length payload)
 	      " " (if (packet? payload) "bytes " "characters ")
 	      " of " (or ptype "stuff"))
-	    "\n  no payload")
+	    (if payload
+		"\n  zero-length payload"
+		"\n  no payload"))
 	"\n  creds=" (write credential)
 	"\n  req=" (write creq)
 	"\n  sts=" (write string-to-sign))
