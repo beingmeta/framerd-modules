@@ -10,9 +10,20 @@
 
 (module-export! '{engine/run  
 		  engine/checkpoint
-		  engine/usage
 		  engine/getopt
 		  batchup})
+
+(module-export! '{engine/showrates engine/showrusage
+		  engine/log engine/logrusage engine/logrates})
+
+(module-export! '{engine/fetchoids engine/fetchkeys
+		  engine/poolfetch engine/indexfetch engine/swapout
+		  engine/savepool engine/saveindex engine/savetable})
+
+(module-export! '{engine/stopfn engine/callif
+		  engine/interval engine/maxitems engine/usage})
+
+;;;; Configurable
 
 (define log-frequency 60)
 (varconfig! engine:logfreq log-frequency)
@@ -470,10 +481,10 @@ slot of the loop state.
 		       (else (get finished 'rfc822date)))
 		 ") totalling " (secs->string timetotal 1))))))))
 
-(define (engine/logrates batch proctime time batch-state loop-state state)
+(define (engine/showrates loop-state)
   (let ((elapsed (elapsed-time (get loop-state 'started)))
 	(items (get loop-state 'items)))
-    (lognotice |Engine/Counts|
+    (printout
       ($num items) " items in " (secs->string elapsed) 
       " @ " ($num (->exact (/ items elapsed))) " items/sec, "
       (stringout 
@@ -483,21 +494,24 @@ slot of the loop state.
 	    (printout (if (zero? (remainder i 3)) "\n   " ", ")
 	      ($num count) " " (downcase counter)
 	      " (" ($num rate) " " (downcase counter) "/sec)")))))))
-(define (engine/logrates+ batch proctime time batch-state loop-state state)
-  (engine/log (qc batch) proctime time batch-state loop-state state)
-  (engine/logrates (qc batch) proctime time batch-state loop-state state))
 
-(define (engine/logrusage batch proctime time batch-state loop-state state)
+(define (engine/logrates batch proctime time batch-state loop-state state)
+  (let ((elapsed (elapsed-time (get loop-state 'started)))
+	(items (get loop-state 'items)))
+    (lognotice |Engine/Counts| (engine/showrates loop-state))))
+
+(define (engine/showrusage)
   (let* ((usage (rusage))
 	 (load (get usage 'loadavg)))
-    (lognotice |Engine/Resources| 
-      "cpu=" ($num (get usage 'cpu%) 2) "%; "
-      "mem=" ($bytes (memusage)) ", vmem=" ($bytes (vmemusage)) "; "
-      "\n    "
-      "Load: " (first load) " · " (second load) " · " (third load) "; "
+    (printout "cpu=" ($num (get usage 'cpu%) 2) "%; "
+      "mem=" ($bytes (memusage)) ", vmem=" ($bytes (vmemusage)) ";\n    "
+      "load: " (first load) " · " (second load) " · " (third load) "; "
       "utime=" ($num (get usage 'utime) 2) "secs; "
       "stime=" ($num (get usage 'stime) 2) "secs; "
       "elapsed=" (secs->string (get usage 'clock)))))
+
+(define (engine/logrusage batch proctime time batch-state loop-state state)
+  (loginfo |Engine/Resources| (engine/showrusage)))
 
 ;;; Checkpointing
 
@@ -612,10 +626,6 @@ slot of the loop state.
 (define (engine/swapout args (batch-state #f) (loop-state #f) (state #f))
   (swapout args))
 
-(module-export! '{engine/fetchoids engine/fetchkeys 
-		  engine/log engine/logrusage 
-		  engine/logrates engine/logrates+})
-
 ;;;; Utility meta-functions
 
 (define (engine/poolfetch pool)
@@ -650,14 +660,6 @@ slot of the loop state.
     (cond ((> (getopt loop-state 'items 0) max-count)
 	   #t)
 	  (else #f))))
-
-(define (engine/memgrowth delta)
-  (let ((last (memusage)))
-    (slambda ((loop-state #f)) 
-      (cond ((> (- (memusage) last) delta)
-	     (set! last (memusage))
-	     #t)
-	    (else #f)))))
 
 (define (engine/stopfn (opts #f))
   (let ((maxtime (getopt opts 'maxtime #f))
@@ -733,9 +735,4 @@ slot of the loop state.
 		    (call)
 		    (call loop-state)))))))))
 
-(module-export! '{engine/stopfn engine/callif
-		  engine/interval engine/memgrowth 
-		  engine/poolfetch engine/indexfetch engine/swapout 
-		  engine/savepool engine/saveindex engine/savetable
-		  engine/maxitems})
 
