@@ -1,4 +1,4 @@
-;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
+;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2005-2017 beingmeta, inc.  All rights reserved.
 
 (in-module 'engine)
@@ -11,6 +11,7 @@
 (module-export! '{engine/run  
 		  engine/checkpoint
 		  engine/getopt
+		  engine/test
 		  batchup})
 
 (module-export! '{engine/showrates engine/showrusage
@@ -35,6 +36,11 @@
 (varconfig! engine:checkspace check-spacing)
 
 (define fifo-condvar (within-module 'fifo fifo-condvar))
+
+(define ($showrate rate)
+  (if (> rate 50)
+      ($num (->exact rate 0))
+      ($num rate)))
 
 ;;; This is a task loop engine where a task applies a function to a
 ;;;  bunch of data items organized into batches.
@@ -255,7 +261,7 @@ slot of the loop state.
 			     (config 'batchrange (if nthreads
 						     (max nthreads (ilog nthreads))
 						     '(1 . 2)))))
-	 (batches (if (= batchsize 1)
+	 (batches (if (or (not batchsize) (< batchsize 2))
 		      (if vector-items items (choice->vector items))
 		      (if vector-items
 			  (batchup-vector items batchsize batchrange)
@@ -271,6 +277,7 @@ slot of the loop state.
 	 (logfns (getopt opts 'logfns {}))
 	 (counters {(getopt state 'counters {}) (getopt opts 'counters {})})
 	 (loop-init (getopt opts 'loop))
+	 (count-term (getopt opts 'count-term "items"))
 	 (loop-state (frame-create #f
 		       'fifo fifo
 		       'counters counters
@@ -287,8 +294,10 @@ slot of the loop state.
 		       'monitors (getopt opts 'monitors {})
 		       'logfns logfns
 		       'logcounters (getopt opts 'logcounters {})
+		       'logrates (getopt opts 'logrates {})
 		       'init (deep-copy state)
 		       'state (deep-copy state)
+		       'count-term count-term
 		       'nthreads nthreads
 		       'opts opts
 		       'cycles 1))
@@ -318,7 +327,7 @@ slot of the loop state.
 	  (irritant logfn |ENGINE/InvalidLogfn| engine/run))))
 
     (lognotice |Engine| 
-      "Processing " ($count n-items) " items "
+      "Processing " ($count n-items) " " count-term " "
       (when (and batchsize (> batchsize 1))
 	(printout "in " ($count (length batches)) " batches "))
       "using " rthreads " threads with " fcn)
@@ -345,11 +354,11 @@ slot of the loop state.
     (let* ((elapsed (elapsed-time (get loop-state 'started)))
 	   (rate (/ n-items elapsed)))
       (lognotice |Engine| 
-	"Finished " ($count n-items) " items "
+	"Finished " ($count n-items) " " count-term " "
 	(when (and batchsize (> batchsize 1))
 	  (printout "across " ($count (length batches)) " batches "))
 	"in " (secs->string elapsed) " "
-	"averaging " ($num (->exact rate 0)) " items/sec"))
+	"averaging " ($showrate rate) " " count-term "/sec"))
 
     (unless (test loop-state 'stopped)
       (store! loop-state 'stopped (timestamp))
@@ -426,6 +435,8 @@ slot of the loop state.
 ;;; The default log function
 (define (engine/log batch proctime time batch-state loop-state state)
   (let* ((count (getopt loop-state 'items 0))
+	 (count-term (try (get loop-state 'count-term) "items"))
+	 (logrates (get loop-state 'logrates))
 	 (loopmax (getopt loop-state 'total))
 	 (total (getopt state 'total))
 	 (taskmax (getopt state 'total))
@@ -434,41 +445,44 @@ slot of the loop state.
 	 (rate (/~ items elapsed))
 	 (%loglevel (getopt loop-state '%loglevel %loglevel))
 	 (fifo (getopt loop-state 'fifo)))
-    (loginfo |Batch/Progress| 
-      (when (testopt (fifo-opts fifo) 'static)
-	(printout "(" (show% (fifo/load fifo) (fifo-size fifo) 2)") "))
-      "Processed " ($num (choice-size batch)) " items in " 
-      (secs->string (elapsed-time (get batch-state 'started)) 1) " or ~"
-      ($num (->exact (/~ (choice-size batch)
-			 (elapsed-time (get batch-state 'started))) 0))
-      " items/second for this batch and thread.")
+    (when (exists? batch)
+      (loginfo |Batch/Progress| 
+	(when (testopt (fifo-opts fifo) 'static)
+	  (printout "(" (show% (fifo/load fifo) (fifo-size fifo) 2)") "))
+	"Processed " ($num (choice-size batch)) " " count-term " in " 
+	(secs->string (elapsed-time (get batch-state 'started)) 1) " or ~"
+	($showrate (/~ (choice-size batch) (elapsed-time (get batch-state 'started))))
+	" " count-term "/second for this batch and thread."))
+    ;; (%watch "ENGINE/LOG" loop-state)
     (lognotice |Engine/Progress|
-      "Processed " ($num (getopt loop-state 'items 0)) " items" 
+      "Processed " ($num (getopt loop-state 'items 0)) " " count-term
       (when loopmax
 	(printout " (" (show% (getopt loop-state 'items 0) loopmax) " of "
-	  ($num loopmax) ")"))
+	  ($num loopmax) " " count-term ")"))
       " in " (secs->string (elapsed-time (get loop-state 'started)) 1) 
-      ", averaging " ($num (->exact rate 0)) " items/second."
+      ", averaging " ($showrate rate) " " count-term "/second."
       (if (testopt loop-state 'logcounters)
 	  (doseq (counter (getopt loop-state 'logcounters) i)
 	    (let* ((count (get loop-state counter))
-		   (rate (->exact (/~ count elapsed))))
+		   (rate (/~ count elapsed)))
 	      (printout (if (zero? (remainder i 4)) "\n   " ", ")
 		($num count) " " (downcase counter)
-		" (" ($num rate) " " (downcase counter) "/sec)")))
+		(when (overlaps? counter logrates)
+		  (printout " (" ($showrate rate) " " (downcase counter) "/sec)")))))
 	  (do-choices (counter (difference (get loop-state 'counters) 'items) i)
 	    (let* ((count (get loop-state counter))
-		   (rate (->exact (/~ count elapsed))))
+		   (rate  (/~ count elapsed)))
 	      (printout (if (zero? (remainder i 4)) "\n   " ", ")
 		($num count) " " (downcase counter)
-		" (" ($num rate) " " (downcase counter) "/sec)"))))
+		(when (overlaps? counter logrates)
+		  (printout " (" ($showrate rate) " " (downcase counter) "/sec)"))))))
       (cond (loopmax
 	     (let* ((togo (- loopmax count))
 		    (timeleft (/~ togo rate))
 		    (finished (timestamp+ (timestamp) timeleft))
 		    (timetotal (/~ loopmax rate)))
-	       (printout "\nAt " ($num (->exact rate 0)) " items/sec, "
-		 "the loop's " ($num loopmax) " items should be finished in "
+	       (printout "\nAt " ($showrate rate) " " count-term "/sec, "
+		 "the loop's " ($num loopmax) " " count-term " should be finished in "
 		 "~" (secs->string timeleft 1) " (~"
 		 (get finished 'timestring) 
 		 (if (not (equal? (get (timestamp) 'datestring)
@@ -483,17 +497,21 @@ slot of the loop state.
 
 (define (engine/showrates loop-state)
   (let ((elapsed (elapsed-time (get loop-state 'started)))
+	(logrates (get loop-state 'logrates))
+	(count-term (getopt loop-state 'count-term "items"))
 	(items (get loop-state 'items)))
     (printout
-      ($num items) " items in " (secs->string elapsed) 
-      " @ " ($num (->exact (/ items elapsed))) " items/sec, "
+      ($num items) " " count-term " in " (secs->string elapsed) 
+      " @ " ($showrate (/ items elapsed)) " " count-term "/sec, "
       (stringout 
 	(do-choices (counter (difference (get loop-state 'counters) 'items) i)
 	  (let* ((count (get loop-state counter))
-		 (rate (->exact (/~ count elapsed))))
+		 (rate  (/~ count elapsed)))
 	    (printout (if (zero? (remainder i 3)) "\n   " ", ")
 	      ($num count) " " (downcase counter)
-	      " (" ($num rate) " " (downcase counter) "/sec)")))))))
+	      (when (overlaps? counter logrates)
+		(printout
+		  " (" ($showrate rate) " " (downcase counter) "/sec)")))))))))
 
 (define (engine/logrates batch proctime time batch-state loop-state state)
   (let ((elapsed (elapsed-time (get loop-state 'started)))
@@ -734,5 +752,59 @@ slot of the loop state.
 		(if (zero? (procedure-arity call))
 		    (call)
 		    (call loop-state)))))))))
+
+(define (test-clause sysinfo loop-state clause)
+  (cond ((applicable? clause) (clause))
+	((not (pair? clause))
+	 (logwarn |BadLoopTestClause| "Couldn't interpret " clause)
+	 #f)
+	((applicable? (car clause))
+	 (apply (car clause) (cdr clause)))
+	((symbol? (car clause))
+	 (let* ((field (car clause))
+		(value (try (get sysinfo field) 
+			    (get loop-state field)))
+		(args (cdr clause))
+		(arg (and (pair? args) (car args))))
+	   (cond ((fail? value) #t)
+		 ((and (number? args) (number? value)) (>= value args))
+		 ((and (number? arg) (number? value)) (>= value arg))
+		 ((and (timestamp? args) (timestamp? value))
+		  (time-later? value args))
+		 ((and (timestamp? arg) (timestamp? value))
+		  (time-later? value arg))
+		 ((and (applicable? arg) (pair? (cdr args)))
+		  (apply arg value (cdr args)))
+		 ((applicable? arg) (arg value (cdr args)))
+		 (else #f))))
+	(else #t)))
+
+(define (looptest sysinfo loop-state tests)
+  (if (null? tests) #t
+      (and (test-clause sysinfo loop-state (car tests))
+	   (looptest sysinfo loop-state (cdr tests)))))
+
+(define (engine/test . spec-args)
+  (let ((tests '()) (spec spec-args) (clause #f))
+    (while (and (pair? spec) (pair? (cdr spec)))
+      (cond ((applicable? (car spec))
+	     (set! tests (cons (car spec) (cadr spec)))
+	     (set! spec (cddr spec)))
+	    ((not (symbol? (car spec)))
+	     (irritant spec-args |BadTestSpec| engine/looptest))
+	    ((not (applicable? (cadr spec)))
+	     (set! tests (cons (cons (car spec) (cadr spec)) tests))
+	     (set! spec (cddr spec)))
+	    ((= (procedure-arity (cadr spec)) 1)
+	     (set! tests (cons (list (car spec) (cadr spec)) tests))
+	     (set! spec (cddr spec)))
+	    (else
+	     (if (< (length spec) 3) (irritant spec-args |BadTestSpec| engine/test))
+	     (set! tests (cons (list (car spec) (cadr spec) (caddr spec))
+			       tests))
+	     (set! spec (cdddr spec)))))
+    (unless (null? spec) (irritant spec-args |BadTestSpec| engine/test))
+    (def (engine/tester (loop-state #[]))
+      (looptest (rusage) loop-state tests))))
 
 
