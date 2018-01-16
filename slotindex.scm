@@ -3,7 +3,7 @@
 
 (in-module 'slotindex)
 
-(use-module '{logger varconfig})
+(use-module '{logger varconfig storage/flex})
 
 (module-export! '{slotindex/make slotindex/setup 
 		  slotindex/init slotindex/add!
@@ -100,7 +100,9 @@
 			   (get (getopt default-opts 'custom {}) slot)
 			   #[]))
 	      (opts (cons custom indexopts))
-	      (default-name (glom prefix (downcase slot) ".index"))
+	      (default-name (if (getopt opts 'flexindex)
+				(glom prefix (downcase slot) ".flexindex")
+				(glom prefix (downcase slot) ".index")))
 	      (basefile (getopt opts 'basename default-name))
 	      (pools (poolref (choice (get base 'pools)
 				      (getopt opts 'pools {})) dir))
@@ -117,7 +119,7 @@
 	 (when (file-exists? path)
 	   (lognotice |UsingIndex| "Using the index at " path " for " slot))
 	 (if (file-exists? path)
-	     (set! index (open-index path opts))
+	     (set! index (flex/dbref path opts))
 	     (let* ((type (getopt opts 'indextype 
 				  (getopt opts 'type (getopt opts 'module 'hashindex))))
 		    (module (getopt opts 'module {}))
@@ -132,7 +134,7 @@
 			       (get-baseoids pools)}))
 	       (lognotice |NewIndex| "Creating new index for " slot " at " path)
 	       (when (exists? baseoids) (store! opts 'baseoids baseoids))
-	       (set! index (make-index path opts))))
+	       (set! index (flex/make path opts))))
 	 (store! base slot index)
 	 (add! base 'slots slot)
 	 index)))
