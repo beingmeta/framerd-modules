@@ -7,10 +7,12 @@
 (define %nosubst '{bricosource
 		   brico-pool brico-index brico.db
 		   xbrico-pool names-pool places-pool
+		   brico.pool brico.index
+		   xbrico.pool names.pool places.pool
 		   freqfns use-wordforms})
 
 ;; For index-name, at least
-(use-module '{texttools reflection logger varconfig})
+(use-module '{texttools reflection logger varconfig storage/flex})
 ;; When BRICOSOURCE is ".db"
 (use-module 'usedb)
 ;; For custom methods
@@ -28,12 +30,116 @@
 (define names-pool {})
 (define places-pool {})
 
+(define brico.pool {})
+(define brico.index {})
+
+(define xbrico.pool {})
+(define names.pool {})
+(define places.pool {})
+
 (define brico.db #f)
 
 (define brico-readonly #t)
 (varconfig! brico:readonly brico-readonly)
 
+(define brico-background #t)
+(varconfig! brico:background brico-background)
+
 (define absfreqs {})
+
+(define host-string '(+ {(isalnum) "-"}))
+(define host-name `#((* #(,host-string ".")) ,host-string))
+
+(defambda (setup-brico source (success #f) (setup #f) 
+		       (use-indexes #f))
+  (cond ((ambiguous? source)
+	 (do-choices (elt source)
+	   (unless success
+	     (when (setup-brico elt) (set! success #t)))))
+	((or (pair? source) (vector? source))
+	 (doseq (elt source)
+	   (unless success
+	     (when (setup-brico elt) (set! success #t)))))
+	((not (string? source)))
+	((textsearch #{"," ";" ":" "|"} source)
+	 (let* ((first-sep (textsearch #{"," ";" ":" "|"} source))
+		(sepchar (slice source first-sep (1+ first-sep))))
+	   (set! success
+	     (setup-brico (remove "" (segment source sepchar))))))
+	((and (has-suffix source {".pool" ".index"})
+	      (file-exists? source))
+	 (set! success (setup-brico (dirname (abspath source)))))
+	((and (file-directory? source) 
+	      (file-exists? (mkpath source "brico.db")))
+	 (set! success (setup-brico (mkpath source "brico.db"))))
+	((file-directory? source)
+	 (let ((pools {}) (indexes {}) (failed #f))
+	   (do-choices (file (getfiles source))
+	     (onerror
+		 (cond ((has-suffix file ".pool")
+			(set+! pools (use-pool file `#[readonly ,brico-readonly])))
+		       ((has-suffix file ".index")
+			(set+! indexes
+			  (open-index file
+				      `#[readonly ,brico-readonly
+					 background ,brico-background]))))
+		 (lambda (ex) 
+		   (set! failed #t)
+		   #break)))
+	   (when (or (exists? pools) (exists? indices))
+	     (loginfo |BRICO|
+	       "Loaded " (choice-size pools) " pools "
+	       "and " (choice-size pools) " indexes:"
+	       (do-choices (pool pools) (printout "\n\t" pool))
+	       (do-choices (index indexes) (printout "\n\t" index))))
+	   (when (and (not failed) (exists? pools) (exists? indices)
+		      (name->pool "brico.framerd.org"))
+	     (set! use-indexes indexes)
+	     (set! success #t)
+	     (set! setup #t))))
+	((file-exists? source)
+	 (onerror
+	     (begin
+	       (set! brico.db 
+		 (usedb source `#[readonly ,brico-readonly
+				  background ,brico-background]))
+	       (set! success #t)
+	       (set! setup #t))
+	     (lambda (ex)
+	       (logwarn |BadBrico| 
+		 "Couldn't use BRICOSOURCE " source ": "
+		 ex)
+	       #f)))
+	((file-exists? (glom source ".db"))
+	 (set! success (setup-brico (glom source ".db"))))
+	((or (textmatch `#((isalnum+) "@" ,host-name) source)
+	     (textmatch `#(,host-name ":" (isdigit+)) source))
+	 (onerror
+	     (begin
+	       (use-pool source `#[readonly ,brico-readonly])
+	       (open-index source `#[readonly ,brico-readonly
+				     background ,brico-background])
+	       (set! success #t)
+	       (set! setup #t))
+	     (lambda (ex)
+	       (logwarn |BadBrico| 
+		 "Couldn't use BRICOSOURCE " source ": "
+		 ex)
+	       #f))))
+  (when (and success setup)
+    (set! bricosource source)
+    (if brico.db
+	(set! brico-index (get brico.db '%indexes))
+	(if use-indexes (set! brico-index use-indexes)))
+    (set! brico-pool (name->pool "brico.framerd.org"))
+    (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
+    (set! names-pool (name->pool "namedb.beingmeta.com"))
+    (set! places-pool (name->pool "placedb.beingmeta.com"))
+    (set! brico.pool brico-pool)
+    (set! xbrico.pool xbrico-pool)
+    (set! names.pool names-pool)
+    (set! places.pool places-pool))
+  success)
 
 (define bricosource-config
   (slambda (var (val 'unbound))
@@ -48,37 +154,7 @@
 		    "BRICO is already provided from "
 		    (pool-source brico-pool))
 	   #f)
-	  ((and (string? val)
-		(or (has-suffix val ".db")
-		    (file-exists? (string-append val ".db"))))
-	   (lognotice |Brico| "Using BRICO database from " val)
-	   (set! bricosource val)
-	   (set! brico.db (usedb val `#[readonly ,brico-readonly]))
-	   (set! brico-index (get brico.db '%indexes))
-	   (set! brico-pool (name->pool "brico.framerd.org"))
-	   (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
-	   (set! names-pool (name->pool "namedb.beingmeta.com"))
-	   (set! places-pool (name->pool "placedb.beingmeta.com"))
-	   (if (exists? brico-pool) #t
-	       (begin (set! brico-index {})
-		      #f)))
-	  (else
-	   (lognotice |Brico| "Using BRICO database from " val)
-	   (set! bricosource val)
-	   (use-pool val `#[readonly ,brico-readonly])
-	   (set! brico-index (onerror (use-index val `#[readonly ,brico-readonly]) #f))
-	   (set! brico-pool (name->pool "brico.framerd.org"))
-	   (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
-	   (set! names-pool (name->pool "namedb.beingmeta.com"))
-	   (set! places-pool (name->pool "placedb.beingmeta.com"))
-	   (when #f ;; (position #\@ val)
-	     (onerror
-	      (set+! absfreqs
-		     (open-index (string-append "absfreqs@" val)))
-	      (lambda (ex) (fail))))
-	   (if (exists? brico-pool) #t
-	       (begin (set! brico-index {})
-		      #f))))))
+	  (else (setup-brico val)))))
 (config-def! 'bricosource bricosource-config)
 
 (define (config-absfreqs var (val))
@@ -619,6 +695,8 @@
  '{brico-pool
    brico-index brico.db
    xbrico-pool names-pool places-pool
+   brico.pool brico.index
+   xbrico.pool names.pool places.pool
    absfreqs getabsfreq
    default-language all-languages
    ;; Maps for particular languages
