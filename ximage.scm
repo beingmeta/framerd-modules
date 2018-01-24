@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
-;;; Copyright (C) 2011-2017 beingmeta, inc. All rights reserved
+;;; Copyright (C) 2011-2018 beingmeta, inc. All rights reserved
 
 (in-module 'ximage)
 

@@ -5,15 +5,18 @@
 
 ;;; Generation of strings from various other kinds of values
 
-(module-export! '{get% show%
-		       interval-string short-interval-string
-		       minimal-interval-string
-		       padnum printnum numstring
-		       $count $countstring
-		       $num $numstring
-		       $size $sizestring
-		       $bytes $bytestring
-		       $bytes/sec})
+(module-export!
+ '{get% show%
+   interval-string
+   short-interval-string
+   minimal-interval-string
+   compact-interval-string
+   padnum printnum numstring
+   $count $countstring
+   $num $numstring
+   $size $sizestring
+   $bytes $bytestring
+   $bytes/sec})
 
 ;; Percentages
 
@@ -216,4 +219,34 @@
 	 (stringout (round (/ secs (* 30 24 3600))) " months"))
 	(else
 	 (stringout (round (/ secs (* 365 24 3600))) " years"))))
+
+(define (compact-interval-string total (precise #t) (started #f) (secs))
+  (default! secs (->exact (floor total)))
+  (stringout
+    (when (> secs (* 7 24 3600))
+      (printout (quotient secs (* 7 24 3600)) "w")
+      (set! secs (remainder secs (* 7 24 3600)))
+      (set! started #t))
+    (when (or started (> secs (* 24 3600)))
+      (printout (quotient secs (* 24 3600)) "d")
+      (set! secs (remainder secs (* 24 3600)))
+      (set! started #t))
+    (when (or started (> secs 3600))
+      (printout (quotient secs 3600) "h")
+      (set! secs (remainder secs 3600))
+      (set! started #t))
+    (when (or started (> secs 60))
+      (printout (quotient secs 60) "m")
+      (set! secs (remainder secs 60))
+      (set! started #t))
+    (if (< total 15) 
+	(printout total "s")
+	(if (< total 60)
+	    (printout (inexact->string total 1) "s")
+	    (printout secs "s")))))
+
+
+
+
+
 
