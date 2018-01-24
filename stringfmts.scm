@@ -1,5 +1,11 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
-;;; Copyright (C) 2005-2013 beingmeta, inc.  All rights reserved.
+;;; Copyright (C) 2005-2018 beingmeta, inc.  All rights reserved.
+
+;;; DEPRECATED!!! DEPRECATED!!! DEPRECATED!!! DEPRECATED!!!
+
+;;; This file has been moved into the builtin libscm module,
+;;;  so the contents of this file will only be used by older versions
+;;;  of FramerD.
 
 (in-module 'stringfmts)
 
