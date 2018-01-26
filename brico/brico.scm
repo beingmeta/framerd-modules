@@ -86,13 +86,13 @@
 		 (lambda (ex) 
 		   (set! failed #t)
 		   #break)))
-	   (when (or (exists? pools) (exists? indices))
+	   (when (or (exists? pools) (exists? indexes))
 	     (loginfo |BRICO|
 	       "Loaded " (choice-size pools) " pools "
 	       "and " (choice-size pools) " indexes:"
 	       (do-choices (pool pools) (printout "\n\t" pool))
 	       (do-choices (index indexes) (printout "\n\t" index))))
-	   (when (and (not failed) (exists? pools) (exists? indices)
+	   (when (and (not failed) (exists? pools) (exists? indexes)
 		      (name->pool "brico.framerd.org"))
 	     (set! use-indexes indexes)
 	     (set! success #t)
