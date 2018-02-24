@@ -39,7 +39,7 @@
 (define (getbaselang s)
   (if (overlaps? s all-languages) s
       (try (get norm-map s)
-	   (get index-map s))))
+	   (get indicator-map s))))
 
 (define (apply-variation rule word language)
   (if (custom-map-language rule)

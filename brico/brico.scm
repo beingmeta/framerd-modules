@@ -171,16 +171,18 @@
 
 ;;; Common tables
 
-(define all-languages (file->dtype (get-component "data/languages.dtype")))
-(define language-map (file->dtype (get-component "data/langmap.table")))
-(define norm-map (file->dtype (get-component "data/normmap.table")))
-(define gloss-map (file->dtype (get-component "data/glossmap.table")))
-(define index-map (file->dtype (get-component "data/indexmap.table")))
-(define frag-map (file->dtype (get-component "data/fragmap.table")))
+(define-init all-languages (file->dtype (get-component "data/languages.dtype")))
+(define-init language-map (file->dtype (get-component "data/langmap.table")))
+(define-init norm-map (file->dtype (get-component "data/normmap.table")))
+(define-init gloss-map (file->dtype (get-component "data/glossmap.table")))
+(define-init indicator-map (file->dtype (get-component "data/indicatormap.table")))
+(define-init frag-map (file->dtype (get-component "data/fragmap.table")))
 
-(define all-languages (get language-map (getkeys language-map)))
-(define all-norms (get norm-map (getkeys norm-map)))
-(define all-glosses (get gloss-map (getkeys gloss-map)))
+(define index-map indicator-map)
+
+(define-init all-languages (get language-map (getkeys language-map)))
+(define-init all-norms (get norm-map (getkeys norm-map)))
+(define-init all-glosses (get gloss-map (getkeys gloss-map)))
 
 ;;; This is how these tables where generated
 (comment
@@ -192,9 +194,9 @@
  (do-choices (l (?? 'type 'norm))
    (store! norm-map (get l 'key) l))
  (do-choices (l (?? 'type 'indexes))
-   (store! index-map (get l 'key) l))
+   (store! indicator-map (get l 'key) l))
  (do-choices (l (?? 'type 'fragments))
-   (store! index-map (get l 'key) l)))
+   (store! frag-map (get l 'key) l)))
 
 ;;; Common BRICO frames
 
@@ -700,7 +702,7 @@
    absfreqs getabsfreq
    default-language all-languages
    ;; Maps for particular languages
-   language-map gloss-map norm-map index-map frag-map
+   language-map gloss-map norm-map indicator-map frag-map index-map
    all-languages all-glosses all-norms
    ;; Prefetchers for OIDs and inverted index slotids
    brico-prefetch! brico-prefetch prefetch-slots!})
@@ -757,5 +759,5 @@
 	 isa =is= sameas inverse disjoint implies implies*
 	 diffterms /diffterms differentiae differentates
 	 sumterms refterms /sumterms /refterms references
-	 language-map gloss-map norm-map index-map})
+	 language-map gloss-map norm-map indicator-map})
 
