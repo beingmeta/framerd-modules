@@ -11,9 +11,7 @@
 		   xbrico.pool names.pool places.pool
 		   freqfns use-wordforms})
 
-;; For index-name, at least
 (use-module '{texttools reflection logger varconfig storage/flex})
-;; When BRICOSOURCE is ".db"
 (use-module 'usedb)
 ;; For custom methods
 (use-module 'rulesets)

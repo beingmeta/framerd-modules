@@ -180,8 +180,7 @@
 		(try-choices
 		    (d (difference (get-norm (get concept sumterms) lang)
 				   norm))
-		  (tryif (singleton? (intersection meanings
-						   (?? sumterms (?? lang d))))
+		  (tryif (singleton? (intersection meanings (?? sumterms (?? lang d))))
 			 (string-append norm " (:"  d ")")))))))
 
 ;;; Prefetching
@@ -189,9 +188,7 @@
 (defambda (find-dterm/prefetch! concept (language default-language) (norm))
   (default! norm (get-norm concept language))
   (prefetch-oids! concept)
-  (prefetch-oids! (%get concept '{region country
-					 @1/2c274{PARTOF}
-					 @1/2c27e{IMPLIES}}))
+  (prefetch-oids! (%get concept '{region country @1/2c274{PARTOF} @1/2c27e{IMPLIES}}))
   (prefetch-keys!
    (cons (choice language (get norm-map language))
 	 (choice (get sensecathints (cons (get concept 'sensecat) language))
