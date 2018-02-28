@@ -20,14 +20,15 @@
 
 (define (probe-xdterm lang1 term1 lang2 term2)
   (singleton? (?? lang1 term1
-		  {@?always @?partof* @?sometimes} (?? lang2 term2))))
+		  {@1/4{ALWAYS} @1/2c281{PART-OF*} @1/5{SOMETIMES}}
+		  (?? lang2 term2))))
 
 (define (find-xdterm concept primary secondary)
   (let ((d1 (choice (get concept '{country region})
-		    (get concept @?always)))
-	(d2 (get concept @?sometimes))
-	(d3 (get+ concept @?always))
-	(d4 (get+ concept @?sometimes))
+		    (get concept @1/4{ALWAYS})))
+	(d2 (get concept @1/5{SOMETIMES}))
+	(d3 (get+ concept @1/4{ALWAYS}))
+	(d4 (get+ concept @1/5{SOMETIMES}))
 	(langid (get secondary 'iso639/1)))
     (try
      (try-choices (norm (get-norm concept secondary))
