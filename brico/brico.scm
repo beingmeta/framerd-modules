@@ -18,6 +18,9 @@
 
 (define %loglevel %notify%)
 
+(define (get-keyslot ix) 
+  (tryif (index? ix) (indexctl ix 'keyslot)))
+
 ;;; Configuring bricosource
 
 (define bricosource #f)
@@ -34,6 +37,16 @@
 (define xbrico.pool {})
 (define names.pool {})
 (define places.pool {})
+
+(define en.index #f)
+(define en_norms.index #f)
+
+(define words.index #f)
+(define names.index #f)
+(define norms.index #f)
+
+(module-export!
+ '{en.index en_norms.index words.index names.index norms.index})
 
 (define brico.db #f)
 
@@ -92,6 +105,7 @@
 	       (do-choices (index indexes) (printout "\n\t" index))))
 	   (when (and (not failed) (exists? pools) (exists? indexes)
 		      (name->pool "brico.framerd.org"))
+	     (set! brico.db `#[%pools ,pools %index ,indexes])
 	     (set! use-indexes indexes)
 	     (set! success #t)
 	     (set! setup #t))))
@@ -136,7 +150,13 @@
     (set! brico.pool brico-pool)
     (set! xbrico.pool xbrico-pool)
     (set! names.pool names-pool)
-    (set! places.pool places-pool))
+    (set! places.pool places-pool)
+    (set! en.index
+      (try (pick (get brico.db '%indexes) get-keyslot @1/2c1c7"English") #f))
+    (set! en_norms.index
+      (try (pick (get brico.db '%indexes) get-keyslot @1/44896"Common English") #f))
+    (set! names.index
+      (try (pick (get brico.db '%indexes) get-keyslot 'names) #f)))
   success)
 
 (define bricosource-config
