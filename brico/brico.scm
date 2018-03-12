@@ -92,8 +92,8 @@
 		       ((has-suffix file ".index")
 			(set+! indexes
 			  (open-index file
-				      `#[readonly ,brico-readonly
-					 background ,brico-background]))))
+			    `#[readonly ,brico-readonly
+			       background ,brico-background]))))
 		 (lambda (ex) 
 		   (set! failed #t)
 		   #break)))
@@ -105,7 +105,7 @@
 	       (do-choices (index indexes) (printout "\n\t" index))))
 	   (when (and (not failed) (exists? pools) (exists? indexes)
 		      (name->pool "brico.framerd.org"))
-	     (set! brico.db `#[%pools ,pools %index ,indexes])
+	     (set! brico.db `#[%pools ,pools %indexes ,indexes])
 	     (set! use-indexes indexes)
 	     (set! success #t)
 	     (set! setup #t))))
