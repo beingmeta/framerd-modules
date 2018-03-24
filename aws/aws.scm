@@ -56,13 +56,40 @@
 (define-init aws:expires #f)
 (define-init aws/refresh #f)
 
-;;; Other config info
-
 (define key+secret
   #((label key (isxdigit+)) "#" (label secret (isxdigit+) ->secret)))
 
+(define-init aws:config #[])
+
+(define cred-fields #(aws:key aws:secret aws:region aws:account))
+
+(define (handle-creds string (fields cred-fields))
+  (if (exists? (text->frame key+secret string))
+      (let ((match (text->frame key+secret string)))
+	(store! aws:config 'aws:key (get match 'key))
+	(store! aws:config 'aws:secret (get match 'secret)))
+      (doseq (config (remove "" (map trim-spaces (textslice string '(+ {(isspace) ";"}) #f)))
+		     i)
+	(let ((var (if (position #\= config)
+		       (decode-entities (slice config 0 (position #\= config)))
+		       (and (< i (length fields)) (elt fields i))))
+	      (val (if (position #\= config)
+		       (slice config (1+ (position #\= config)))
+		       config)))
+	  (if (has-prefix val "#")
+	      (set! val (->secret (decode-entities (slice val 1))))
+	      (set! val (decode-entities val)))
+	  (config! var val)
+	  (when (and (string? var) (has-prefix var "AWS:"))
+	    (store! aws:config (string->symbol (slice var 4))
+		    val))))))
+  
+;;; Other config info
+
 (define (set-aws-config val)
-  (cond ((and (pair? val) ;; (key . secret)
+  (cond ((and (symbol? val) (config val))
+	 (set-aws-config (config val)))
+	((and (pair? val) ;; (key . secret)
 	      (or (string? (car val))
 		  (packet? (car val))
 		  (secret? (car val)))
@@ -101,8 +128,11 @@
 	 (let ((match (text->frame key+secret val)))
 	   (store! aws:config 'aws:key (get match 'key))
 	   (store! aws:config 'aws:secret (get match 'secret))))
+	((and (string? val) (position #\= val))
+	 (handle-creds val cred-fields))
+	((and (string? val) (config val))
+	 (set-aws-config (config val)))
 	(else (logwarn |BadAWSConfig| val))))
-(define-init aws:config #[])
 (config-def! 'aws:config
 	     (lambda (var (val))
 	       (if (not (bound? val))
