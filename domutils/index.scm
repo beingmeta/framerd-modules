@@ -79,7 +79,7 @@
 			 (pick indexrules hashtable?)))
 		 (terminal #t))
 	    (debug%watch "DOM/INDEXER" (dom/sig xml) index xml parent
-			 indexval indexslots slot rules eltinfo)
+			 indexval indexslots slots rules eltinfo)
 	    (when idmap (add! idmap (get xml 'id) xml))
 	    (add! index (cons 'has {(getkeys xml) (get xml '%attribids)}) indexval)
 	    (add! index (cons 'parent parent) indexval)

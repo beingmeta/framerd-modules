@@ -163,7 +163,7 @@
 ;;; Exported functions
 
 (define (text/keystrings text (options #[]))
-  (info%watch "TEXT/KEYSTRINGS" settings)
+  (info%watch "TEXT/KEYSTRINGS" options)
   (textanalyze text
 	       (getopt options 'wordrule
 		       (difference
