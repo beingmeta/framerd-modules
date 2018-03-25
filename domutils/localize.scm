@@ -260,13 +260,13 @@
 	(when (and (exists? ref) ref)
 	  (if (exists? cached)
 	      (loginfo |Localize|
-		       "Localized (cached) " (showuri (get node 'src))
-		       "\n\tto " (write ref) " for " (dom/sig node #t) " saved in"
-		       (do-choices saveto (printout "\n\t\t" (gp/string saveto))))
+		"Localized (cached) " (showuri (get node 'src))
+		"\n\tto " (write ref) " for " (dom/sig node #t) " saved in"
+		(do-choices saveto (printout "\n\t\t" (gp/string saveto))))
 	      (loginfo |Localize|
-		       "Localized " (showuri (get node 'src))
-		       "\n\tto " (write ref) " for " (dom/sig node #t) " saved in"
-		       (do-choices saveto (printout "\n\t\t" (gp/string saveto)))))
+		"Localized " (showuri (get node 'src))
+		"\n\tto " (write ref) " for " (dom/sig node #t) " saved in"
+		(do-choices saveto (printout "\n\t\t" (gp/string saveto)))))
 	  (when saveslot (dom/set! node saveslot (get node 'src)))
 	  (unless (or (test node 'data-origin) (has-prefix (get node 'src) "data:"))
 	    (dom/set! node 'data-origin (get node 'src)))
@@ -275,18 +275,18 @@
     ;; Convert url() references in stylesheets
     (loginfo |Localize| "Localizing stylesheet links")
     (do-choices (node (pick (pick (dom/find head "link") 'rel "stylesheet")
-			    'href))
+			'href))
       (let* ((ctype (try (get node 'type) "text"))
 	     (href (get node 'href))
 	     (ref (get urlmap href)))
 	(when (or (fail? ref) (not ref) 
 		  (has-prefix href "data:") (has-prefix ref "data:"))
 	  (loginfo |Localize|
-		   "Localizing stylesheet " (get node 'href)
-		   "\n\tfrom " (showuri base) "\n\tto " saveto
-		   (when (exists? stylerules)
-		     (printout "\n\twith CSS rules " 
-		       (pprint stylerules))))
+	    "Localizing stylesheet " (get node 'href)
+	    "\n\tfrom " (showuri base) "\n\tto " saveto
+	    (when (exists? stylerules)
+	      (printout "\n\twith CSS rules " 
+		(pprint stylerules))))
 	  (let* ((usebase (if (position #\/ href)
 			      (gp/mkpath base (dirname href))
 			      base))
@@ -395,14 +395,14 @@
 	  (logdebug |Localize/href| "New converted node: \n"  (pprint node))))
       (let ((xresources '()) (files {}))
 	(do-choices (resource (pick (pickstrings (get urlmap (getkeys urlmap)))
-				    has-prefix read))
+				has-prefix read))
 	  (set+! files resource)
 	  (set! xresources
-		(cons* `#[%XMLTAG LINK %ATTRIBIDS {REL HREF}
-			  REL "x-resource"
-			  HREF ,resource]
-		       "\n"
-		       xresources)))
+	    (cons* `#[%XMLTAG LINK %ATTRIBIDS {REL HREF}
+		      REL "x-resource"
+		      HREF ,resource]
+		   "\n"
+		   xresources)))
 	(if (pair? options)
 	    (add! (car options) 'xresources files)
 	    (add! options 'xresources files))
