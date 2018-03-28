@@ -22,7 +22,7 @@
   )
 (define noun-roots
   (choice->hashset
-   (file->dtypes (get-component "data/en-noun.dtype"))))
+   (qc (file->dtypes (get-component "data/en-noun.dtype")))))
 
 (define plural-rules
   '(#({"a" "e" "i" "o" "u"} (subst "ies" "y")) 
@@ -44,8 +44,7 @@
   ;; (use-index (get-component "data/en-verb-roots.index"))
   )
 (define verb-roots
-  (choice->hashset
-   (file->dtypes (get-component "data/en-verb.dtype"))))
+  (choice->hashset (file->dtypes (get-component "data/en-verb.dtype"))))
 (define ing-forms
   (let ((table (make-hashtable)))
     (do-choices (key (getkeys irregular-verbs))
