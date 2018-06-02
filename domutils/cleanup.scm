@@ -10,7 +10,8 @@
 
 (module-export! '{dom/cleanup! dom/mergestyles! dom/unipunct!
 		  dom/cleanblocks! dom/raisespans!
-		  dom/smartquote!})
+		  dom/smartquote!
+		  domtext/cleanup})
 
 (module-export!
  '{dom/mergebreaks/subst
@@ -633,3 +634,32 @@
 	(dom/set! img 'data-source-height (get img 'height))
 	(dom/drop! img 'height)
 	(drop! index (cons 'has 'height) img)))))
+
+;;;; Handle SCRIPT/etc elements
+
+(define (xml-start tagname)
+  `(IC #("<" ,tagname 
+	 (* {#((isspace+) (xmlname) (spaces*) "=" (spaces*) 
+	       {#("\"" (not> "\"") "\"")
+		#("'" (not> "'") "\p")
+		(xmlnmtoken)})
+	     #((isspace+) (xmlname))})
+	 (spaces*) ">")))
+
+(define (fix-funny-content string)
+  (if (textsearch #/[<>]/ string)
+      (encode-entities (decode-entities string))
+      string))
+
+(define (wrap-cdata text)
+  (if (search "<!" text)
+      text
+      (append "\n<![CDATA[\n" text "\n]]>\n")))
+
+(define (wrap-rule token)
+  `#(,(xml-start "script")
+     (subst (not> "</script>") ,wrap-cdata)
+     "</script>"))
+
+(define (domtext/cleanup text)
+  (textsubst text `(IC ,(wrap-rule {"script" "style" "pre"}))))
