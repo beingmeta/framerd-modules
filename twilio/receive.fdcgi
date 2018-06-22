@@ -1,0 +1,328 @@
+(use-module '{fdweb texttools crypto xhtml packetfns})
+(use-module '{logger logctl optimize})
+(use-module '{twilio signature aws/ses aws/simpledb})
+
+(define %loglevel %debug%)
+
+(define disabled #f)
+
+(define signing-key
+  #*"\08p\d4\b2\8a)TH\9a\0a\bc\d5\0e\18\a8D\ac[\f3\8eL\d7-\9b\09B\e5\06\c43\af\cd\a3\84-\ad\d4vG\de2\1c\ecJ\c40\f6 #\85l\fb\b2\07\04\f4\ec\0b\b9 \ba\86\c3>\05\f1\ec\d9g3\b7\99P\a3\e3\14\d3\d94\f7^\a0\f2\10\a8\f6\05\94\01\be\b4\bcDx\faIi\e6#\d0\1a\daij~L~Q%\b3H\84S:\94\fb1\99\902WD\ee\9b\bc\e9\e5")
+
+(config! 'simpledb:key "1QYJ5P9NZE42YRQK5B02")
+(config! 'simpledb:secret #*"0Q+UGBUJQYJL3vq85mTJXLnlN2kfEw5xdKmS84c7")
+(config! 'simpledb:domain "neighbors-18572330368")
+(CONFIG! 'TWILIO:SID "SK5960d3b72fbdfaaa20312f058b0d985b")
+(CONFIG! 'TWILIO:AUTH #*"bi6tT3TLnwydmH1Jbc3CaRIfoTeVJhLi")
+(CONFIG! 'TWILIO:FROM "8572330368")
+(CONFIG! 'UPDATEMODULES 5.0)
+
+(define (depunct string (lower #f))
+  (if lower (downcase (textsubst string '(ISPUNCT) ""))
+      (textsubst string '(ISPUNCT) "")))
+(define (normstring s) (stdspace (depunct s #t)))
+
+(define-init commands (make-hashtable))
+
+(define (getdb (to #f))
+  (if to
+      (glom "neighbors-" (textsubst (sms/norm to) #{"+" "-" "." "(" ")"} ""))
+      (if (req/test 'to)
+	  (glom "neighbors-"
+	    (textsubst (sms/norm (req/get 'to)) #{"+" "-" "." "(" ")"} ""))
+	  (req/get '_simpledb (config 'simpledb:domain)))))
+(define ->ndb getdb)
+
+(define (->neighbor num (ndb (req/call getdb)) (create #f))
+  (if create
+      (sdb/create (sms/norm num) ndb)
+      (sdb/probe (sms/norm num) ndb)))
+
+(define (->neighborhood name (ndb (req/call getdb)))
+  (sdb/probe (depunct name #t) ndb))
+(define (->name e) (try (get e 'name) (scramble-id (get e 'id))))
+(define (scramble-id id)
+  (downcase (packet->digits (packet/condense (md5 id) 4) packetfns/base26)))
+
+(define (dorespond string)
+  (when (req/get '_respond)
+    (twilio/send string `#[to ,(req/get '_respond) from ,(req/get 'to)])))
+(define respond (macro expr `(,dorespond (,stringout ,@(cdr expr)))))
+
+(define (getuser name (neighborhood #f) (db (req/call getdb)))
+  (try (sdb/probe (sms/norm name) db)
+       (sdb/probe (sdb/get name 'realid db) db)
+       (tryif neighborhood
+	 (sdb/probe (glom (sdb/get (normstring name) 'realid db) "@"
+		      (get neighborhood 'id))
+		    db))))
+
+;;; Simple loop
+
+(define (handle-sms (to #f) (from #f) (body #f))
+  (logdebug "SMS to " to " from " from ": " body)
+  (cond ((has-prefix (downcase body) {".join " "join "})
+	 (req/call handle-join))
+	((command? body)
+	 (req/call handle-command))
+	((exists? (->neighborhood body (getdb to)))
+	 (req/set! 'body (glom ".join " body))
+	 (req/call handle-join))
+	(disabled)
+	((exists? (textmatcher #((spaces*) {"." "#" ":"} "alert" (spaces))
+			       body))
+	 (let* ((ndb (getdb to))
+		(userinfo (%wc ->neighbor from ndb))
+		(neighborhood (get userinfo 'domain))
+		(hoodinfo (%wc ->neighborhood neighborhood))
+		(msg
+		 (stringout "[" (->name userinfo) "@" (->name hoodinfo) "] "
+		   (%wc textsubst body
+			#((bos)  (spaces*) {"." "#" ":"} "alert" (spaces))
+			""))))
+	   (debug%watch userinfo hoodinfo msg)
+	   (twilio/send ;; "Use '.alert message` to send to everyone"
+	    "Sorry, the SMS system is currently down for maintenance."
+	    `#[to ,from])
+	   (when (and #f (exists? hoodinfo) (exists? userinfo)
+		      (test hoodinfo 'neighbors from))
+	     (when (test hoodinfo 'disabled from)
+	       (sdb/drop! neighborhood 'disabled from ndb))
+	     (do-choices (dest (difference (get hoodinfo 'neighbors)
+					   (get hoodinfo 'disabled)
+					   (get userinfo 'blocked)))
+	       (%watch "TWILIO/SEND" msg `#[to ,dest from ,to])))))
+	(else (twilio/send ;; "Use '.alert message` to send to everyone"
+	       "Sorry, the SMS system is currently down for maintenance."
+	       `#[to ,from]))))
+
+;;; Setting names
+
+(define (set-name! user name (db (req/call getdb)))
+  (let* ((userinfo (sdb/probe user db))
+	 (curname (get userinfo 'name))
+	 (hood (->neighborhood (get userinfo 'neighborhood) db)))
+    (when (exists? hood)
+      (when (exists? curname)
+	(sdb/drop! (glom (normstring curname) "@" (get hood 'id))
+		   'realid (get userinfo 'id)))
+      (sdb/add! (glom (normstring name) "@" (get hood 'id))
+		'realid (get userinfo 'id)))
+    (sdb/set! user 'name name db)))
+
+;;; Joining
+
+(define (handle-join (to #f) (from #f) (body #f))
+  (let* ((ndb (req/call ->ndb))
+	 (parsed (segment body))
+	 (neighborhood (second parsed))
+	 (hoodinfo (try (tryif (> (length parsed) 1)
+			  (->neighborhood (second parsed) ndb)
+			  (->neighborhood (apply glom (cdr parsed)) ndb))
+			(->neighborhood (sdb/get ndb 'neighborhood)
+					ndb)))
+	 (iam (and (>= (length parsed) 3)
+		   (stringout (doseq (wd (slice parsed 2) i)
+				(printout (if (> i 0) " ") wd)))))
+	 (userinfo (and (exists? hoodinfo) (->neighbor from ndb #t)))
+	 (cur (get userinfo 'neighborhood)))
+    (debug%watch ndb userinfo hoodinfo iam cur)
+    (cond ((fail? hoodinfo)
+	   (respond "[neighbors.im] Unknown neighborhood '"
+		    neighborhood "'"))
+	  ((and (identical? (downcase (depunct cur))
+			    (downcase (depunct neighborhood)))
+		iam)
+	   ;; Update the username if specified
+	   (sdb/set! cur 'name iam ndb)
+	   (respond "[neighbors.im] Okay, you're "
+		    iam "@" (try (get hoodinfo 'nickname)
+				 (get hoodinfo 'name)
+				 (get hoodinfo 'id))))
+	  ((identical? (downcase (depunct cur))
+		       (downcase (depunct neighborhood)))
+	   (respond "[neighbors.im] You're already 'here'!"))
+	  ((test hoodinfo 'blocked from)
+	   (logwarn BlockedUser "Request from blocked user " userinfo
+		    " to join " hoodinfo))
+	  ((exists? cur)
+	   ;; The user is changing neighborhoods
+	   (sdb/drop! from 'neighborhood cur ndb)
+	   (sdb/drop! cur 'neighbors from ndb)
+	   (sdb/add! from 'neighborhood neighborhood ndb)
+	   (sdb/add! neighborhood 'neighbors from ndb)
+	   (when iam (sdb/add! from 'name iam ndb))
+	   (respond "[neighbors.im] You've left " cur
+		    " and joined " neighborhood))
+	  (else 
+	   ;; The user is joining a neighborhood for the first time
+	   (when (fail? userinfo) (sdb/add! from 'id from ndb))
+	   (sdb/add! from 'neighborhood neighborhood ndb)
+	   (sdb/add! neighborhood 'neighbors from ndb)
+	   (when iam (sdb/add! from 'name iam ndb))
+	   (respond (stringout "[neighbors.im] Welcome to "
+		      neighborhood
+		      (when iam (printout ", " iam))
+		      "!"))))))
+
+;;; Commands
+
+(define (command? string)
+  (test commands
+	(depunct (slice string
+			 (textmatcher '(GREEDY (* (ispunct))) string)
+			 (textsearch '(isspace) string))
+		 #t)))
+(define (command-handler string)
+  (get commands (depunct string #t)))
+
+(define (handle-command (to #f) (from #f) (body #f))
+  (let* ((ndb (->ndb to))
+	 (userinfo (->neighbor from ndb))
+	 (neighborhood (get userinfo 'neighborhood))
+	 (hoodinfo (->neighborhood neighborhood ndb))
+	 (parsed (segment body))
+	 (handler (command-handler (car parsed)))
+	 (args (cdr parsed)))
+    (when (and (fail? handler) (not (null? args)))
+      (cond ((exists? (command-handler (glom (car parsed) (car args))))
+	     (set! handler (command-handler (glom (car parsed) (car args))))
+	     (set! args (cdr args)))))
+    (debug%watch ndb userinfo neighborhood hoodinfo parsed handler)
+    (when (and (exists? handler) (exists? userinfo) (exists? hoodinfo))
+      (apply handler ndb (qc userinfo) (qc hoodinfo) (cdr parsed)))))
+
+;;;; Particular commands
+
+(define (turnoff ndb user neighborhood . ignored)
+  (sdb/add! (get neighborhood 'id) 'disabled (get user 'id) ndb)
+  (respond "[" (->name neighborhood) "] OK, I'll be quiet.  Text 'on' to wake me up."))
+(store! commands "off" turnoff)
+(define (turnon ndb user neighborhood . ignored)
+  (sdb/drop! (get neighborhood 'id) 'disabled (get user 'id) ndb)
+  (respond (stringout "[" (->name neighborhood) "] Welcome back!")))
+(store! commands "on" turnon)
+(define (leave ndb user neighborhood . ignored)
+  (when (exists? neighborhood)
+    (sdb/drop! (get neighborhood 'id) 'members (get user 'id) ndb)
+    (sdb/drop! (get user 'id) 'neighborhood (get neighborhood 'id) ndb)
+    (respond (stringout "[neighbors.im] OK, you have left " (get neighborhood 'name)))))
+(store! commands "leave" leave)
+(store! commands "bye" leave)
+(define (iam ndb user neighborhood . args)
+  (when (exists? neighborhood)
+    (set-name! user
+	       (stringout (doseq (arg args i)
+			    (printout (if (> i 0) " ") arg)))
+	       ndb)
+    (respond (stringout "[neighbors.im] OK, you're " (get user 'name)
+	       "@" (->name neighborhood)))))
+(store! commands "iam" iam)
+(store! commands "setname" iam)
+(store! commands "callme" iam)
+
+(define (blockuser ndb user neighborhood (toblock #f))
+  (when (exists? neighborhood)
+    (let* ((norm (normstring toblock))
+	   (relname  (glom norm "@" (get neighborhood 'id)))
+	   (blockuser (->neighbor (try (sdb/get relname 'realid ndb)
+				       (sms/norm toblock))
+				  ndb)))
+      (when (exists? blockuser)
+	(sdb/add! blockuser 'blocked (get user 'id) ndb)
+	(sdb/add! user 'blocking (get blockuser 'id) ndb)
+	(respond "[" (->name neighborhood) "] OK, "
+		 "you've blocked messages from "
+		 (if (singleton? blockuser)
+		     (printout "your neighbor '" toblock "'")
+		     (printout "your " (choice-size blockuser)
+		       " neighbors named '" toblock "'")))))))
+(store! commands "block" blockuser)
+
+(define (unblockuser ndb user neighborhood toblock)
+  (if (equal? toblock "all")
+      (let ((blockuser (get user 'blocking)))
+	(do-choices blockuser
+	  (sdb/drop! blockuser 'blocked (get user 'id) ndb)
+	  (sdb/drop! user 'blocking blockuser) ndb)
+	(respond "[" (->name neighborhood) "] OK, "
+		 "you've un-blocked messages from "
+		 (choice-size blockuser) " neighbors."))
+      (let* ((norm (normstring toblock))
+	     (relname  (glom norm "@" (get neighborhood 'id)))
+	     (blockuser (->neighbor (try (sdb/get relname 'realid ndb)
+					 (sms/norm toblock))
+				    ndb)))
+	(when (exists? blockuser)
+	  (sdb/drop! blockuser 'blocked (get user 'id) ndb)
+	  (sdb/drop! user 'blocking (get blockuser 'id) ndb)
+	  (respond "[" (->name neighborhood) "] OK, "
+		   "you've un-blocked messages from "
+		   (if (singleton? blockuser)
+		       (printout "your neighbor '" toblock "'")
+		       (printout "your " (choice-size blockuser)
+			 " neighbors named '" toblock "'")))))))
+(store! commands "unblock" unblockuser)
+
+(define (email ndb user neighborhood (addr #f))
+  (cond ((or (and (not addr) (test user 'email))
+	     (test user 'email addr))
+	 (begin (sdb/add! neighborhood 'disabled (get user 'id))
+	   (sdb/add! neighborhood 'onemail (get user 'email))
+	   (respond "[" (get neighborhood 'id) "] "
+		    "OK, switched to " (get user 'email) ".  "
+		    "Text 'ON' or 'SMS' to undo, 'OFF' to stop everything.")))
+	((and (not addr) (not (test user '_email)))
+	 (respond "[" (get neighborhood 'id) "] "
+		  "You haven't configured an email address!"))
+	(else (let* ((email (or addr (get user '_email)))
+		     (conf-code (random-packet 4))
+		     (sig (sig/make signing-key
+			    'email email 'phone (get user 'id)
+			    'conf (packet->base16 conf-code))))
+		(sdb/add! user '_email addr)
+		(sdb/add! user '_sig sig)
+		(ses/sendmail
+		 `#[to ,addr subject "confirm email address"]
+		 (stringout "Someone (we hope it's you!) has associated "
+		   "this email address\n with their cell phone for use with "
+		   "neighbor.im.\n\nIf it's really you, confirm your email "
+		   "by texting\n"
+		   "\t'mailok " (packet->base16 conf-code) "'\n"
+		   "to us from the phone you're using."))))))
+(store! commands "email" email)
+
+(define (emailok ndb user neighborhood (code #f))
+  (cond ((not code)
+	 (respond "[" (get neighborhood 'id) "] "
+		  "You left out the confirmation code!"))
+	((not (test user '_email))
+	 (respond "[" (get neighborhood 'id) "] "
+		  "You haven't provided an email address to confirm!"))
+	((not (test user '_sig))
+	 (respond "[" (get neighborhood 'id) "] "
+		  "There was a problem.  We're sorry."))
+	((sig/check (get user '_sig) signing-key 
+	   'email (get user '_email) 'phone (get user 'id)
+	   'conf code)
+	 (sdb/add! user 'email (get user '_email) ndb)
+	 (sdb/drop! user '_email (get user '_email) ndb)
+	 (sdb/drop! user '_sig (get user '_sig) ndb)
+	 (sdb/add! neighborhood 'disabled (get user 'id))
+	 (sdb/add! neighborhood 'onemail (get user 'email))
+	 (respond "[" (get neighborhood 'id) "] "
+		  "OK, switched to " (get user 'email) ".  "
+		  "Text 'ON' or 'SMS' to undo, 'OFF' to stop everything."))
+	(else (respond "[" (get neighborhood 'id) "] "
+		       "Sorry, that's not the correct code."))))
+(store! commands "emailok" emailok)
+
+;;;; The main event
+
+(define (main (to #f) (from #f))
+  (when (and to from)
+    (req/set! 'to (sms/norm to))
+    (req/set! 'from (sms/norm from))
+    (req/set! '_respond (sms/norm from))
+    (req/set! '_simpledb (req/call getdb))
+    (req/call handle-sms)))
