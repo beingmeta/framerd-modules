@@ -63,6 +63,7 @@
 
 (defambda (setup-brico source (success #f) (setup #f) 
 		       (use-indexes #f))
+  (logdebug |SetupBrico| source)
   (cond ((ambiguous? source)
 	 (do-choices (elt source)
 	   (unless success
@@ -84,8 +85,9 @@
 	      (file-exists? (mkpath source "brico.db")))
 	 (set! success (setup-brico (mkpath source "brico.db"))))
 	((file-directory? source)
-	 (let ((pools {}) (indexes {}) (failed #f))
-	   (do-choices (file (getfiles source))
+	 (let ((pools {}) (indexes {}) (failed #f) (sources (getfiles source)))
+	   (loginfo |SetupBricoDir| sources)
+	   (do-choices (file sources)
 	     (onerror
 		 (cond ((has-suffix file ".pool")
 			(set+! pools (use-pool file `#[readonly ,brico-readonly])))
@@ -95,6 +97,7 @@
 			    `#[readonly ,brico-readonly
 			       background ,brico-background]))))
 		 (lambda (ex) 
+		   (logwarn |DBFailed| "Couldn't use " file)
 		   (set! failed #t)
 		   #break)))
 	   (when (or (exists? pools) (exists? indexes))
@@ -138,6 +141,8 @@
 		 "Couldn't use BRICOSOURCE " source ": "
 		 ex)
 	       #f))))
+  (unless (and success setup)
+    (logwarn |BricoSource| "Setup failed: " source))
   (when (and success setup)
     (set! bricosource source)
     (if brico.db
