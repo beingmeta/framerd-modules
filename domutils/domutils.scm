@@ -737,16 +737,17 @@
   "Finds all nodes matching SEL under UNDER, if FINDALL is true, \
    look under matching nodes for other matching nodes."
   (when (exists? (pickstrings sel)) (set! sel (->selector sel)))
-  (cond ((string? under) (fail))
+  (cond ((empty-list? under) (fail))
+	((string? under) (fail))
 	((ambiguous? under)
 	 (for-choices under (dom/select under sel)))
-	((exists?  (get under 'index))
+	((pair? under)
+	 (for-choices (elt (elts under)) (dom/select elt sel findall)))
+	((exists? (get under 'index))
 	 (for-choices (index (get under 'index)) (dom-index-find index sel)))
 	((exists? (get (get under '%doc) 'index))
 	 (let ((index (try (get under 'index) (get (get under '%doc) 'index))))
 	   (for-choices index (dom-index-find index sel under))))
-	((pair? under)
-	 (for-choices (elt (elts under)) (dom/select elt sel findall)))
 	((and (table? under) (dom/match under sel))
 	 (choice under (tryif findall
 			 (for-choices (elt (elts (get under '%content)))
