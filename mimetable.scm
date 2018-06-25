@@ -10,7 +10,7 @@
  '{*mimetable* *inv-mimetable*
    *default-mimetype* *default-charset*
    getsuffix
-   ctype->suffix ctype->charset
+   ctype->suffix ctype->charset ctype->base
    path->ctype path->mimetype
    path->encoding
    mimetype/text?})
@@ -520,6 +520,9 @@
   (if prefix
       (glom prefix (get *inv-mimetable* ctype))
       (get *inv-mimetable* ctype)))
+
+(define (ctype->base string)
+  (downcase (slice string 0 (position #\; string))))
 
 (define (ctype->charset string)
   (try (get (text->frames #("charset" (spaces*) "="
