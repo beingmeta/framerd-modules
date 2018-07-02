@@ -33,6 +33,7 @@
 
 (define brico.pool {})
 (define brico.index {})
+(define core.index {})
 
 (define xbrico.pool {})
 (define names.pool {})
