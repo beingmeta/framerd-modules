@@ -15,8 +15,8 @@
 
 (define %loglevel %info%)
 
-(define wikidata-dir (get-component "wikidata/"))
-(varconfig! wikidata:root wikidata-dir)
+(define wikidata-dir #f)
+(define wikidata-default-dir (get-component "wikidata/"))
 
 (define *epoch* "testing")
 (varconfig! wikidata:epoch *epoch*)
@@ -37,31 +37,75 @@
   (indexctl meta.index 'readonly #f)
   (poolctl brico.pool 'readonly #f))
 
-(define wikid.pool
-  (db/ref (mkpath wikidata-dir "wikid.flexpool")
-	  `#[type flexpool 
-	     base @31C1/0 capacity #1gib partsize #1mib
-	     create #t prefix "wikid/wiki" compression zstd
-	     metadata 
-	     #[adjuncts #[%words #[pool "words.flexpool" prefix "words" create #t]
-			  %glosses #[pool "glosses.flexpool" prefix "glosses" create #t]
-			  %norms #[pool "norms.flexpool" prefix "norms" create #t]
-			  %links #[pool "links.flexpool" prefix "links" create #t]]]
-	     adjopts #[compression zstd]]))
-(define wikid.map
-  (db/ref (mkpath wikidata-dir "wikid.map")
-	  `#[indextype memindex
-	     preload ,(config 'wikibuild #f)
-	     register #t
-	     create #t]))
+(define wikid.pool #f)
+(define wikid.map #f)
 
-(define wikid.index
-  (db/ref (mkpath wikidata-dir "wikid.index")
-	  `#[type hashindex size ,(* 16 #mib) register #t create #t]))
+(define wikid.index #f)
+(define wikid_en.index #f)
+(define wikid_en_norm.index #f)
+(define wikid_types.index #f)
+(define wikid_has.index #f)
 
-(define meta.index 
-  (db/ref (mkpath (config 'bricosource) "meta.index")
-	  #[type hashindex register #t create #t]))
+(define meta.index #f)
+
+(define wikidata.index #f)
+
+(define (set-wikidata-root! dir)
+  (unless (equal? wikidata-dir dir)
+    (set! wikid.pool
+      (db/ref (mkpath dir "wikid.flexpool")
+	      `#[type flexpool 
+		 base @31C1/0 capacity #1gib partsize ,(* 4 #1mib)
+		 create #t prefix "wikid/wiki" compression zstd
+		 metadata 
+		 #[adjuncts #[%words #[pool "words.flexpool" prefix "words" create #t]
+			      %glosses #[pool "glosses.flexpool" prefix "glosses" create #t]
+			      %norms #[pool "norms.flexpool" prefix "norms" create #t]
+			      %links #[pool "links.flexpool" prefix "links" create #t]]]
+		 adjopts #[compression zstd]]))
+    (set! wikid.map
+      (db/ref (mkpath dir "wikid.map")
+	      `#[indextype memindex
+		 preload ,(config 'wikibuild #f)
+		 register #t
+		 create #t]))
+
+    (set! wikid.index
+      (db/ref (mkpath dir "wikid.index")
+	      `#[type hashindex size ,(* 64 #mib) register #t create #t]))
+    (set! wikid_en.index
+      (db/ref (mkpath dir "en.index")
+	      `#[type hashindex size ,(* 32 #mib) register #t create #t
+		 keyslot @?en]))
+    (set! wikid_en_norm.index
+      (db/ref (mkpath dir "en_norm.index")
+	      `#[type hashindex size ,(* 16 #mib) register #t create #t
+		 keyslot @?en_norm]))
+    (set! wikid_types.index
+      (db/ref (mkpath dir "types")
+	      `#[type typeindex keyslot type 
+		 register #t create #t]))
+    (set! wikid_has.index
+      (db/ref (mkpath dir "has")
+	      `#[type typeindex keyslot has
+		 register #t create #t]))
+
+    (set! meta.index 
+      (db/ref (mkpath (config 'bricosource) "meta.index")
+	      #[type hashindex register #t create #t]))
+
+    (set! wikidata.index
+      (make-aggregate-index {wikid.index wikid_en.index wikid_en_norm.index 
+			     wikid_types.index wikid_has.index}
+			    #[register #t]))
+
+    (set! wikidata-dir dir)))
+
+(config-def! 'wikidata:root
+	     (lambda (var (val))
+	       (cond ((not (bound? val)) wikidata-dir)
+		     ((string? val) (set-wikidata-root! val))
+		     (else (set-wikidata-root! wikidata-default-dir)))))
 
 ;;; Interning wikids
 

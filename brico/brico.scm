@@ -50,6 +50,7 @@
  '{en.index en_norms.index words.index names.index norms.index})
 
 (define brico.db #f)
+(define brico-dir #f)
 
 (define brico-readonly #t)
 (varconfig! brico:readonly brico-readonly)
@@ -157,6 +158,9 @@
     (set! xbrico.pool xbrico-pool)
     (set! names.pool names-pool)
     (set! places.pool places-pool)
+    (set! brico-dir 
+      (and (not (textsearch #/:@/ (pool-source brico-pool)))
+	   (dirname (pool-source brico-pool))))
     (set! en.index
       (try (pick (get brico.db '%indexes) get-keyslot @1/2c1c7"English") #f))
     (set! en_norms.index
@@ -719,7 +723,7 @@
 
 (module-export!
  '{brico-pool
-   brico-index brico.db
+   brico-index brico.db brico-dir
    xbrico-pool names-pool places-pool
    brico.pool brico.index
    xbrico.pool names.pool places.pool
