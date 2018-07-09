@@ -9,13 +9,30 @@
 (use-module '{brico})
 
 (module-export! '{link-release! check-release-links
-		  import-synsets read-synset})
-
-(define wordnet-source @1/46074)
-(define en @1/2c1c7)
+		  import-synsets read-synset
+		  core.index wordnet.index wordforms.index
+		  fix-wordform})
 
 (define wnrelease 'wn30)
-(varconfig! brico:wnversion wnrelease)
+(define wordnet-release @1/46074)
+
+(config-def! 'brico:wordnet 
+	     (lambda (var (val))
+	       (cond ((not (bound? val)) wordnet-release)
+		     ((and (oid? val) (test val 'release))
+		      (set! wnrelease (get val 'release))
+		      (set! wordnet-release val))
+		     ((oid? val) (error |InvalidRelease| val))
+		     ((and (symbol? val) (test (?? '%id val) 'release))
+		      (set! wordnet-release (?? '%id val))
+		      (set! wnrelease (get wordnet-release 'release)))
+		     ((and (string? val)
+			   (or (test (?? '%id val) 'release)
+			       (test (?? '%id (string->symbol (upcase val))) 'release)))
+		      (set! wordnet-release (?? '%id val))
+		      (set! wnrelease (get wordnet-release 'release)))
+		     (else (error |InvalidRelease| val)))))
+(define en @1/2c1c7)
 
 (define sensecats
   #(ADJ.ALL ADJ.PERT ADV.ALL NOUN.TOPS NOUN.ACT NOUN.ANIMAL NOUN.ARTIFACT 
@@ -28,16 +45,13 @@
     VERB.PERCEPTION VERB.POSSESSION VERB.SOCIAL VERB.STATIVE VERB.WEATHER ADJ.PPL))
 
 (define core.index #f)
-(define wordnet.index (open-index (mkpath brico-dir "wordnet.index")))
-(define wordforms.index (open-index (mkpath brico-dir "wordforms.index")))
+(define wordnet.index #f)
+(define wordforms.index #f)
 
-(set! core.index (open-index (mkpath brico-dir "core.index")))
-(set! wordnet.index (open-index (mkpath brico-dir "wordnet.index")))
-(set! wordforms.index (open-index (mkpath brico-dir "wordforms.index")))
-(poolctl brico.pool 'readonly #f)
-(indexctl core.index 'readonly #f)
-(indexctl wordnet.index 'readonly #f)
-(indexctl wordforms.index 'readonly #f)
+(when brico-dir
+  (set! core.index (open-index (mkpath brico-dir "core.index")))
+  (set! wordnet.index (open-index (mkpath brico-dir "wordnet.index")))
+  (set! wordforms.index (open-index (mkpath brico-dir "wordforms.index"))))
 
 ;;; Reading WordNet sense indexes (index.sense)
 
@@ -75,12 +89,15 @@
       (let* ((oid (find-frames wordnet.index 'sensekeys (get sense 'key)))
 	     (type (intersection (get oid 'type) '{noun verb adjective adverb}))
 	     (synset-key (list release (get sense 'synset) type)))
-	(when (exists? oid)
-	  (add! oid '%synsets synset-key)
-	  (add! synsetmap oid synset-key))
-	(index-frame wordnet.index oid '%synsets)
-	(index-frame wordnet.index oid 'type)
-	(index-frame wordnet.index oid 'has (getkeys oid))))
+	(add! synsetmap oid synset-key)))
+    (do-choices (oid (getkeys synsetmap))
+      (let ((key (get synsetmap oid)))
+	(unless (singleton? key)
+	  (logwarn |SplitConcept| 
+	    "The concept " oid " has been split into " key))
+	(when (singleton? key)
+	  (add! oid 'synsets key)
+	  (index-frame wordnet.index oid 'synsets key))))
     `#[sensemap ,sensemap synsetmap ,synsetmap]))
 
 (define (check-release-links wnrelease)
@@ -88,7 +105,7 @@
   (let ((tagged (find-frames wordnet.index 'has '{sensekeys %synsets})))
     (prefetch-oids! tagged)
     (filter-choices (synset tagged)
-      (ambiguous? (pick (get synset '%synsets) wnrelease)))))
+      (ambiguous? (pick (get synset 'synsets) wnrelease)))))
 
 ;;;; Reading WordNet synset data files (data.pos)
 
@@ -169,23 +186,23 @@
 
 (define (ref-synset num type (version wnrelease))
   (let* ((frame (find-frames wordnet.index
-		  '%synsets `(,version ,num ,type))))
+		  'synsets `(,version ,num ,type))))
     (when (fail? frame)
       (set! frame 
 	(frame-create brico.pool
-	  'type type '%synsets `(,version ,num ,type)))
+	  'type type 'synsets `(,version ,num ,type)))
       (lognotice |NewSynsetRef| type " " num)
       (index-frame {wordnet.index core.index} frame 'type type)
-      (index-frame wordnet.index frame '%synsets))
+      (index-frame wordnet.index frame 'synsets))
     frame))
 
 (define (import-synset info)
   (let* ((existing (find-frames wordnet.index
-		     '%synsets `(,wnrelease ,(get info 'synset) ,(get info 'type))))
+		     'synsets `(,wnrelease ,(get info 'synset) ,(get info 'type))))
 	 (frame (try existing
 		     (frame-create brico.pool
 		       'type (get info 'type)
-		       '%synsets `(,wnrelease ,(get info 'synset) ,(get info 'type))))))
+		       'synsets `(,wnrelease ,(get info 'synset) ,(get info 'type))))))
     (store! frame '%id
 	    (cons (try (get info 'sensecat) wnrelease)
 		  (choice->list (get info 'words))))
@@ -219,11 +236,12 @@
 		(add! frame '%norms (cons en (car form))))
 	      (let ((cur (?? 'word (car form) 'of existing)))
 		(cond ((fail? cur))
-		      ((test cur 'sensenum (1+ i)))
+		      ((test cur 'sensenum i))
 		      ((test cur 'sensenum)
 		       (warn%watch "SenseNumMismatch"
-			 frame form "WORDFORMS" (get info 'wordforms)
-			 "SYNSETS" (get frame '%synsets))
+			 frame cur form "WORDFORMS" (get info 'wordforms)
+			 "SYNSETS" (get frame 'synsets)
+			 "CUR" (get cur 'sensenum) "REAL" i)
 		       (set! cur {}))
 		      (else (store! cur 'word (car form))
 			    (index-frame wordforms.index cur 'word (car form))))
@@ -257,7 +275,7 @@
 	     (warn%watch "SenseNumChanged"
 	       meaning sensenum word existing 
 	       "OLD" (get existing 'sensenum)
-	       "SYNSETS" (get meaning '%synsets)
+	       "SYNSETS" (get meaning 'synsets)
 	       "CONTEXT" context)
 	     (drop! wordforms.index (cons 'sensenum (get existing 'sensenum))
 		    existing))
@@ -326,9 +344,11 @@
 (define wn16.senses (read-sense-index "wordnet/WordNet-1.6/dict/index.sense"))
 (do-choices (sense wn16.senses)
   (let ((synset (sense->synset sense)))
-    (if (ambiguous? synset)
-	(logwarn |AmbigSynset| sense " ==> " synset)
-	(add! sensekey.map synset (get sense 'key)))))
+    (if (fail? synset)
+	(logwarn |NoSynset| "For " sense)
+	(if (ambiguous? synset)
+	    (logwarn |AmbigSynset| sense " ==> " synset)
+	    (add! sensekeys.table synset (get sense 'key))))))
 (do-choices (key (getkeys sensekeys.table))
   (store! key 'sensekeys (get sensekeys.table key))
   (index-frame wordnet.index key 'sensekeys))
