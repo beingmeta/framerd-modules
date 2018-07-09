@@ -29,6 +29,16 @@
 
 (define (reporterror ex) (message "Error in indexcore: " ex))
 
+(define (get-derived-slots f)
+  {(get language-map (car (pick (get f '%words) pair?)))
+   (get norm-map (car (pick (get f '%norm) pair?)))
+   (get indicator-map (car (pick (get f '%signs) pair?)))
+   (get gloss-map (car (pick (get f '%gloss) pair?)))
+   (get language-map (getkeys (pick (get f '%words) slotmap?)))
+   (get norm-map (getkeys (pick (get f '%norm) slotmap?)))
+   (get indicator-map (getkeys (pick (get f '%signs) slotmap?)))
+   (get gloss-map (getkeys (pick (get f '%gloss) slotmap?)))})
+
 (defambda (indexer frames batch-state loop-state task-state)
   (let ((latlong.table (make-hashtable))
 	(wordnet.table (make-hashtable))
@@ -41,11 +51,7 @@
 	    (index-frame core.table f 'type)
 	    (index-frame core.table f 'has (getslots f))
 	    (when (test f 'words) (index-frame core.table f 'has english))
-	    (index-frame core.table f 'has
-			 {(get language-map (car (get f '%words)))
-			  (get norm-map (car (get f '%norm)))
-			  (get indicator-map (car (get f '%signs)))
-			  (get gloss-map (car (get f '%gloss)))})
+	    (index-frame core.table f 'has (get-derived-slots f))
 	    (when (test f 'source {@1/0"WordNet 1.6..."
 				   @1/46074"Wordnet 3.0, Copyright 2006 Princeton University"})
 	      (index-frame wordnet.table
