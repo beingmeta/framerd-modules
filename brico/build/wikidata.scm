@@ -1,7 +1,7 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2005-2018 beingmeta, inc.  All rights reserved.
 
-(in-module 'brico/wikidata)
+(in-module 'brico/build/wikidata)
 
 (use-module '{texttools fdweb logger varconfig stringfmts optimize})
 (use-module '{storage/flex storage/typeindex})

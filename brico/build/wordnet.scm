@@ -1,7 +1,7 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2005-2018 beingmeta, inc.  All rights reserved.
 
-(in-module 'brico/wordnet)
+(in-module 'brico/build/wordnet)
 
 (use-module '{texttools})
 (use-module '{logger varconfig optimize stringfmts})
@@ -11,7 +11,7 @@
 (module-export! '{link-release! check-release-links
 		  import-synsets read-synset
 		  core.index wordnet.index wordforms.index
-		  fix-wordform})
+		  fix-wordform fix-wnsplit})
 
 (define wnrelease 'wn30)
 (define wordnet-release @1/46074)
@@ -92,9 +92,13 @@
 	(add! synsetmap oid synset-key)))
     (do-choices (oid (getkeys synsetmap))
       (let ((key (get synsetmap oid)))
-	(unless (singleton? key)
+	(when (and (ambiguous? key) (not (test oid 'wnsplit)))
 	  (logwarn |SplitConcept| 
-	    "The concept " oid " has been split into " key))
+	    "The concept " oid " has been split into " key)
+	  (add! oid 'wnsplit key)
+	  (add! oid 'type 'deprecated)
+	  (index-frame wordnet.index oid 'has 'wnsplit)
+	  (index-frame {wordnet.index core.index} oid 'type 'deprecated))
 	(when (singleton? key)
 	  (add! oid 'synsets key)
 	  (index-frame wordnet.index oid 'synsets key))))
@@ -250,12 +254,6 @@
       (lognotice |NewSynset| frame)
       (index-frame core.index frame 'type))))
 
-(define (fix-wordform wf)
-  (unless (test wf 'sensenum)
-    (store! wf 'sensenum
-	    (or (position (get wf 'word) (get (get wf 'of) 'ranked)) {}))
-    (index-frame wordforms.index wf 'sensenum)))
-
 (define (get-wordform meaning sensenum (word #f) (context #f))
   (let ((existing 
 	 (try (tryif word
@@ -283,6 +281,20 @@
 	   (index-frame wordforms.index existing 'sensenum sensenum)
 	   existing)
 	  (else existing))))
+
+;;; Fixups
+
+(define (fix-wordform wf)
+  (unless (test wf 'sensenum)
+    (store! wf 'sensenum
+	    (or (position (get wf 'word) (get (get wf 'of) 'ranked)) {}))
+    (index-frame wordforms.index wf 'sensenum)))
+
+(define (fix-wnsplit frame)
+  (store! frame 'wnsplit 
+	  (for-choices (split (get frame 'wnsplit))
+	    (try (find-frames wordnet.index 'synsets split)
+		 split))))
 
 ;;;; Reading synset data files
 
@@ -320,7 +332,8 @@
 		(find-frames wordnet.index 
 		  'type 'wordform)
 		(find-frames wordnet.index 
-		  'has 'sensenum))))
+		  'has 'sensenum)))
+ (fix-wnsplit (find-frames wordnet.index 'has 'wnsplit)))
 
 ;;; Various old code used to set up the database
 
