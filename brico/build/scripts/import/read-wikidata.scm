@@ -2,10 +2,10 @@
 ;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
 ;;; Copyright (C) 2005-2018 beingmeta, inc.  All rights reserved.
 
-(define brico-dir (get-component "new/"))
+(define brico-dir (abspath "forwikid"))
 (config! 'bricosource brico-dir)
 
-(define local-wikidata-dir (get-component "wikidata/"))
+(define local-wikidata-dir (abspath "wikidata/"))
 (config! 'wikidata:root local-wikidata-dir)
 
 (use-module '{logger varconfig stringfmts optimize})
@@ -18,7 +18,7 @@
 (config! 'dbloglevel %info%)
 (config! 'cachelevel 2)
 (define wikidata-input-file
-  (get-component "wikisrc/latest-all.json.bz2"))
+  (abspath "wikisrc/latest-all.json.bz2"))
 (indexctl meta.index 'readonly #f)
 (poolctl brico.pool 'readonly #f)
 

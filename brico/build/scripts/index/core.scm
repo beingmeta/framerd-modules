@@ -48,7 +48,7 @@
       (onerror
 	  (begin
 	    (fixup f)
-	    (index-frame core.table f 'type)
+	    (index-frame core.table f '{type source %linked})
 	    (index-frame core.table f 'has (getslots f))
 	    (when (test f 'words) (index-frame core.table f 'has english))
 	    (index-frame core.table f 'has (get-derived-slots f))

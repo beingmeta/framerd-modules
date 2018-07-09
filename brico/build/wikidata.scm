@@ -41,8 +41,9 @@
 (define wikid.map #f)
 
 (define wikid.index #f)
-(define wikid_en.index #f)
-(define wikid_en_norm.index #f)
+(define labels.index #f)
+(define aliases.index #f)
+(define links.index #f)
 (define wikid_types.index #f)
 (define wikid_has.index #f)
 
@@ -73,14 +74,18 @@
     (set! wikid.index
       (db/ref (mkpath dir "wikid.index")
 	      `#[type hashindex size ,(* 64 #mib) register #t create #t]))
-    (set! wikid_en.index
-      (db/ref (mkpath dir "en.index")
-	      `#[type hashindex size ,(* 32 #mib) register #t create #t
-		 keyslot @?en]))
-    (set! wikid_en_norm.index
-      (db/ref (mkpath dir "en_norm.index")
+    (set! labels.index
+      (db/ref (mkpath dir "labels.index")
 	      `#[type hashindex size ,(* 16 #mib) register #t create #t
-		 keyslot @?en_norm]))
+		 keyslot labels]))
+    (set! aliases.index
+      (db/ref (mkpath dir "aliases.index")
+	      `#[type hashindex size ,(* 32 #mib) register #t create #t
+		 keyslot aliases]))
+    (set! links.index
+      (db/ref (mkpath dir "links.index")
+	      `#[type hashindex size ,(* 16 #mib) register #t create #t
+		 keyslot links]))
     (set! wikid_types.index
       (db/ref (mkpath dir "types")
 	      `#[type typeindex keyslot type 
@@ -91,11 +96,11 @@
 		 register #t create #t]))
 
     (set! meta.index 
-      (db/ref (mkpath (config 'bricosource) "meta.index")
+      (db/ref (mkpath (config 'bricosource) "core.index")
 	      #[type hashindex register #t create #t]))
 
     (set! wikidata.index
-      (make-aggregate-index {wikid.index wikid_en.index wikid_en_norm.index 
+      (make-aggregate-index {wikid.index labels.index aliases.index links.index
 			     wikid_types.index wikid_has.index}
 			    #[register #t]))
 
@@ -154,6 +159,10 @@
 
 (define (expandvecs x) (if (vector? x) (elts x) x))
 
+(define (mapping-keys mapping)
+  (for-choices (slotid (getkeys mapping))
+    (cons slotid (get mapping slotid))))
+
 (define (copy-frame data into (index #f))
   (when (test data 'title) (store! into 'title (get data 'title)))
   (store! into 'type (string->symbol (upcase (get data 'type))))
@@ -163,10 +172,9 @@
 		       (get into 'norms)})
   (store! into 'gloss (get (get (get data 'descriptions) 'en) 'value))
   (store! into '%id (list (pick-one (get into 'norm)) (get into 'wikid)))
-  (store! into '%norms (->langmap (get data 'labels)))
-  (store! into '%labels (->langmap (get data 'labels)))
-  (store! into '%words (->langmap (get data 'aliases)))
-  (store! into '%glosses (->langmap (get data 'descriptions)))
+  (store! into 'labels (->langmap (get data 'labels)))
+  (store! into 'aliases (->langmap (get data 'aliases)))
+  (store! into 'glosses (->langmap (get data 'descriptions)))
   (store! into 'links (->sitelinks (get data 'sitelinks)))
   (store! into 'modified (timestamp (get data 'modified)))
   (store! into 'revid (get data 'revid))
@@ -186,10 +194,14 @@
 	(when (exists? (getkeys context))
 	  (add! into prop (cons value context))))))
   (store! into 'epoch *epoch*)
-  (when index (index-frame index into 'type))
-  (when index (index-string index into @?en #default 2))
+  (when index 
+    (index-frame index into 'type)
+    (index-frame index into 'labels (mapping-keys (get into 'labels)))
+    (index-frame index into 'links (mapping-keys (get into 'links)))
+    (index-frame index into 'aliases (mapping-keys (get into 'aliases)))
+    (index-frame index into 'has (getkeys into)))
   (when index (index-string index into @?en_norms #default 2))
-  (when index (index-frame index into 'has (getkeys into)))
+  (when index)
   into)
 
 ;;; Handling snaks (bigger than bytes)
