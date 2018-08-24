@@ -118,8 +118,9 @@
 ;;; Working with existing tokens
 
 (define (jwt/parse string (opts) (key) (alg) (issuer)
-		   (err #f) (segs) (header) (signature))
+		   (err) (segs) (header) (signature))
   (handle-jwt-args)
+  (default! err (getopt opts 'err #f))
   (set! segs (segment string "."))
   (debug%watch "JWT/PARSE" 
     key alg issuer "STRING" string "OPTS" opts)
@@ -252,7 +253,9 @@
   (if (testopt opts 'header)
       (set! header (keys->strings (getopt opts 'header)))
       (set! header `#["typ" "JWT" "alg" ,alg]))
-  (when (table? usepay) (set! usepay (keys->strings usepay)))
+  (if (table? payload) 
+      (set! usepay (keys->strings payload))
+      (set! usepay payload))
   (when (and issuer (not (test payload 'iss)))
     (store! usepay "iss" issuer))
   (set! hdr64 (->base64 (->json (keys->strings header)) nopad urisafe))
