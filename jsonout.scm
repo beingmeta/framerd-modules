@@ -32,46 +32,44 @@
 
 (defambda (jsonfield field value (valuefn #f) (prefix #f) (context #f)
 		     (vecval #f))
-  (unless (fail? value)
-    (printout
-      (if prefix prefix)
-      (if (symbol? field)
-	  (write (downcase (symbol->string field)))
-	  (if (string? field) (write field)
-	      (write (unparse-arg field))))
-      ": "
-      (if (or vecval (ambiguous? value)) (printout "["))
-      (do-choices (value value i)
-	(when (> i 0) (printout ","))
-	(if valuefn
-	    (jsonout (valuefn value context) #f)
-	    (jsonout value #f)))
-      (if (or vecval (ambiguous? value)) (printout "]")))))
+  (printout
+    (if prefix prefix)
+    (if (symbol? field)
+	(write (downcase (symbol->string field)))
+	(if (string? field) (write field)
+	    (write (unparse-arg field))))
+    ": "
+    (if (or vecval (not (singleton? value))) (printout "["))
+    (do-choices (value value i)
+      (when (> i 0) (printout ","))
+      (if valuefn
+	  (jsonout (valuefn value context) #f)
+	  (jsonout value #f)))
+    (if (or vecval (not (singleton? value))) (printout "]"))))
 (defambda (jsonfield+ field value (valuefn #f) (prefix #f) (context #f)
 		      (vecval #f))
-  (unless (fail? value)
-    (printout
-      (if prefix prefix)
-      (if (symbol? field)
-	  (write (downcase (symbol->string field)))
-	  (if (string? field) (write field)
-	      (write (unparse-arg field))))
-      ": ["
-      (do-choices (value value i)
-	(when (> i 0) (printout ","))
-	(if valuefn
-	    (jsonout (valuefn value context) #f)
-	    (jsonout value #f)))
-      "]")))
+  (printout
+    (if prefix prefix)
+    (if (symbol? field)
+	(write (downcase (symbol->string field)))
+	(if (string? field) (write field)
+	    (write (unparse-arg field))))
+    ": ["
+    (do-choices (value value i)
+      (when (> i 0) (printout ","))
+      (if valuefn
+	  (jsonout (valuefn value context) #f)
+	  (jsonout value #f)))
+    "]"))
+
 (define (jsontable table (valuefn #f) (context #f))
   (printout "{"
 	    (let ((initial #t))
 	      (do-choices (key (getkeys table) i)
 		(let ((v (get table key)))
-		  (when (exists? v)
-		    (unless initial (printout ", "))
-		    (jsonfield key v valuefn "" context)
-		    (set! initial #f)))))
+		  (unless initial (printout ", "))
+		  (jsonfield key (qc v) valuefn "" context)
+		  (set! initial #f))))
 	    
 	    "}"))
 
@@ -86,7 +84,6 @@
 	((vector? value) (jsonvec value))
 	((eq? value #t) (printout "true"))
 	((eq? value #f) (printout "false"))
-	((timestamp? value) (printout (get value 'tick)))
 	((timestamp? value) (printout (get value 'tick)))
 	((oid? value) (jsonoutput (exportjson value) 0))
 	((uuid? value) (jsonoutput (exportjson value) 0))
@@ -117,11 +114,12 @@
 	 (try (tryif oid-getref (oid-getref object))
 	      (tryif jsref-slotid 
 		(get object (or jsref-oid-slotid jsref-slotid)))
-	       (glom ":" (oid->string object))))
+	      (glom ":" (oid->string object))))
 	((fixnum? (qc object)) object)
 	((symbol? (qc object)) object)
 	((ambiguous? object)
-	 (choice->vector (for-choices object (exportjson object))))
+	 (choice->vector 
+	  (for-choices (object object) (exportjson object))))
 	((pair? object)
 	 (if (proper-list? object)
 	     (vector (->vector (map exportjson object)))
@@ -137,18 +135,16 @@
 	      (glom "#U" (uuid->string object))))
 	((vector? object) (vector (map exportjson object)))
 	((table? object)
-	 (if (and jsref-slotid (test object jsref-slotid))
-	     (get object jsref-slotid)
-	     (let ((obj (frame-create #f)))
-	       (do-choices (key (getkeys object))
-		 (if (and toplevel (symbol? key))
-		     (store! obj (downcase (symbol->string key))
-			     (for-choices (v (get object key))
-			       (exportjson v)))
-		     (store! obj key
-			     (for-choices (v (get object key))
-			       (exportjson v)))))
-	       obj)))
+	 (let ((obj (frame-create #f)))
+	   (do-choices (key (getkeys object))
+	     (if (and toplevel (symbol? key))
+		 (store! obj (downcase (symbol->string key))
+			 (for-choices (v (get object key))
+			   (exportjson v)))
+		 (store! obj key
+			 (for-choices (v (get object key))
+			   (exportjson v)))))
+	   obj))
 	 (else object)))
 (define (export->json arg) (exportjson arg #t))
 
