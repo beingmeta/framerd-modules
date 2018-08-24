@@ -6,7 +6,7 @@
 (module-export!
  '{packet->digits digits->packet number->digits digits->number
    packetfns/base62 packetfns/base57 packetfns/base36
-   packetfns/base26 packetfns/base32 packetfns/base16
+   packetfns/base26 packetfns/base32 packetfns/base16 packetfns/base10
    packet/condense}) 
 
 (define packetfns/base62
@@ -17,9 +17,10 @@
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 (define packetfns/base26
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-(define packetfns/base16 "0123456789ABCDEF")
 (define packetfns/base32
   "0123456789ABCDEFGHJKLMNPQRTVWXYZ")
+(define packetfns/base16 "0123456789ABCDEF")
+(define packetfns/base10 "0123456789")
 
 (define (packet->digits packet (digits packetfns/base62))
   (let ((num (if (number? packet) packet
