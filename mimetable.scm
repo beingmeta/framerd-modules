@@ -516,10 +516,11 @@
 
 (define getsuffix path-suffix)
 
-(define (ctype->suffix ctype (prefix #f))
-  (if prefix
-      (glom prefix (get *inv-mimetable* ctype))
-      (get *inv-mimetable* ctype)))
+(define (ctype->suffix ctype (dot #f))
+  (tryif (string? ctype)
+    (glom dot
+      (try (pick-one (smallest (get *inv-mimetable* ctype) length))
+	   (and (position #\/ ctype) (slice ctype (1+  (position #\/ ctype))))))))
 
 (define (ctype->base string)
   (downcase (slice string 0 (position #\; string))))
