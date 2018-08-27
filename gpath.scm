@@ -93,10 +93,11 @@
 
 (define charset-pat #("charset=" (label charset (not> ";"))))
 
-(define (get-charset ctype (opts #f))
+(defambda (get-charset ctype (opts #f))
   (try (tryif opts (getopt opts 'charset))
-       (tryif ctype
-	 (get (text->frames charset-pat ctype) 'charset))
+       (tryif (and (exists? ctype) ctype)
+	 (get (text->frames charset-pat (pickstrings ctype))
+	      'charset))
        #f))
 
 (define *default-dirmode* 0x775) ;; rwxrwxr_x
