@@ -14,10 +14,8 @@
 (define index-also '{ticker})
 
 (define core-index (target-file "core.index"))
-(define has-index (target-file "has.index"))
-(define latlong-index (target-file "latlong.index"))
 (define wordnet-index (target-file "wordnet.index"))
-(define wordforms-index (target-file "wordforms.index"))
+(define latlong-index (target-file "latlong.index"))
 
 (define (index-latlong index f)
   (when (test f '{lat long})
@@ -47,23 +45,22 @@
     (do-choices (f frames)
       (onerror
 	  (begin
-	    (fixup f)
+	    ;; (fixup f)
 	    (index-frame core.table f '{type source %linked})
 	    (index-frame core.table f 'has (getslots f))
 	    (when (test f 'words) (index-frame core.table f 'has english))
 	    (index-frame core.table f 'has (get-derived-slots f))
-	    (when (test f 'source {@1/0"WordNet 1.6..."
-				   @1/46074"Wordnet 3.0, Copyright 2006 Princeton University"})
+	    (unless (test f 'source @1/1"Derived from 1911 Roget Thesaurus")
 	      (index-frame wordnet.table
 		  f '{type words hypernym hyponym sensecat 
 		      sensekeys synsets
 		      verb-frames pertainym
 		      lex-fileno})
 	      (index-frame wordnet.table f 'has (getkeys f))
-	      (index-gloss wordnet.table f 'gloss))
-	    (index-brico core.table f)
-	    (index-frame core.table f index-also)
-	    (index-latlong latlong.table f))
+	      (index-gloss wordnet.table f 'gloss)
+	      (index-brico core.table f)
+	      (index-frame core.table f index-also)
+	      (index-latlong latlong.table f)))
 	  (lambda (ex) (logwarn |IndexError| "Indexing " f "\n" ex))))
     (info%watch "INDEXER"
       "FRAMES" (choice-size frames) latlong.table core.table
@@ -84,11 +81,9 @@
 (define (main)
   (config! 'appid  "indexcore ")
   (let* ((pools (use-pool (mkpath indir brico-pool-names)))
-	 (has.index (target-index has-index #f #default 'type))
 	 (core.index (target-index core-index))
 	 (latlong.index (target-index latlong-index))
-	 (wordnet.index (target-index wordnet-index))
-	 (wordforms.index (target-index wordforms-index)))
+	 (wordnet.index (target-index wordnet-index)))
     (engine/run indexer (pool-elts pools)
       `#[loop #[latlong.index ,latlong.index
 		core.index ,core.index
@@ -106,8 +101,8 @@
 	"Indexing " ($count (choice-size wordforms) "wordform"))
       (prefetch-oids! wordforms)
       (do-choices (f wordforms)
-	(index-frame wordforms.index f  '{word of language rank type}))
-      (commit  wordforms.index))))
+	(index-frame wordnet.index f '{word of sensenum language rank type}))
+      (commit wordnet.index))))
 
 (when (config 'optimize #t)
   (optimize! '{brico brico/indexing tinygis fifo engine})

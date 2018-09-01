@@ -30,14 +30,14 @@
   (or indexes
       (let ((index
 	     (frame-create #f
-	       @?genls (target-index "genls.index")
-	       @?specls (target-index "specls.index")
-	       @?genls* (target-index "allgenls.index")
-	       @?specls* (target-index "allspecls.index")
-	       {@?parts @?partof @?partof* @?parts*} (target-index "parts.index")
-	       {@?members @?memberof @?members* @?memberof*} (target-index "members.index")
+	       @?genls (target-index "lattice.index")
+	       @?specls (target-index "lattice.index")
+	       @?genls* (target-index "lattice.index")
+	       @?specls* (target-index "lattice.index")
+	       {@?parts @?partof @?partof* @?parts*} (target-index "divisions.index")
+	       {@?members @?memberof @?members* @?memberof*} (target-index "divisions.index")
 	       {@?ingredients @?ingredientof @?ingredients* @?ingredientof*}
-	       (target-index "substances.index")
+	       (target-index "divisions.index")
 	       '%default (target-index "lattice.index"))))
 	(set! indexes index)
 	index)))

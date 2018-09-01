@@ -15,10 +15,8 @@
 
 (defambda (index-slot index frame slot (values))
   (if (bound? values)
-      (index-frame (try (get index slot) (get index '%default))
-	  frame slot values)
-      (index-frame (try (get index slot) (get index '%default))
-	  frame slot)))
+      (index-frame index frame slot values)
+      (index-frame index frame slot)))
 
 (defambda (index-phase1 concepts batch-state loop-state task-state)
   (let ((indexes (get loop-state 'indexes)))
@@ -98,17 +96,8 @@
   (let* ((pools (use-pool (if (empty-list? names)
 			      (mkpath indir brico-pool-names)
 			      (elts names))))
-	 (always.index (target-index "always.index" `#[keyslot @?always]))
-	 (always_inv.index (target-index "always_inv.index" `#[keyslot @?/always]))
-	 (never.index (target-index "never.index"  `#[keyslot @?never]))
-	 (sometimes.index (target-index "sometimes.index" `#[keyslot @?sometimes]))
 	 (termlogic.index (target-index "termlogic.index"))
-	 (target `#[@?always ,always.index
-		    @?/always ,always_inv.index
-		    @?sometimes ,sometimes.index
-		    @?never ,never.index
-		    @?sometimes ,sometimes.index
-		    %default ,termlogic.index]))
+	 (target termlogic.index))
     (engine/run (if (config 'phase2 #f) index-phase2 index-phase1)
 	(pool-elts pools)
       `#[loop #[indexes ,target]
@@ -116,10 +105,13 @@
 	 nthreads ,(config 'nthreads #t)
 	 checkfreq 15
 	 checktests ,(engine/interval (config 'savefreq 60))
-	 checkpoint ,{pools (get target (getkeys target))}
+	 checkpoint ,{pools target}
 	 logfns {,engine/log ,engine/logrusage}
 	 logchecks #t
-	 logfreq 25])))
+	 logfreq 25])
+    (commit)
+    (if (not (config 'phase2))
+	(apply chain "PHASE2=yes" names))))
 
 (optimize! '{brico engine fifo brico/indexing})
 (optimize!)

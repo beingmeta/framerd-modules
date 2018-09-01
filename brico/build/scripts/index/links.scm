@@ -9,13 +9,13 @@
   (when done (commit) (clearcaches))
   (unless done (indexer/prefetch (qc oids))))
 
-(define misc-index (target-file "misc.index"))
+(define misc-index (target-file "links.index"))
 (define links-index (target-file "links.index"))
-(define entails-index (target-file "entails.index"))
-(define entailed-index (target-file "entailed.index"))
-(define refs-index (target-file "refs.index"))
-(define sumrefs-index (target-file "sumrefs.index"))
-(define diffterms-index (target-file "diffterms.index"))
+(define entails-index (target-file "links.index"))
+(define entailed-index (target-file "links.index"))
+(define refs-index (target-file "links.index"))
+(define sumrefs-index (target-file "links.index"))
+(define diffterms-index (target-file "links.index"))
 
 (define misc-slotids '{PERTAINYM REGION COUNTRY FAMILY LASTNAME})
 
