@@ -206,7 +206,7 @@
   (index-lattice index concept)
   (index-analytics index concept))
 
-(define wordform-slotids '{word of language rank type})
+(define wordform-slotids '{word of language rank type sensenum})
 
 (define (index-core index frame)
   (index-relation index frame '{type sensecat fips-code source dsg})
