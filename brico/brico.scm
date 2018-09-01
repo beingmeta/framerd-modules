@@ -94,23 +94,12 @@
 	 (set! success (setup-brico (mkpath source "brico.db"))))
 	((file-directory? source)
 	 (let ((pools {}) (indexes {}) (failed #f) 
-	       (sources (getfiles source))
-	       (reduced (not (file-exists? (mkpath source "xbrico.pool")))))
-	   (if reduced 
-	       (lognotice |SetupBrico|
-		 "Setting up reduced version of BRICO from " 
-		 (listdata (pick sources has-suffix {".pool" ".index"})))
-	       (lognotice |SetupBrico|
-		 "Setting up legacy version of BRICO from " 
-		 (listdata (pick sources has-suffix {".pool" ".index"}))))
-	   (when reduced
-	     (set! brico.reduced #t)
-	     (set+! pools (pool/ref (mkpath source "brico.pool"))))
+	       (sources (getfiles source)))
 	   (do-choices (file sources)
 	     (onerror
 		 (cond ;; Use other pools in the directory
-		       ((and (has-suffix file ".pool") (not reduced))
-			(set+! pools (use-pool file `#[readonly ,brico-readonly])))
+		       ((has-suffix file ".pool")
+			(set+! pools (pool/ref file `#[readonly ,brico-readonly])))
 		       ((has-suffix file ".index")
 			(set+! indexes
 			  (open-index file
@@ -123,7 +112,11 @@
 	   (when (or (exists? pools) (exists? indexes))
 	     (lognotice |BRICO|
 	       "Loaded " (choice-size pools) " pools "
-	       "and " (choice-size pools) " indexes:"
+	       "and " (choice-size indexes) " indexes for BRICO "
+	       "from " source)
+	     (logdebug |BRICO|
+	       "Loaded " (choice-size pools) " pools "
+	       "and " (choice-size indexes) " indexes:"
 	       (do-choices (pool pools) (printout "\n\t" pool))
 	       (do-choices (index indexes) (printout "\n\t" index))))
 	   (when (and (not failed) (exists? pools) (exists? indexes)
@@ -164,6 +157,7 @@
   (unless (and success setup)
     (logwarn |BricoSource| "Setup failed: " source))
   (when (and success setup)
+    (unless (exists? (getpool @1/3000000)) (set! brico.reduced #t))
     (set! bricosource source)
     (if brico.db
 	(set! brico-index (get brico.db '%indexes))
