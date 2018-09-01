@@ -26,6 +26,7 @@
 (define bricosource #f)
 (define brico-pool {})
 (define brico-index {})
+(define brico.reduced #f)
 
 (define xbrico-pool {})
 (define names-pool {})
@@ -34,6 +35,9 @@
 (define brico.pool {})
 (define brico.index {})
 (define core.index {})
+(define wordnet.index #f)
+(define lattice.index #f)
+(define termlogic.index #f)
 
 (define xbrico.pool {})
 (define names.pool {})
@@ -48,6 +52,8 @@
 
 (module-export!
  '{en.index en_norms.index words.index names.index norms.index})
+
+(module-export! '{core.index wordnet.index lattice.index termlogic.index})
 
 (define brico.db #f)
 (define brico-dir #f)
@@ -87,11 +93,23 @@
 	      (file-exists? (mkpath source "brico.db")))
 	 (set! success (setup-brico (mkpath source "brico.db"))))
 	((file-directory? source)
-	 (let ((pools {}) (indexes {}) (failed #f) (sources (getfiles source)))
-	   (loginfo |SetupBricoDir| sources)
+	 (let ((pools {}) (indexes {}) (failed #f) 
+	       (sources (getfiles source))
+	       (reduced (not (file-exists? (mkpath source "xbrico.pool")))))
+	   (if reduced 
+	       (lognotice |SetupBrico|
+		 "Setting up reduced version of BRICO from " 
+		 (listdata (pick sources has-suffix {".pool" ".index"})))
+	       (lognotice |SetupBrico|
+		 "Setting up legacy version of BRICO from " 
+		 (listdata (pick sources has-suffix {".pool" ".index"}))))
+	   (when reduced
+	     (set! brico.reduced #t)
+	     (set+! pools (pool/ref (mkpath source "brico.pool"))))
 	   (do-choices (file sources)
 	     (onerror
-		 (cond ((has-suffix file ".pool")
+		 (cond ;; Use other pools in the directory
+		       ((and (has-suffix file ".pool") (not reduced))
 			(set+! pools (use-pool file `#[readonly ,brico-readonly])))
 		       ((has-suffix file ".index")
 			(set+! indexes
@@ -103,7 +121,7 @@
 		   (set! failed #t)
 		   #break)))
 	   (when (or (exists? pools) (exists? indexes))
-	     (loginfo |BRICO|
+	     (lognotice |BRICO|
 	       "Loaded " (choice-size pools) " pools "
 	       "and " (choice-size pools) " indexes:"
 	       (do-choices (pool pools) (printout "\n\t" pool))
@@ -151,22 +169,25 @@
 	(set! brico-index (get brico.db '%indexes))
 	(if use-indexes (set! brico-index use-indexes)))
     (set! brico-pool (name->pool "brico.framerd.org"))
-    (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
-    (set! names-pool (name->pool "namedb.beingmeta.com"))
-    (set! places-pool (name->pool "placedb.beingmeta.com"))
     (set! brico.pool brico-pool)
-    (set! xbrico.pool xbrico-pool)
-    (set! names.pool names-pool)
-    (set! places.pool places-pool)
+    (unless brico.reduced
+      (set! xbrico-pool (name->pool "xbrico.beingmeta.com"))
+      (set! names-pool (name->pool "namedb.beingmeta.com"))
+      (set! places-pool (name->pool "placedb.beingmeta.com"))
+      (set! xbrico.pool xbrico-pool)
+      (set! names.pool names-pool)
+      (set! places.pool places-pool))
     (set! brico-dir 
       (and (not (textsearch #/:@/ (pool-source brico-pool)))
 	   (dirname (pool-source brico-pool))))
-    (set! en.index
-      (try (pick (get brico.db '%indexes) get-keyslot @1/2c1c7"English") #f))
-    (set! en_norms.index
-      (try (pick (get brico.db '%indexes) get-keyslot @1/44896"Common English") #f))
-    (set! names.index
-      (try (pick (get brico.db '%indexes) get-keyslot 'names) #f)))
+    (let ((indexes (get brico.db '%indexes)))
+      (set! en.index (try (pick indexes get-keyslot @1/2c1c7"English") #f))
+      (set! en_norms.index (try (pick indexes get-keyslot @1/44896"Common English") #f))
+      (set! names.index (try (pick indexes get-keyslot 'names) #f))
+      (set! core.index (pick indexes index-source has-suffix "/core.index"))
+      (set! wordnet.index (pick indexes index-source has-suffix "/wordnet.index"))
+      (set! lattice.index (pick indexes index-source has-suffix "/lattice.index"))
+      (set! termlogic.index (pick indexes index-source has-suffix "/termlogic.index"))))
   success)
 
 (define bricosource-config
@@ -229,9 +250,10 @@
 ;;; Common BRICO frames
 
 (define english @1/2c1c7"English")
+(define en @1/2c1c7"English")
+(define en_norms @1/44896)
 (define english-gloss @1/2ffbd"Gloss (English)")
 (define english-norm @1/44896)
-(define enorm @1/44896)
 (define spanish @1/2c1fc"Spanish")
 (define french @1/2c122"French")
 
@@ -737,8 +759,8 @@
 
 (module-export!
  ;; OIDs by name
- '{english
-   english-gloss english-norm
+ '{english en_norms en
+   english-gloss english-norm 
    spanish french
    always sometimes never somenot commonly rarely
    /always /somenot /commonly /rarely
