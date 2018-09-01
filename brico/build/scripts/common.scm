@@ -21,6 +21,7 @@
 ;;(define misc-slotids (file->dtype (mkpath data-dir "miscslots.dtype")))
 
 (config! 'bricosource indir)
+(pool/ref (mkpath indir "brico.pool"))
 
 (use-module '{brico brico/indexing})
 (use-module '{brico brico/indexing mttools trackrefs optimize tinygis})
@@ -54,6 +55,11 @@
 
 (define (target-file name) (mkpath outdir name))
 
+(define (writable-index . args)
+  (let ((ix (apply open-index args)))
+    (indexctl ix 'readonly #f)
+    ix))
+
 (define (target-index filename (opts #f) (size) (keyslot))
   (default! size (getopt opts 'size (config 'INDEXSIZE (* 8 #mib))))
   (default! keyslot (getopt opts 'keyslot (config 'keyslot #f)))
@@ -61,7 +67,7 @@
   (unless (position #\/ filename) 
     (set! filename (mkpath outdir filename)))
   (cond ((and (file-exists? filename) (not (config 'REBUILD #f config:boolean)))
-	 (open-index filename `(#[register ,(getopt opts 'register #t)] . ,opts)))
+	 (writable-index filename `(#[register ,(getopt opts 'register #t)] . ,opts)))
 	(else (when (file-exists? filename) 
 		(logwarn |ReplacingFile| 
 		  (write filename) ", backup in " 
@@ -70,4 +76,4 @@
 	      (make-index filename
 		`(#[type hashindex size ,size keyslot ,keyslot] . ,opts))
 	      (lognotice |NewIndex| "Making new file index " filename)
-	      (open-index filename `(#[register ,(getopt opts 'register #t)] . ,opts)))))
+	      (writable-index filename `(#[register ,(getopt opts 'register #t)] . ,opts)))))
