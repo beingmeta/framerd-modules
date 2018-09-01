@@ -9,29 +9,29 @@
 (use-module '{brico})
 
 (module-export! '{link-release! check-release-links
-		  import-synsets read-synset
+		  import-synsets read-synset finish-import
 		  core.index wordnet.index wordforms.index
 		  fix-wordform fix-wnsplit})
 
-(define wnrelease 'wn30)
-(define wordnet-release @1/46074)
+(define wnrelease 'wn31)
+(define wordnet-release @1/94d47) ;; 3.0 @1/46074
 
 (config-def! 'brico:wordnet 
-	     (lambda (var (val))
-	       (cond ((not (bound? val)) wordnet-release)
-		     ((and (oid? val) (test val 'release))
-		      (set! wnrelease (get val 'release))
-		      (set! wordnet-release val))
-		     ((oid? val) (error |InvalidRelease| val))
-		     ((and (symbol? val) (test (?? '%id val) 'release))
-		      (set! wordnet-release (?? '%id val))
-		      (set! wnrelease (get wordnet-release 'release)))
-		     ((and (string? val)
-			   (or (test (?? '%id val) 'release)
-			       (test (?? '%id (string->symbol (upcase val))) 'release)))
-		      (set! wordnet-release (?? '%id val))
-		      (set! wnrelease (get wordnet-release 'release)))
-		     (else (error |InvalidRelease| val)))))
+  (lambda (var (val))
+    (cond ((not (bound? val)) wordnet-release)
+	  ((and (oid? val) (test val 'release))
+	   (set! wnrelease (get val 'release))
+	   (set! wordnet-release val))
+	  ((oid? val) (error |InvalidRelease| val))
+	  ((and (symbol? val) (test (?? '%id val) 'release))
+	   (set! wordnet-release (?? '%id val))
+	   (set! wnrelease (get wordnet-release 'release)))
+	  ((and (string? val)
+		(or (test (?? '%id val) 'release)
+		    (test (?? '%id (string->symbol (upcase val))) 'release)))
+	   (set! wordnet-release (?? '%id val))
+	   (set! wnrelease (get wordnet-release 'release)))
+	  (else (error |InvalidRelease| val)))))
 (define en @1/2c1c7)
 
 (define sensecats
@@ -76,13 +76,13 @@
       (set! sense (sense-index-reader in)))
     results))
 
-(define (link-release! sense-index (release wnrelease))
+(define (link-release! sense-index (release wnrelease) (mods (make-hashtable)))
   (let ((senses (read-sense-index sense-index))
 	(wnoids (find-frames wordnet.index 'has 'sensekeys))
 	(synsetmap (make-hashtable))
 	(sensemap (make-hashtable)))
     (prefetch-keys! wordnet.index (cons 'sensekeys (get senses 'key)))
-    (lock-oids! wnoids)
+    (unless mods (lock-oids! wnoids))
     (prefetch-oids! wnoids)
     (do-choices (sense senses)
       (add! sensemap (get sense 'key) sense)
@@ -95,14 +95,20 @@
 	(when (and (ambiguous? key) (not (test oid 'wnsplit)))
 	  (logwarn |SplitConcept| 
 	    "The concept " oid " has been split into " key)
-	  (add! oid 'wnsplit key)
-	  (add! oid 'type 'deprecated)
-	  (index-frame wordnet.index oid 'has 'wnsplit)
-	  (index-frame {wordnet.index core.index} oid 'type 'deprecated))
+	  (cond (mods
+		 (add! mods oid (cons 'wnsplit key))
+		 (add! mods oid (cons 'type 'deprecated)))
+		(else
+		 (add! oid 'wnsplit key)
+		 (add! oid 'type 'deprecated)
+		 (index-frame wordnet.index oid 'has 'wnsplit)
+		 (index-frame {wordnet.index core.index} oid 'type 'deprecated))))
 	(when (singleton? key)
-	  (add! oid 'synsets key)
-	  (index-frame wordnet.index oid 'synsets key))))
-    `#[sensemap ,sensemap synsetmap ,synsetmap]))
+	  (cond (mods (add! mods oid (cons 'synsets key)))
+		(else
+		 (add! oid 'synsets key)
+		 (index-frame wordnet.index oid 'synsets key))))))
+    `#[sensemap ,sensemap synsetmap ,synsetmap mods ,mods]))
 
 (define (check-release-links wnrelease)
   "This returns any cases where the synset mapping for WNRELEASE is ambiguous"
@@ -200,88 +206,88 @@
       (index-frame wordnet.index frame 'synsets))
     frame))
 
-(define (import-synset info)
-  (let* ((existing (find-frames wordnet.index
-		     'synsets `(,wnrelease ,(get info 'synset) ,(get info 'type))))
+(define (import-synset info temp.index done.set)
+  (let* ((type (intersection (get info 'type) '{noun verb adjective adverb}))
+	 (existing (find-frames wordnet.index
+		     'synsets `(,wnrelease ,(get info 'synset) ,type)))
 	 (frame (try existing
 		     (frame-create brico.pool
 		       'type (get info 'type)
-		       'synsets `(,wnrelease ,(get info 'synset) ,(get info 'type))))))
+		       'synsets `(,wnrelease ,(get info 'synset) ,type)))))
     (store! frame '%id
 	    (cons (try (get info 'sensecat) wnrelease)
 		  (choice->list (get info 'words))))
-    (add! frame 'source wordnet-source)
-    (drop! frame '%words (cons 'en (get frame 'words)))
+    (add! frame 'source wordnet-release)
+    (hashset-add! done.set frame)
     (store! frame 'words (get info 'words))
-    (add! frame '%words (cons 'en (get info 'words)))
-    (drop! frame '%norms (pick (get frame '%norms) en))
-    (drop! frame '%glosses (cons en (get frame 'gloss)))
     (store! frame 'gloss (get info 'gloss))
-    (add! frame '%glosses (cons @?en (get info 'gloss)))
     (store! frame 'sensecat (get info 'sensecat))
     (store! frame 'ranked (map car (get info 'wordforms)))
     (store! frame 'n-words (get info 'n-words))
-    (drop! frame (get (get info 'pointers) 'relation))
-    (drop! frame '{hypernym hyponym})
+    (drop!  frame (get (get info 'pointers) 'relation))
+    (drop!  frame '{hypernym hyponym})
+    (doseq (word.rank (get info 'wordforms) i)
+      (let ((existing (find-frames wordforms.index 
+			'of frame 'sensenum (1+ i)
+			'word (car word.rank))))
+	(when (exists? existing) 
+	  (add! existing 'source wordnet-release)
+	  (store! existing 'rank 0))
+	(if (zero? (cdr word.rank))
+	    (add! frame 'norms (car word.rank))
+	    (try existing
+		 (let ((form (get-wordform frame (1+ i) (car word.rank))))
+		   (store! form 'rank (cdr word.rank))
+		   form)))))
     (do-choices (ptr (get info 'pointers))
+      ;; Pointers can go synset to synset or synset.word to synset.word
+      ;;  This (and get-wordform, below) is where we sort all that out.
       (let* ((relation (get ptr 'relation))
-	     (synset-target (ref-synset (get ptr 'synset) (get ptr 'type)))
-	     (target (try (get-wordform synset-target (get ptr 'targetno) #f
-					(cons frame relation))
-			  synset-target))
-	     (source (try (get-wordform frame (get ptr 'sourceno) (get ptr 'source)
-					(cons relation synset-target))
-			  frame)))
-	(add! source relation target)))
-    (store! frame '%forms
-	    (forseq (form (get info 'wordforms) i)
-	      (when (zero? (cdr form)) 
-		(add! frame 'norms (car form))
-		(add! frame '%norms (cons en (car form))))
-	      (let ((cur (?? 'word (car form) 'of existing)))
-		(cond ((fail? cur))
-		      ((test cur 'sensenum i))
-		      ((test cur 'sensenum)
-		       (warn%watch "SenseNumMismatch"
-			 frame cur form "WORDFORMS" (get info 'wordforms)
-			 "SYNSETS" (get frame 'synsets)
-			 "CUR" (get cur 'sensenum) "REAL" i)
-		       (set! cur {}))
-		      (else (store! cur 'word (car form))
-			    (index-frame wordforms.index cur 'word (car form))))
-		(try cur form))))
+	     (source (if (test ptr 'sourceno)
+			 (get-wordform frame (get ptr 'sourceno) (get ptr 'source))
+			 frame))
+	     (target-synset (ref-synset (get ptr 'synset) (get ptr 'type)))
+	     (target (if (test ptr 'targetno)
+			 (tryif (get done.set target-synset)
+			   (get-wordform target-synset (get ptr 'targetno)))
+			 target-synset)))
+	(cond ((exists? target) (add! frame relation target))
+	      (else (store! ptr 'sourceword source)
+		    (store! ptr 'source frame)
+		    (store! ptr 'target target-synset)
+		    (add! frame '%wordlinks ptr)
+		    (index-frame temp.index frame 'has '%wordlinks)))))
     (when (fail? existing)
-      (lognotice |NewSynset| frame)
-      (index-frame core.index frame 'type))))
+      (logwarn |NewSynset| frame)
+      (index-frame core.index frame 'type)
+      (index-frame wordnet.index frame 'synsets))))
 
-(define (get-wordform meaning sensenum (word #f) (context #f))
-  (let ((existing 
-	 (try (tryif word
-		(find-frames wordforms.index 
-		  'of meaning 'word word))
-	      (find-frames wordforms.index 
-		'of meaning 'sensenum sensenum))))
-    (cond ((fail? existing)
-	   (let ((form (frame-create brico.pool
-			 'type 'wordform 'of meaning
-			 'word (tryif word word)
-			 'sensenum sensenum)))
-	     (index-frame wordforms.index form '{type word sensenum of})
-	     form))
-	  ((not (test existing 'sensenum sensenum))
-	   (when (test existing 'sensenum)
-	     (warn%watch "SenseNumChanged"
-	       meaning sensenum word existing 
-	       "OLD" (get existing 'sensenum)
-	       "SYNSETS" (get meaning 'synsets)
-	       "CONTEXT" context)
-	     (drop! wordforms.index (cons 'sensenum (get existing 'sensenum))
-		    existing))
-	   (store! existing 'sensenum sensenum)
-	   (index-frame wordforms.index existing 'sensenum sensenum)
-	   existing)
-	  (else existing))))
+(define (get-wordform meaning sensenum (word))
+  (default! word (elt (get meaning 'ranked) (-1+ sensenum)))
+  (unless (equal? word (elt (get meaning 'ranked) (-1+ sensenum)))
+    (error |InconsistentSenseNum| get-wordform 
+	   "Given " (write word) " as sense #" sensenum " of " meaning ", "
+	   "but sense # " sensenum " is actually " 
+	   (write (elt (get meaning 'ranked) (-1+ sensenum)))))
+  (try (find-frames wordforms.index
+	 'of meaning 'sensenum sensenum
+	 'word word)
+       (let ((form (frame-create brico.pool
+		     'type 'wordform 'of meaning 'word word
+		     'source wordnet-release
+		     'sensenum sensenum)))
+	 (add! meaning 'forms form)
+	 (index-frame wordforms.index form '{type sensenum word of})
+	 form)))
 
+(define (finish-import temp.index done.set)
+  (do-choices (frame (find-frames temp.index 'has '%wordlinks))
+    (do-choices (ptr (get frame '%wordlinks))
+      (add! (try (get ptr 'sourceword) (get ptr 'source))
+	(get ptr 'relation)
+	(get-wordform (get ptr 'target) (get ptr 'targetno))))
+    (drop! frame '%wordlinks)))
+  
 ;;; Fixups
 
 (define (fix-wordform wf)
@@ -289,6 +295,13 @@
     (store! wf 'sensenum
 	    (or (position (get wf 'word) (get (get wf 'of) 'ranked)) {}))
     (index-frame wordforms.index wf 'sensenum)))
+
+(define (fix-sensenum wf (num))
+  (set! num (position (get wf 'word) (get (get wf 'of) 'ranked)))
+  (when (exists? num)
+    (if num
+	(store! wf 'sensenum (1+ num))
+	(drop! wf 'sensenum))))
 
 (define (fix-wnsplit frame)
   (store! frame 'wnsplit 
@@ -310,19 +323,18 @@
     (setpos! in off)
     (line->synset (getline in))))
 
-(define (import-synsets file)
+(define (import-synsets file (temp.index (make-hashtable)) (done.set (make-hashset)))
   (let* ((in (open-input-file file))
 	 (line (dataline in)))
     (while (and line (not (eq? line #eof)))
-      (import-synset (line->synset line))
+      (import-synset (line->synset line) temp.index done.set)
       (set! line (dataline in)))))
-
 
 ;;;; The default order
 
 (comment
- (link-release! "dict/index.sense" 'wn30)
- (when (exists? (check-release-links 'wn30))
+ (link-release! "dict/index.sense" 'wn31)
+ (when (exists? (check-release-links 'wn31))
    (error |InconsistentLinks|))
  (import-synsets "dict/data.noun")
  (import-synsets "dict/data.verb")
@@ -371,7 +383,7 @@
 #|
 (define sense-keys.index
   (db/ref (mkpath brico-dir "sensekeys.index")
-	  #[indextype hashindex size #2mib 
+	  #[indextype hashindex size #m2mib 
 	    keyslot sensekeys
 	    register #t create #t]))
 

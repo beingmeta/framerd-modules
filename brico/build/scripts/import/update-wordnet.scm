@@ -3,30 +3,40 @@
 
 (config! 'cachelevel 2)
 (config! 'dbloglevel %info%)
-(config! 'bricosource (get-component "new"))
-(config! 'brico:wordnet @1/46074)
+(config! 'bricosource "./fresh/")
 
 (use-module '{storage/flex})
-(use-module '{brico brico/indexing brico/build/wordnet})
+(use-module '{brico})
+(use-module '{brico/indexing brico/build/wordnet})
+
+(config! 'brico:wordnet 'wn31)
 
 (define en @1/2c1c7)
-(define wordnet-dir (abspath (get-component "wordnet/WordNet-3.0/")))
+(define wordnet-dir (abspath "wordnet/WordNet-3.1/"))
 (varconfig! wordnet wordnet-dir)
 
 (define %loglevel %warn%)
 
-(define (main reln)
+(define global-index #f)
+(define global-done #f)
+
+(define (main)
   (poolctl brico.pool 'readonly #f)
   (indexctl core.index 'readonly #f)
   (indexctl wordnet.index 'readonly #f)
   (indexctl wordforms.index 'readonly #f)
-  (link-release! (mkpath wordnet-dir "dict/index.sense") 'wn30)
   (when (exists? (check-release-links 'wn30))
     (error |InconsistentLinks|))
-  (import-synsets (mkpath wordnet-dir "dict/data.noun"))
-  (import-synsets (mkpath wordnet-dir "dict/data.verb"))
-  (import-synsets (mkpath wordnet-dir "dict/data.adj"))
-  (import-synsets (mkpath wordnet-dir "dict/data.adv"))
+  (link-release! (mkpath wordnet-dir "dict/index.sense") 'wn31 #f)
+  (let ((temp.index (make-hashtable)) (done.set (make-hashset)))
+    (set! global-index temp.index) (set! global-done done.set)
+    (import-synsets (mkpath wordnet-dir "dict/data.noun") temp.index done.set)
+    (import-synsets (mkpath wordnet-dir "dict/data.verb") temp.index done.set)
+    (import-synsets (mkpath wordnet-dir "dict/data.adj") temp.index done.set)
+    (import-synsets (mkpath wordnet-dir "dict/data.adv") temp.index done.set)
+    (finish-import temp.index done.set)))
+
+(define (legacy-fixes)
   (fix-wordform (difference
 		 (find-frames wordnet.index 'type 'wordform)
 		 (find-frames wordnet.index 'has 'sensenum)))
