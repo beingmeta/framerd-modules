@@ -4,11 +4,11 @@
 (in-module 'brico/build/wikidata)
 
 (use-module '{texttools fdweb logger varconfig stringfmts optimize})
-(use-module '{storage/flex storage/typeindex})
+(use-module '{storage/flex storage/typeindex storage/aggregates})
 (use-module '{brico brico/indexing})
 
 (module-export! '{wikidata-dir wikid.pool wikid.map 
-		  wikid.index meta.index
+		  wikidata.index wikids.index meta.index
 		  wikid wikid/ingest
 		  wikid/read wikid/readn wikid/fetch
 		  wikid/commit})
@@ -21,8 +21,8 @@
 (define *epoch* "testing")
 (varconfig! wikidata:epoch *epoch*)
 
-(define block-size 10000)
-(define merge-size 1000)
+(define block-size 25000)
+(define merge-size 5000)
 
 (varconfig! wikidata:blocksize block-size)
 (varconfig! wikidata:mergesize merge-size)
@@ -40,71 +40,146 @@
 (define wikid.pool #f)
 (define wikid.map #f)
 
-(define wikid.index #f)
-(define labels.index #f)
+(define wikids.index #f)
+(define misc.index #f)
+(define en_labels.index #f)
+(define en_aliases.index #f)
 (define aliases.index #f)
 (define links.index #f)
+(define graph.index #f)
+(define words.index #f)
+(define norms.index #f)
+(define en.index #f)
+(define en_norms.index #f)
 (define wikid_types.index #f)
 (define wikid_has.index #f)
 
 (define meta.index #f)
 
 (define wikidata.index #f)
+(define wikidata.indexes #[])
 
 (define (set-wikidata-root! dir)
   (unless (equal? wikidata-dir dir)
     (set! wikid.pool
       (db/ref (mkpath dir "wikid.flexpool")
 	      `#[type flexpool 
-		 base @31C1/0 capacity #1gib partsize ,(* 4 #1mib)
-		 create #t prefix "wikid/wiki" compression zstd
+		 base @31C1/0 capacity #gib partsize ,(* 4 #mib) 
+		 create #t prefix "wikid/wikid" compression zstd
 		 metadata 
-		 #[adjuncts #[%words #[pool "words.flexpool" prefix "words" create #t]
-			      %glosses #[pool "glosses.flexpool" prefix "glosses" create #t]
-			      %norms #[pool "norms.flexpool" prefix "norms" create #t]
-			      %links #[pool "links.flexpool" prefix "links" create #t]]]
+		 #[adjuncts #[aliases #[pool "aliases.flexpool" prefix "aliases" compression zstd create #t]
+			      glosses #[pool "glosses.flexpool" prefix "glosses" compression zstd create #t]
+			      labels #[pool "labels.flexpool" prefix "labels" compression zstd create #t]
+			      links #[pool "links.flexpool" prefix "links" compression zstd create #t]
+			      %words #[pool "words.flexpool" prefix "words" compression zstd create #t]
+			      %norms #[pool "norms.flexpool" prefix "norms" compression zstd create #t]]]
 		 adjopts #[compression zstd]]))
+
     (set! wikid.map
       (db/ref (mkpath dir "wikid.map")
 	      `#[indextype memindex
 		 preload ,(config 'wikibuild #f)
+		 keyslot wikid
 		 register #t
 		 create #t]))
 
-    (set! wikid.index
-      (db/ref (mkpath dir "wikid.index")
-	      `#[type hashindex size ,(* 64 #mib) register #t create #t]))
-    (set! labels.index
-      (db/ref (mkpath dir "labels.index")
-	      `#[type hashindex size ,(* 16 #mib) register #t create #t
+    (set! wikids.index
+      (db/ref (mkpath dir "wikids.index")
+	      `#[type hashindex
+		 size ,(* 128 #mib)
+		 keyslot wikid
+		 register #t
+		 create #t]))
+    (add! wikidata.indexes 'wikids wikids.index)
+
+    (set! misc.index
+      (db/ref (mkpath dir "misc.index")
+	      `#[type hashindex
+		 size ,(* 64 #mib)
+		 register #t
+		 create #t]))
+    (add! wikidata.indexes 'misc misc.index)
+
+    (set! graph.index
+      (db/ref (mkpath dir "graph.index")
+	      `#[type hashindex
+		 size ,(* 128 #mib)
+		 register #t
+		 create #t]))
+    (add! wikidata.indexes 'graph graph.index)
+
+    (set! en_labels.index
+      (db/ref (mkpath dir "en_labels.index")
+	      `#[type hashindex size ,(* 64 #mib) register #t create #t
 		 keyslot labels]))
-    (set! aliases.index
-      (db/ref (mkpath dir "aliases.index")
-	      `#[type hashindex size ,(* 32 #mib) register #t create #t
+    (add! wikidata.indexes 'labels en_labels.index)
+
+    (set! en_aliases.index
+      (db/ref (mkpath dir "en_aliases.index")
+	      `#[type hashindex size ,(* 64 #mib) register #t create #t
 		 keyslot aliases]))
+    (add! wikidata.indexes 'aliases en_aliases.index)
+
     (set! links.index
       (db/ref (mkpath dir "links.index")
 	      `#[type hashindex size ,(* 16 #mib) register #t create #t
 		 keyslot links]))
+    (store! wikidata.indexes 'links links.index)
+
+    (set! words.index
+      (db/ref (mkpath dir "words.index")
+	      `#[type hashindex size ,(* 16 #mib) register #t create #t
+		 keyslot words]))
+    (store! wikidata.indexes 'links words.index)
+
+    (set! norms.index
+      (db/ref (mkpath dir "norms.index")
+	      `#[type hashindex size ,(* 16 #mib) register #t create #t
+		 keyslot norms]))
+    (store! wikidata.indexes 'norms norms.index)
+
+    (set! en.index
+      (db/ref (mkpath dir "en.index")
+	      #.[type 'hashindex size (* 16 #mib) register #t create #t
+		      keyslot @?en]))
+    (store! wikidata.indexes @?en en.index)
+
+    (set! en_norms.index
+      (db/ref (mkpath dir "en_norms.index")
+	      #.[type 'hashindex size (* 16 #mib) register #t create #t
+		      keyslot @?en_norms]))
+    (store! wikidata.indexes @?en_norms en_norms.index)
+
+    (unless (file-directory? (mkpath dir "types")) (mkdir (mkpath dir "types")))
     (set! wikid_types.index
-      (db/ref (mkpath dir "types")
-	      `#[type typeindex keyslot type 
-		 register #t create #t]))
+      (typeindex/open (mkpath dir "types")
+		      `#[type typeindex keyslot type 
+			 register #t create #t]))
+    (store! wikidata.indexes 'type wikid_types.index)
+
+    (unless (file-directory? (mkpath dir "has")) (mkdir (mkpath dir "has")))
     (set! wikid_has.index
-      (db/ref (mkpath dir "has")
-	      `#[type typeindex keyslot has
-		 register #t create #t]))
+      (typeindex/open (mkpath dir "has")
+		      `#[type typeindex keyslot has
+			 register #t create #t]))
+    (store! wikidata.indexes 'has wikid_has.index)
 
     (set! meta.index 
       (db/ref (mkpath (config 'bricosource) "core.index")
 	      #[type hashindex register #t create #t]))
 
     (set! wikidata.index
-      (make-aggregate-index {wikid.index labels.index aliases.index links.index
-			     wikid_types.index wikid_has.index}
+      (make-aggregate-index {wikids.index misc.index graph.index
+			     words.index norms.index
+			     en.index en_norms.index
+			     links.index
+			     wikid_types.index
+			     wikid_has.index}
 			    #[register #t]))
 
-    (set! wikidata-dir dir)))
+    (set! wikidata-dir dir)
+
+    ))
 
 (config-def! 'wikidata:root
 	     (lambda (var (val))
@@ -123,7 +198,7 @@
     (try (get wikid.map string)
 	 (let* ((isprop (has-prefix string "P"))
 		(existing 
-		 (find-frames (if isprop meta.index wikid.index)
+		 (find-frames (if isprop meta.index wikids.index)
 		   'wikid string))
 		(frame
 		 (try existing
@@ -133,7 +208,8 @@
 			'type (if isprop 'property 'entity)
 			'source 'wikidata))))
 	   (store! wikid.map string frame)
-	   (index-frame wikid.index frame '{wikid type})
+	   (index-frame wikids.index frame 'wikid)
+	   (index-frame wikid_types.index frame 'type)
 	   (when isprop (index-frame meta.index frame '{wikid type}))
 	   frame))))
 
@@ -144,18 +220,35 @@
 
 ;;; Converting dump data
 
-(define (->langmap map (into `#[]))
-  (do-choices (assoc (getassocs map))
-    (if (vector? (cdr assoc))
-	(store! into (car assoc) (get (elts (cdr assoc)) 'value))
-	(store! into (car assoc) (get (cdr assoc) 'value))))
-  into)
-(define (->sitelinks map (into `#[]))
-  (do-choices (assoc (getassocs map))
-    (if (vector? (cdr assoc))
-	(store! into (car assoc) (get (elts (cdr assoc)) 'title))
-	(store! into (car assoc) (get (cdr assoc) 'title))))
-  into)
+(define (expand-langid langid (dc))
+  (set! dc (downcase langid))
+  {(tryif (position #\_ dc) (string->symbol (slice dc 0 (position #\_ dc))))
+   langid})
+
+(defambda (->langmap map (xform #f))
+  (tryif (exists? map)
+    (let ((into #[]))
+      (do-choices (assoc (getassocs map))
+	(if (vector? (cdr assoc))
+	    (add! into (expand-langid (car assoc)) 
+		  (if xform
+		      (xform (get (elts (cdr assoc)) 'value))
+		      (get (elts (cdr assoc)) 'value)))
+	    (add! into (expand-langid (car assoc)) 
+		  (if xform
+		      (xform (get (cdr assoc) 'value))
+		      (get (cdr assoc) 'value)))))
+      into)))
+(define (->sitelinks map)
+  (tryif (exists? map)
+    (let ((into `#[]))
+      (do-choices (assoc (getassocs map))
+	(if (vector? (cdr assoc))
+	    (store! into (expand-langid (car assoc))
+		    (get (elts (cdr assoc)) 'title))
+	    (store! into (expand-langid (car assoc))
+		    (get (cdr assoc) 'title))))
+      into)))
 
 (define (expandvecs x) (if (vector? x) (elts x) x))
 
@@ -166,42 +259,62 @@
 (define (copy-frame data into (index #f))
   (when (test data 'title) (store! into 'title (get data 'title)))
   (store! into 'type (string->symbol (upcase (get data 'type))))
-  (store! into 'label (get (get (get data 'labels) 'en) 'value))
-  (store! into 'norms (get (get (get data 'labels) 'en) 'value))
-  (store! into 'words {(get (elts (get (get data 'aliases) 'en)) 'value)
-		       (get into 'norms)})
-  (store! into 'gloss (get (get (get data 'descriptions) 'en) 'value))
-  (store! into '%id (list (pick-one (get into 'norm)) (get into 'wikid)))
-  (store! into 'labels (->langmap (get data 'labels)))
-  (store! into 'aliases (->langmap (get data 'aliases)))
-  (store! into 'glosses (->langmap (get data 'descriptions)))
-  (store! into 'links (->sitelinks (get data 'sitelinks)))
+  (let* ((xfn (if (capitalized? (get (get (get data 'labels) 'en) 'value))
+		  #f downcase))
+	 (norms (->langmap (get data 'labels) xfn))
+	 (words (->langmap (get data 'aliases) xfn)))
+    (when (exists? norms) (store! into '%norms norms))
+    (when (exists? words) (store! into '%words words))
+    (when (test norms 'en)
+      (store! into 'norms (get norms 'en))
+      (store! into 'words {(get words 'en) (get norms 'en)}))
+    (store! into '%id
+	    (if (exists? (get into 'norms))
+		(list 'WIKID (get into 'wikid) (pick-one (get into 'norms)))
+		(list 'WIKID (get into 'wikid)))))
+  (when (test data 'descriptions)
+    (store! into 'gloss (get (get (get data 'descriptions) 'en) 'value))
+    (when (test data 'descriptions)
+      (store! into 'glosses (->langmap (get data 'descriptions)))))
+  (when (test data 'labels) (store! into 'labels (->langmap (get data 'labels))))
+  (when (test data 'aliases) (store! into 'aliases (->langmap (get data 'aliases))))
+  (when (test data 'sitelinks) (store! into 'links (->sitelinks (get data 'sitelinks))))
   (store! into 'modified (timestamp (get data 'modified)))
   (store! into 'revid (get data 'revid))
-  (store! into '%id (list (pick-one (get into 'norms)) (get into 'wikid)))
-  (do-choices (claim (expandvecs (getvalues (get data 'claims))))
-    (unless (test claim 'rank "deprecated")
-      (let* ((main (get claim 'mainsnak))
-	     (prop (wikid (get main 'property)))
-	     (context `#[])
-	     (value (snak-value main context)))
-	(add! into prop value)
-	(when (test claim 'rank "preferred") (add! context 'rank "preferred"))
-	(when (test claim 'qualifiers)
-	  (do-choices (snak (expandvecs (getvalues (get claim 'qualifiers))))
-	    (add! context (wikid (get snak 'property))
-		  (snak-value snak))))
-	(when (exists? (getkeys context))
-	  (add! into prop (cons value context))))))
+  (when (test data 'claims)
+    (do-choices (claim (expandvecs (getvalues (get data 'claims))))
+      (unless (test claim 'rank "deprecated")
+	(let* ((main (get claim 'mainsnak))
+	       (prop (wikid (get main 'property)))
+	       (context `#[])
+	       (value (snak-value main context)))
+	  (add! into prop value)
+	  (when (test claim 'rank "preferred") (add! context 'rank "preferred"))
+	  (when (test claim 'qualifiers)
+	    (do-choices (snak (expandvecs (getvalues (get claim 'qualifiers))))
+	      (add! context (wikid (get snak 'property))
+		    (snak-value snak))))
+	  (when (oid? value)
+	    (index-frame graph.index into prop value)
+	    (unless (test claim 'qualifiers)
+	      (index-frame graph.index into prop (list value))))
+	  (when (exists? (getkeys context))
+	    (add! into prop (cons value context)))))))
   (store! into 'epoch *epoch*)
   (when index 
     (index-frame index into 'type)
-    (index-frame index into 'labels (mapping-keys (get into 'labels)))
     (index-frame index into 'links (mapping-keys (get into 'links)))
-    (index-frame index into 'aliases (mapping-keys (get into 'aliases)))
-    (index-frame index into 'has (getkeys into)))
-  (when index (index-string index into @?en_norms #default 2))
-  (when index)
+    (index-frame index into 'has (getkeys into))
+    (index-frame index into 'words (get into 'words))
+    (index-frame index into 'norms (get into 'norms))
+    (index-frame index into 'aliases (mapping-keys (get into 'aliases))))
+  (when en_labels.index
+    (index-frame en_labels.index into 'labels
+		 (mapping-keys `#[en ,(get (get into 'aliases) 'en)])))
+  (when index
+    (index-string index into @?en (get into 'words) 2)
+    (index-string index into @?en_norms (get into 'norms) 2))
+
   into)
 
 ;;; Handling snaks (bigger than bytes)
@@ -264,21 +377,22 @@
 
 (define (readloop reader index (opts #f) (count 0) 
 		  (limit) (merge)
-		  (temp (make-hashtable))
+		  (temp)
 		  (results {})
 		  (data))
   (default! limit (getopt opts 'limit block-size))
   (default! merge (getopt opts 'merge merge-size))
+  (default! temp (aggregate/branch index))
   (set! data (onerror (jsonparse (reader)) #f))
   (while (and data (< count limit))
     (unless (empty-string? data)
       (set+! results (wikid/ingest data temp))
       (set! count (1+ count))
       (when (zero? (remainder count merge))
-	(index-merge! index temp)
-	(set! temp (make-hashtable))))
+	(aggregate/merge! temp)
+	(set! temp (aggregate/branch index))))
     (set! data (onerror (jsonparse (reader)) #f)))
-  (index-merge! index temp)
+  (aggregate/merge! temp)
   results)
 
 (define (wikid/readn reader index (opts #f))
@@ -287,7 +401,10 @@
     (if (and nthreads (> nthreads 1))
 	(begin (dotimes (i nthreads)
 		 (set+! threads (thread/call readloop reader index opts)))
-	  (thread/wait! threads))
+	  (thread/wait! threads)
+	  (let ((errs (pick threads thread/error?)))
+	    (if (exists? errs)
+		(error |ThreadErrors| wikid/readn (thread/result errs)))))
 	(readloop reader index opts))))
 
 (define (wikid/fetch id (index #f))
@@ -297,7 +414,7 @@
 
 (define (wikid/commit)
   (flex/commit! 
-   {wikid.pool wikid.index meta.index wikid.map brico.pool
+   {wikid.pool wikidata.index meta.index wikid.map brico.pool
     (getvalues (poolctl wikid.pool 'adjuncts))})
   (commit))
 
@@ -312,7 +429,7 @@
 	(start-brico-load (pool-load brico.pool))
 	(start-wikid-load (pool-load wikid.pool)))
     (unless session-started (set! session-started started))
-    (wikid/readn r wikid.index opts)
+    (wikid/readn r wikidata.index opts)
     (wikid/commit)
     (swapout)
     (lognotice |FinishedScan| 

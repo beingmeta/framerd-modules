@@ -13,24 +13,35 @@
 (use-module '{storage/flex storage/typeindex})
 (use-module '{brico brico/indexing brico/build/wikidata})
 
-(define %loglevel %info%)
+(define %loglevel %notice%)
 
 (config! 'dbloglevel %info%)
+(config! 'log:threadid #t)
 (config! 'cachelevel 2)
 (define wikidata-input-file
   (abspath "wikisrc/latest-all.json.bz2"))
 (indexctl meta.index 'readonly #f)
 (poolctl brico.pool 'readonly #f)
 
-;;; Converting dump data
+(define dochain #t)
+(varconfig! chain dochain config:boolean)
 
-(define (wikid/reader (file wikidata-input-file) (lines 0) (pos #f))
+;;; Reading import state
+
+(define import-state #f)
+
+;;; Converting exported wikidata
+
+(define (wikid/reader file (lines 0) (pos #f))
+  (unless (number? lines) (set! lines 0))
   (if (has-suffix file ".bz2")
       (let ((stream (archive/open file 0))
 	    (count 0)
 	    (eof #f))
 	;; Ignore leading [
 	(getline stream "[")
+	;; And processed lines
+	(logwarn |SkippingLines| "Skipping " ($count lines "line") " of input")
 	(dotimes (i lines) (getline stream))
 	(set! count lines)
 	(slambda ((cmd #f))
@@ -47,11 +58,13 @@
       (let ((stream (open-input-file file))
 	    (count 0)
 	    (eof #f))
-	;; Ignore leading [
 	(if pos
 	    (setpos stream pos)
 	    (begin
+	      ;; Ignore leading [
 	      (getline stream "[")
+	      ;; And processed lines
+	      (logwarn |SkippingLines| "Skipping " ($count lines "line") " of input")
 	      (dotimes (i lines) (getline stream))))
 	(set! count lines)
 	(slambda ((cmd #f))
@@ -75,7 +88,7 @@
 	(start-brico-load (pool-load brico.pool))
 	(start-wikid-load (pool-load wikid.pool)))
     (unless session-started (set! session-started started))
-    (wikid/readn r wikid.index opts)
+    (wikid/readn r wikidata.index opts)
     (wikid/commit)
     (swapout)
     (lognotice |Cycle| 
@@ -93,13 +106,23 @@
 	      "new property" "new properties")
       " in " (secs->string (elapsed-time session-started)))))
 
-(define (main (input-file wikidata-input-file)
+(define (main (input-file #f)
 	      (lines (config 'LINES 0)) (pos #f)
 	      (maxlines (config 'maxlines)))
-  (let ((r (wikid/reader input-file lines pos))
-	(started (elapsed-time))
-	(done #f))
-    (until (or done (and maxlines (> (- (r 'count) lines) maxlines)))
+  (let* ((state (if (file-exists? (mkpath local-wikidata-dir "import.state"))
+		    (file->dtype (mkpath local-wikidata-dir "import.state"))
+		    `#[]))
+	 (file (or input-file (getopt state 'file wikidata-input-file)))
+	 (lines (getopt state 'lines (config 'LINES 0)))
+	 (pos (getopt state 'pos (config 'STARTPOS 0)))
+	 (started (elapsed-time))
+	 (done #f)
+	 (r #f))
+    (info%watch "MAIN" lines pos r started done)
+    (set! r (wikid/reader file lines pos))
+    (lognotice |Starting| "Reading wikidata")
+    (until (or done (and maxlines (> (- (r 'count) lines) maxlines))
+	       (file-exists? (mkpath local-wikidata-dir "stop")))
       (wikid/cycle r)
       (lognotice |Progress|
 	"Read " ($num (- (r 'count) lines)) "/" ($num (r 'count)) " lines "
@@ -111,14 +134,22 @@
 	      "(" (show% pos size) ")"))))
       (when (r 'eof?)
 	(logwarn |FileDone| "Finished reading " input-file)
-	(set! done #t)))
-    (wikid/commit)
-    (unless (r 'eof?)
+	(set! done #t))
+      (wikid/commit)
+      (store! state 'file file)
+      (store! state 'lines (r 'count))
+      (store! state 'pos (r 'pos))
+      (store! state 'elapsed
+	      (+ (try (get state 'elapsed) 0)
+		 (elapsed-time started)))
+      (dtype->file state (mkpath local-wikidata-dir "import.state")))
+    (unless (or (not dochain) (r 'eof?)
+		(file-exists? (mkpath local-wikidata-dir "stop")))
       (if (r 'pos)
 	  (chain input-file (r 'count) (r 'pos))
 	  (chain input-file (r 'count))))))
 
 (when (config 'optimize #t)
-  (optimize! '{brico brico/indexing brico/wikidata
+  (optimize! '{brico brico/indexing brico/build/wikidata
 	       storage/flex storage/flexpools})
   (optimize!))
