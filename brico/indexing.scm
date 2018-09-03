@@ -209,7 +209,7 @@
 (define wordform-slotids '{word of language rank type sensenum})
 
 (define (index-core index frame)
-  (index-relation index frame '{type sensecat fips-code source dsg})
+  (index-relation index frame '{type sensecat fips-code source dsg wikid})
   (when (and (or (%test frame 'words) (%test frame '%words))
 	     (ambiguous? (get frame 'sensecat)))
     (index-relation index frame 'sensecat 'ambiguous))
