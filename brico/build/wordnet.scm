@@ -51,7 +51,7 @@
 (when brico-dir
   (set! core.index (open-index (mkpath brico-dir "core.index")))
   (set! wordnet.index (open-index (mkpath brico-dir "wordnet.index")))
-  (set! wordforms.index (open-index (mkpath brico-dir "wordforms.index"))))
+  (set! wordforms.index wordnet.index))
 
 ;;; Reading WordNet sense indexes (index.sense)
 
@@ -127,9 +127,9 @@
       "#m" memberof "#s" ingredientof "#p" partof
       "%m" members "%s" ingredients "%p" parts
       "=" attribute "+" derivations
-      ";c" topic "-c" topicof
-      ";r" region "-r" regionof
-      ";u" usage "-u" usage]
+      ";c" topic "-c" topic_refs
+      ";r" region "-r" region_refs
+      ";u" usage "-u" usage_refs]
     verb
     #["!" antonym "@" hypernym "~" hyponym "*" entails ">" causes
       "^" seealso "$" verbgroup "+" derivations
