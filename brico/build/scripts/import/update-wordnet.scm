@@ -3,7 +3,7 @@
 
 (config! 'cachelevel 2)
 (config! 'dbloglevel %info%)
-(config! 'bricosource "./fresh/")
+(config! 'bricosource "./update/")
 
 (use-module '{storage/flex})
 (use-module '{brico})
@@ -34,7 +34,8 @@
     (import-synsets (mkpath wordnet-dir "dict/data.verb") temp.index done.set)
     (import-synsets (mkpath wordnet-dir "dict/data.adj") temp.index done.set)
     (import-synsets (mkpath wordnet-dir "dict/data.adv") temp.index done.set)
-    (finish-import temp.index done.set)))
+    (finish-import temp.index done.set))
+  (commit))
 
 (define (legacy-fixes)
   (fix-wordform (difference
@@ -43,4 +44,4 @@
   (fix-wnsplit (find-frames wordnet.index 'has 'wnsplit)))
 
 (when (config 'optimize #t)
-  (optimize! '{brico brico/indexing brico/wordnet}))
+  (optimize! '{brico brico/indexing brico/build/wordnet}))
