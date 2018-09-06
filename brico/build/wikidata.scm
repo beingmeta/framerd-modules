@@ -54,6 +54,10 @@
 (define wikid_types.index #f)
 (define wikid_has.index #f)
 
+
+(define-init base-wikid-load #f)
+(define-init base-brico-load #f)
+
 (define meta.index #f)
 
 (define wikidata.index #f)
@@ -67,14 +71,26 @@
 		 base @31C1/0 capacity #gib partsize ,(* 4 #mib) 
 		 create #t prefix "wikid/wikid" compression zstd
 		 metadata 
-		 #[adjuncts #[aliases #[pool "aliases.flexpool" prefix "aliases" compression zstd create #t]
-			      glosses #[pool "glosses.flexpool" prefix "glosses" compression zstd create #t]
-			      labels #[pool "labels.flexpool" prefix "labels" compression zstd create #t]
-			      links #[pool "links.flexpool" prefix "links" compression zstd create #t]
-			      %words #[pool "words.flexpool" prefix "words" compression zstd create #t]
-			      %norms #[pool "norms.flexpool" prefix "norms" compression zstd create #t]]]
+		 #[adjuncts #[aliases
+			      #[pool "aliases.flexpool" prefix "aliases" 
+				compression zstd slotids #() create #t]
+			      %glosses
+			      #[pool "glosses.flexpool" prefix "glosses"
+				compression zstd slotids #() create #t]
+			      labels
+			      #[pool "labels.flexpool" prefix "labels" 
+				compression zstd slotids #() create #t]
+			      links #[pool "links.flexpool" prefix "links" 
+				      compression zstd slotids #() create #t]
+			      %words
+			      #[pool "words.flexpool" prefix "words" 
+				compression zstd slotids #() create #t]
+			      %norms
+			      #[pool "norms.flexpool" prefix "norms" 
+				compression zstd slotids #() create #t]]]
 		 adjopts #[compression zstd]]))
-
+    (set! base-wikid-load (pool-load wikid.pool))
+    (set! base-brico-load (and brico.pool (pool-load brico.pool)))
     (set! wikid.map
       (db/ref (mkpath dir "wikid.map")
 	      `#[indextype memindex
@@ -307,7 +323,8 @@
     (index-frame index into 'has (getkeys into))
     (index-frame index into 'words (get into 'words))
     (index-frame index into 'norms (get into 'norms))
-    (index-frame index into 'aliases (mapping-keys (get into 'aliases))))
+    ;; (index-frame index into 'aliases (mapping-keys (get into 'aliases)))
+    )
   (when en_labels.index
     (index-frame en_labels.index into 'labels
 		 (mapping-keys `#[en ,(get (get into 'aliases) 'en)])))
@@ -420,8 +437,6 @@
 
 ;;;; Cycles
 
-(define-init base-wikid-load (pool-load wikid.pool))
-(define-init base-brico-load (pool-load brico.pool))
 (define-init session-started #f)
 
 (define (wikid/cycle r (opts #f))
