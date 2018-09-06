@@ -211,7 +211,7 @@
 (define (index-core index frame)
   (index-relation index frame
 		  '{type sensecat fips-code source dsg wikid
-		    topic region usage})
+		    topic_domain region_domain usage_domain})
   (when (and (or (%test frame 'words) (%test frame '%words))
 	     (ambiguous? (get frame 'sensecat)))
     (index-relation index frame 'sensecat 'ambiguous))

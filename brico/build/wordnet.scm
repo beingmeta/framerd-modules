@@ -127,18 +127,20 @@
       "#m" memberof "#s" ingredientof "#p" partof
       "%m" members "%s" ingredients "%p" parts
       "=" attribute "+" derivations
-      ";c" topic "-c" topic_refs
-      ";r" region "-r" region_refs
-      ";u" usage "-u" usage_refs]
+      ";c" topic_domain "-c" topic_refs
+      ";r" region_domain "-r" region_refs
+      ";u" usage_domain "-u" usage_refs]
     verb
     #["!" antonym "@" hypernym "~" hyponym "*" entails ">" causes
       "^" seealso "$" verbgroup "+" derivations
-      ";c" topic ";r" region ";u" usage]
+      ";c" topic_domain ";r" region_domain ";u" usage_domain]
     adjective
     #["!" antonym "&" similar "<" participle "\\" pertainym 
-      "=" attribute "^" seealso ";c" topic ";r" region ";u" usage]
+      "=" attribute "^" seealso 
+      ";c" topic_domain ";r" region_domain ";u" usage_domain]
     adverb
-    #["!" antonym "\\" adjective ";c" topic ";r" region ";u" usage]])
+    #["!" antonym "\\" adjective 
+      ";c" topic_domain ";r" region_domain ";u" usage_domain]])
 
 (define (decnum string) (string->number string 10))
 (define (hexnum string) (string->number string 16))
@@ -276,7 +278,7 @@
 		     'type 'wordform 'of meaning 'word word
 		     'source wordnet-release
 		     'sensenum sensenum)))
-	 (add! meaning 'forms form)
+	 (add! meaning 'wordforms form)
 	 (index-frame wordforms.index form '{type sensenum word of})
 	 form)))
 
