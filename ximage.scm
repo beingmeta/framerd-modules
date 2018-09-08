@@ -85,7 +85,7 @@
 		 (or (getopt xform 'handler)
 		     (procedure? (getopt xform 'handler)))))
 	(let* ((newimage (if (procedure? xform)
-			     (xform image content)
+			     (xform image data)
 			     ((getopt xform 'handler) image data xform))))
 	  newimage)
 	(if (table? xform)

@@ -80,7 +80,7 @@
   (fifo/queued (pump-input pump)))
 
 (define (pump/shutdown pump)
-  (fifo/close (pump-input pump)))
+  (fifo/close! (pump-input pump)))
 
 
 
