@@ -157,14 +157,14 @@
     (set! en.index
       (db/ref (mkpath dir "en.index")
 	      #.[type 'hashindex size (* 16 #mib) register #t create #t
-		      keyslot @?en]))
-    (store! wikidata.indexes @?en en.index)
+		      keyslot en]))
+    (store! wikidata.indexes en en.index)
 
     (set! en_norms.index
       (db/ref (mkpath dir "en_norms.index")
 	      #.[type 'hashindex size (* 16 #mib) register #t create #t
-		      keyslot @?en_norms]))
-    (store! wikidata.indexes @?en_norms en_norms.index)
+		      keyslot en_norms]))
+    (store! wikidata.indexes en_norms en_norms.index)
 
     (unless (file-directory? (mkpath dir "types")) (mkdir (mkpath dir "types")))
     (set! wikid_types.index
@@ -329,8 +329,8 @@
     (index-frame en_labels.index into 'labels
 		 (mapping-keys `#[en ,(get (get into 'aliases) 'en)])))
   (when index
-    (index-string index into @?en (get into 'words) 2)
-    (index-string index into @?en_norms (get into 'norms) 2))
+    (index-string index into en (get into 'words) 2)
+    (index-string index into en_norms (get into 'norms) 2))
 
   into)
 
