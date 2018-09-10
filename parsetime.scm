@@ -4,8 +4,9 @@
 ;;; DON'T EDIT THIS FILE !!!
 ;;;
 ;;; The reference version of this module now in the src/libscm
-;;; directory of the FramerD/KNO source tree. Please edit that file
-;;; instead.
+;;; directory of the FramerD/KNO source tree. Please edit the file in
+;;; src/libscm instead or move any added functionality to an extension
+;;; module.
 
 (in-module 'parsetime)
 

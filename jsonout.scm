@@ -1,20 +1,47 @@
+;;; -*- Mode: Scheme; Character-encoding: utf-8; -*-
+;;; Copyright (C) 2005-2018 beingmeta, inc. All rights reserved
+
+;;; DON'T EDIT THIS FILE !!!
+;;;
+;;; The reference version of this module now in the src/libscm
+;;; directory of the FramerD/KNO source tree. Please edit the file in
+;;; src/libscm instead or move any added functionality to an extension
+;;; module.
+
 (in-module 'jsonout)
 
 (use-module '{fdweb varconfig})
 
 (define json-lisp-prefix ":")
 
-(define jsref-slotid #f)
-(varconfig! JSON:REFSLOT jsref-slotid)
-(define jsref-oid-slotid #f)
-(varconfig! JSON:OIDREFSLOT jsref-slotid)
+(define-init *wrapvecs* #t)
+(varconfig! JSON:WRAPVECS *wrapvecs*)
 
-(define uuid-getref #f)
-(define oid-getref #f)
-(varconfig! JSON:UUIDREF uuid-getref)
-(varconfig! JSON:OIDREF oid-getref)
+;; Whether to output all slots/keys as :SLOTNAME
+(define-init *ugly-slots* #f)
+(varconfig! JSON:UGLYSLOTS *ugly-slots*)
 
-(define %volatile '{jsref-slotid jsref-oid-slotid uuid-getref oid-getref})
+;; A function for converting slots to keystrings
+(define-init *json-slotkeyfn* #f)
+(varconfig! JSON:SLOTKEYFN *json-slotkeyfn*)
+
+;; A slotid/key storing an ID for rendering tables 
+(define-init *json-refslot* #f)
+(varconfig! JSON:REFSLOT *json-refslot*)
+
+;; A slotid or function for generating references from OIDs
+(define-init *json-oidref* #f)
+(varconfig! JSON:OIDREF *json-oidref*)
+
+;; A slotid or function for generating references from UUIDS
+(define *json-uuidfn* #f)
+(varconfig! JSON:UUIDFN *json-uuidfn*)
+
+(define *render-timestamp*
+  (lambda (t) (printout (get t 'tick))))
+(varconfig! JSON:TIMESTAMPFN *render-timestamp*)
+
+(define %volatile '{*json-refslot* *json-oidref* *json-uuidfn*})
 
 (defambda (jsonelt value (prefix #f) (initial #f))
   (printout (if (not initial) ",") (if prefix prefix)
@@ -73,20 +100,23 @@
 	    
 	    "}"))
 
-(defambda (jsonout value (onfail "[]"))
+(defambda (jsonout value (opts #f) (emptyval))
+  (when (string? opts)
+    (set! emptyval opts)
+    (set! opts #f))
+  (default! emptyval "[]")
   (cond ((ambiguous? value)
 	 (printout "[" (do-choices (v value i)
 			 (printout (if (> i 0) ",") (jsonout v)))
 	   "]"))
-	((fail? value) (if onfail (printout onfail)))
-	((number? value) (printout value))
+	((fail? value) (if emptyval (printout emptyval)))
+	((or (oid? value) (uuid? value) (timestamp? value))
+	 (jsonoutput (exportjson value opts) 0))
 	((string? value) (jsonoutput value 0))
-	((vector? value) (jsonvec value))
+	((or (vector? value) (compound? value 'jsonvec)) (jsonvec value))
 	((eq? value #t) (printout "true"))
 	((eq? value #f) (printout "false"))
-	((timestamp? value) (printout (get value 'tick)))
-	((oid? value) (jsonoutput (exportjson value) 0))
-	((uuid? value) (jsonoutput (exportjson value) 0))
+	((number? value) (printout value))
 	((table? value) (jsontable value))
 	(else (let ((string (stringout (printout json-lisp-prefix)
 			      (write value))))
@@ -109,50 +139,85 @@
 
 ;;; Converting a FramerD/Scheme object into an object that converts to
 ;;; JSON better
-(defambda (exportjson object (toplevel #f))
-  (cond ((oid? (qc object))
-	 (try (tryif oid-getref (oid-getref object))
-	      (tryif jsref-slotid 
-		(get object (or jsref-oid-slotid jsref-slotid)))
-	      (glom ":" (oid->string object))))
-	((fixnum? (qc object)) object)
+(defambda (exportjson object (opts #f) (toplevel #f) 
+		      (oidfn) (uuidfn) (slotkeyfn) (refslot))
+  (default! oidfn
+    (if opts (getopt opts 'oidfn *json-oidref*) *json-oidref*))
+  (default! uuidfn
+    (if opts (getopt opts 'uuidfn *json-uuidfn*) *json-uuidfn*))
+  (default! slotkeyfn
+    (if opts (getopt opts 'slotkeyfn *json-slotkeyfn*) *json-slotkeyfn*))
+  (default! refslot
+    (if opts (getopt opts 'refslot *json-refslot*) *json-refslot*))
+  (cond ((fixnum? (qc object)) object)
 	((symbol? (qc object)) object)
+	((oid? (qc object))
+	 (try (tryif oidfn
+		(tryif (or (symbol? oidfn) (oid? oidfn)) (get object oidfn))
+		(oidfn object opts toplevel))
+	      (tryif *json-refslot* (get object *json-refslot*))
+	      (glom json-lisp-prefix (oid->string object))))
 	((ambiguous? object)
 	 (choice->vector 
-	  (for-choices (object object) (exportjson object))))
+	  (for-choices (object object) 
+	    (exportjson object opts #f oidfn uuidfn slotkeyfn refslot))))
+	((timestamp? object) 
+	 ((getopt opts 'timestampfn *render-timestamp*) object))
 	((pair? object)
 	 (if (proper-list? object)
-	     (vector (->vector (map exportjson object)))
-	     `#[CAR ,(exportjson (car object))
-		CDR ,(exportjson (car object))]))
+	     (if (getopt opts 'wrapvecs *wrapvecs*)
+		 (vector (forseq (elt (->vector object))
+			   (exportjson elt opts #f oidfn uuidfn slotkeyfn refslot)))
+		 (forseq (elt (->vector object)) 
+		   (exportjson elt opts #f oidfn uuidfn slotkeyfn refslot)))
+	     `#[CAR ,(exportjson (car object) opts #f oidfn uuidfn slotkeyfn refslot)
+		CDR ,(exportjson (car object) opts #f oidfn uuidfn slotkeyfn refslot)]))
 	((string? object)
 	 (if (has-prefix object {"#" "\\"}) (glom "\\" object)
 	     object))
-	((timestamp? object) (glom "#T" (get object 'iso)))
 	((packet? object) (glom "#x\"" (packet->base16 object) "\""))
 	((uuid? object)
-	 (try (tryif uuid-getref (uuid-getref object))
+	 (try (tryif uuidfn (uuidfn object opts toplevel))
 	      (glom "#U" (uuid->string object))))
-	((vector? object) (vector (map exportjson object)))
+	((vector? object)
+	 (if (getopt opts 'wrapvecs *wrapvecs*)
+	     (vector (forseq (elt (->vector object))
+		       (exportjson elt opts #f oidfn slotkeyfn refslot)))
+	     (forseq (elt (->vector object))
+	       (exportjson elt opts #f oidfn slotkeyfn refslot))))
+	((and refslot (table? object) (test object refslot))
+	 (get object refslot))
 	((table? object)
 	 (let ((obj (frame-create #f)))
 	   (do-choices (key (getkeys object))
-	     (if (and toplevel (symbol? key))
-		 (store! obj (downcase (symbol->string key))
-			 (for-choices (v (get object key))
-			   (exportjson v)))
-		 (store! obj key
-			 (for-choices (v (get object key))
-			   (exportjson v)))))
+	     (store! obj
+	       (cond ((and (oid? key) oidfn)
+		      (try (tryif (oid? oidfn) (get key oidfn))
+			   (tryif (symbol? oidfn) (get key oidfn))
+			   (oidfn key)
+			   (oid->string key)))
+		     ((oid? key) (oid->string key))
+		     ((and (symbol? key) slotkeyfn) (slotkeyfn key))
+		     ((and (symbol? key) *ugly-slots*)
+		      (glom json-lisp-prefix (symbol->string key)))
+		     ((and (symbol? key) toplevel)
+		      (downcase (symbol->string key)))
+		     ((string? key) key)
+		     (else (let ((exported (exportjson key opts #f oidfn slotkeyfn refslot)))
+			     (if (string? exported) exported
+				 (lisp->string exported)))))
+	       (for-choices (v (get object key))
+		 (exportjson v opts #f oidfn slotkeyfn refslot))))
 	   obj))
 	 (else object)))
-(define (export->json arg) (exportjson arg #t))
+(define (export->json arg (opts #f)) (exportjson arg opts #t))
 
-(defambda (importjson object (toplevel #f))
+(defambda (importjson object (opts #f) (toplevel #f))
   (if (vector? object)
       (for-choices (elt (elts object))
-	(if (vector? elt) (map importjson elt)
-	    (importjson elt)))
+	(if (vector? elt) 
+	    (forseq (subelt elt) (importjson subelt opts))
+	    (importjson elt opts)))
       (if (string? object)
 	  (cond ((has-prefix object "\\") (slice object 1))
 		((has-prefix object "#x") (base16->packet (slice object 2)))
@@ -166,19 +231,19 @@
 		    (do-choices (key (getkeys object))
 		      (if (and toplevel (string? key) (lowercase? key))
 			  (add! obj (string->lisp key)
-				(importjson (get object key)))
-			  (add! obj key (importjson (get object key)))))
+				(importjson (get object key) opts))
+			  (add! obj key (importjson (get object key) opts))))
 		    obj)	      
 		  object)))))
-(define (import->json obj) (importjson obj #t))
+(define (import->json obj (opts #f)) (importjson obj opts #t))
 (module-export! '{export->json import->json})
 
 ;;; JSON stringout
 
-(define (json->string x)
-  (stringout (jsonout (exportjson x #t))))
-(define (jsonstringout x) (json->string x))
-(define (json/stringout x) (json->string x))
+(define (json->string x (opts #f))
+  (stringout (jsonout (exportjson x opts #t))))
+(define (jsonstringout x (opts #f)) (json->string x opts))
+(define (json/stringout x (opts #f)) (json->string x opts))
 
 (module-export! '{json->string jsonstringout json/stringout})
 
