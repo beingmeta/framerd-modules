@@ -56,6 +56,7 @@
 		      sensekeys synsets
 		      verb-frames pertainym
 		      lex-fileno})
+	      (index-frame wordnet.table f '%sensekeys (getvalues (get f '%sensekeys)))
 	      (index-frame wordnet.table f 'has (getkeys f))
 	      (index-gloss wordnet.table f 'gloss)
 	      (index-brico core.table f)

@@ -16,7 +16,8 @@
 ;; For custom methods
 (use-module 'rulesets)
 
-(define %loglevel %notify%)
+(define-init %loglevel %notify%)
+;;(set! %loglevel %debug%)
 
 (define (get-keyslot ix) 
   (tryif (index? ix) (indexctl ix 'keyslot)))

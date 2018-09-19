@@ -11,7 +11,8 @@
 (module-export! '{link-release! check-release-links
 		  import-synsets read-synset finish-import
 		  core.index wordnet.index wordforms.index
-		  fix-wordform fix-wnsplit})
+		  fix-wordform fix-wnsplit
+		  read-sense-index})
 
 (define wnrelease 'wn31)
 (define wordnet-release @1/94d47) ;; 3.0 @1/46074
@@ -55,11 +56,20 @@
 
 ;;; Reading WordNet sense indexes (index.sense)
 
+(define key-types #(NOUN VERB ADJECTIVE ADVERB SATELLITE))
+
+(define pos-cat-pat #((bos) (not> "%") "%" (label poscode (isdigit+) #t)))
+
 (define (sense-index-reader in (line))
   (set! line (getline in))
   (and (exists? line) (string? line)
-       (let ((s (segment line " ")))
+       (let* ((s (segment line " "))
+	      (key (first s))
+	      (poscode (get (text->frames pos-cat-pat key) 'poscode))
+	      (pos (elt key-types (-1+ poscode))))
+	 (when (fail? poscode) (lineout line))
 	 `#[key ,(first s) 
+	    type ,pos
 	    synset ,(string->number (second s)) 
 	    sense_no ,(string->number (third s))
 	    freq ,(string->number (fourth s))
@@ -75,6 +85,14 @@
       (set! count (1+ count))
       (set! sense (sense-index-reader in)))
     results))
+
+(define (assign-sensekey entry release)
+  (let ((found (find-frames wordnet.index 
+		 'synsets `(,release ,(get entry 'synset) ,(get entry 'type)))))
+    (unless (test found '%sensekeys)
+      (store! found '%sensekeys #[])
+      (add! (get found '%sensekeys) release (get entry 'key)))))
+(module-export! 'assign-sensekey)
 
 (define (link-release! sense-index (release wnrelease) (mods (make-hashtable)))
   (let ((senses (read-sense-index sense-index))
