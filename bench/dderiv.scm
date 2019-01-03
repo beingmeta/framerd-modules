@@ -39,6 +39,16 @@
 
 (use-module 'bench/lispish)
 
+(define *props* (make-hashtable))
+(define (pput sym prop val)
+  (let ((ptable (get *props* prop)))
+    (when (fail? ptable)
+      (set! ptable (make-hashtable))
+      (store! *props* prop ptable))
+    (store! ptable sym val)))
+(define (pget sym prop)
+  (get (get *props* prop) sym))
+
 (define (dderiv-aux a)
   (list '/ (dderiv a) a))
  
