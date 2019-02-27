@@ -1,0 +1,7 @@
+*.scm~
+*.scm#*
+.#*.scm
+*.ss~
+*.ss#*
+.#*.ss
+TAGS
