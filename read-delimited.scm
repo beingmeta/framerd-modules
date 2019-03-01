@@ -24,8 +24,9 @@
 
 ;;; Remove comments from lines
 (define (uncomment lines (char #\#))
-  (let ((string (->string char)))
-    (remove-if (lambda (line) (has-prefix line string))
+  (let ((comment (->string char)))
+    (remove-if (lambda (line)
+                 (has-prefix (string-trim-left line) comment))
                lines)))
 
 ;;; Return cleaned up list from FILE
@@ -76,8 +77,7 @@
 ;;; Return a frame from list
 (define (list->frame xs)
   (when (even-list? xs)
-    (let ((f (frame-create #f)))
-      (dotimes (i (length ))))))
+    #f))
 
 ;;; Compose content
 (define (compose-content content)
