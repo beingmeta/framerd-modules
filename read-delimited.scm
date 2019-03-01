@@ -1,9 +1,7 @@
 (in-module 'read-delimited)
 
-;;; TODO
-;;; - use GETOPT
-
-(module-export! '{read-delimited read-delimited-file})
+(module-export! '{read-delimited
+                  read-delimited-file})
 
 (load "strings.scm")
 
@@ -19,22 +17,6 @@
                   val
                   (string->lisp val))))
       val))
-
-(define (read-delimited string (cols #f) (cellsep ","))
-  (let* ((rows (segment string "\n"))
-         (cols (or cols (map convert-cell (segment (first rows) cellsep)))))
-    (for-choices (row (elts rows 1))    ; use STRIM-TRIM-LEFT
-                 (tryif (not (or (empty-string? row)
-                                 (has-prefix row "#")
-                                 (has-prefix row ";")))
-                        (let ((row (map convert-cell (segment row cellsep))))
-                          (let ((f (frame-create #f)))
-                            (dotimes (i (length row))
-                                     (store! f (elt cols i) (elt row i)))
-                            f))))))
-
-(define (read-delimited-file file (cols #f) (cellsep ","))
-  (read-delimited (filestring file) cols cellsep))
 
 ;;; Return a list from FILE
 (define (file->list file)
@@ -107,3 +89,7 @@
 ;;; Compose file
 (define (compose-file file (delimiter #\,))
   (compose-content (split-content (file->list/clean file) delimiter)))
+
+;;; Top-level
+(define read-delimited compose-content)
+(define read-delimited-file compose-file)
