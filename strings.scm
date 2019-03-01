@@ -72,4 +72,15 @@
 
 ;;; Remove leading and trailing CHAR from STRING
 (define (string-trim string (char #\space))
-  (string-trim-left (string-trim-right string char)))
+  (string-trim-left (string-trim-right string char) char))
+
+;;; Return true if string is double quote-escaped
+(define (escaped-string? string)
+  (let ((quote "\""))
+    (and (has-prefix string quote) (has-suffix string quote))))
+
+;;; Remove leading and trailing escaped quotes
+(define (unescape-string string)
+  (if (escaped-string? string)
+      (string-trim string #\")
+      string))
