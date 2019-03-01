@@ -10,7 +10,8 @@
 
                   string-trim-left
                   string-trim-right
-                  string-trim})
+                  string-trim
+                  unescape-string})
 
 ;;; Bind some function aliases
 (define string-length length)
