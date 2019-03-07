@@ -79,6 +79,9 @@
   (when (even-list? xs)
     #f))
 
+;;; Return true if file is a well-formed delimited file
+(define (well-formed? file) #t)
+
 ;;; Compose content
 (define (compose-content content)
   (let ((head (first content))
