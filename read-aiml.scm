@@ -1,3 +1,5 @@
+;;;; -*- mode: scheme; coding: utf-8 -*-
+
 (in-module 'read-aiml)
 
 (module-export! '{read-aiml
@@ -9,11 +11,14 @@
 
 (use-module '{texttools domutils fdweb})
 
+
 ;;; TODO
-;;; - return choices of questions and answers
-;;; - return list of questions and answers
-;;; - ensure correctness
-;;; - extract specific question and answer pairs
+;;; - [x] return choices of questions and answers
+;;; - [x] return list of questions and answers
+;;; - [ ] match a question with an answer
+;;; - [ ] extract specific question and answer pairs
+;;; - [ ] read-aiml-file: ensure that only one AIML instance appears per document
+;;; - [ ] read-aiml-file: ensure correctness
 
 
 ;;;-------------------------------------------------------------------------------------------------
@@ -130,10 +135,26 @@
   (for-choices (category (get-categories tree))
     (identity (dom/find category 'pattern))))
 
+;;; Return all <pattern> object texts
+(define (get-pattern-texts tree)
+  (for-choices (pattern (get-patterns tree))
+    (dom/textify pattern)))
+
 ;;; Return all <template> objects from tree
 (define (get-templates tree)
   (for-choices (category (get-categories tree))
     (identity (dom/find category 'template))))
+
+;;; Return all <templaten> object texts
+(define (get-template-texts tree)
+  (for-choices (template (get-templates tree))
+    (dom/textify template)))
+
+;;; Return <pattern> <template> pairs as choice of tables
+(define (get-pattern-template-pairs tree)
+  (for-choices (cat (get-categories tree))
+    `#[,(dom/textify (dom/find cat 'pattern))
+       ,(dom/textify (dom/find cat 'template))]))
 
 ;;; Return a specific <pattern> object from tree
 (define (find-pattern tree) #f)
@@ -142,7 +163,6 @@
 (define (find-template tree) #f)
 
 ;;; Read an AIML file and return content as entries
-;;; TODO: ensure that only one AIML instance appears per document
 (define (read-aiml-file file)
   (->aiml (filestring file)))
 
