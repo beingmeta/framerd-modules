@@ -1,3 +1,5 @@
+;;;; -*- mode: scheme; coding: utf-8 -*-
+
 (in-module 'read-delimited)
 
 (module-export! '{read-delimited
