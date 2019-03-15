@@ -15,6 +15,9 @@
 ;;; TODO
 ;;; - [x] return choices of questions and answers
 ;;; - [x] return list of questions and answers
+;;; - [ ] handle <star/>
+;;; - [ ] handle <srai>
+;;; - [ ] perform resolution of references
 ;;; - [ ] match a question with an answer
 ;;; - [ ] extract specific question and answer pairs
 ;;; - [ ] read-aiml-file: ensure that only one AIML instance appears per document
@@ -123,6 +126,9 @@
    </category>
 </aiml>")
 
+(define ptree1 (->aiml/first tree1))
+(define qtree1 (list->choice (->aiml tree1)))
+
 ;;; Return attributes of element
 (define (aiml-attributes object) #f)
 
@@ -150,17 +156,28 @@
   (for-choices (template (get-templates tree))
     (dom/textify template)))
 
+;;; Return a category object in which a pattern is found
+;;; (find-category "HELLO BOT!" (get-categories ptree1))
+(define (find-category text categories)
+  (filter-choices (cat categories)
+    (let ((pattern (dom/find cat 'pattern)))
+      (textmatch `#((isspace+) ,text (isspace+))
+                 (dom/textify pattern)))))
+
+;;; Return a 
+;;; (dom/textify (dom/find (find-category "HELLO BOT!" (get-categories ptree1)) 'pattern))
+(define (find-pattern-template-pair text categories)
+  (let ((frame (find-category text categories)))
+    ;; `#[,(dom/find frame 'pattern)
+    ;;    ,(dom/find frame 'template)]
+    `#[,(dom/textify (dom/find frame 'pattern))
+       ,(dom/textify (dom/find frame 'template))]))
+
 ;;; Return <pattern> <template> pairs as choice of tables
 (define (get-pattern-template-pairs tree)
   (for-choices (cat (get-categories tree))
     `#[,(dom/textify (dom/find cat 'pattern))
        ,(dom/textify (dom/find cat 'template))]))
-
-;;; Return a specific <pattern> object from tree
-(define (find-pattern tree) #f)
-
-;;; Return a specific <template> object from tree
-(define (find-template tree) #f)
 
 ;;; Read an AIML file and return content as entries
 (define (read-aiml-file file)
