@@ -2,27 +2,23 @@
 
 (in-module 'read-aiml)
 
-(module-export! '{read-aiml
-                  read-aiml/file
+(module-export! '{read-aiml/file
                   ->aiml
-                  ->aiml/first
-                  ->aiml/last
                   aiml->choices})
 
 (use-module '{texttools domutils fdweb})
 
-
+;;;-------------------------------------------------------------------------------------------------
 ;;; TODO
+;;;-------------------------------------------------------------------------------------------------
+
 ;;; - [x] return choices of questions and answers
 ;;; - [x] return list of questions and answers
+;;; - [x] match a question with an answer
+;;; - [x] extract specific question and answer pairs
+;;; - [x] read-aiml-file: ensure that only one AIML instance appears per document
 ;;; - [ ] handle <star/>
 ;;; - [ ] handle <srai>
-;;; - [ ] perform resolution of references
-;;; - [x] match a question with an answer
-;;; - [ ] extract specific question and answer pairs
-;;; - [ ] read-aiml-file: ensure that only one AIML instance appears per document
-;;; - [ ] read-aiml-file: ensure correctness
-
 
 
 ;;;-------------------------------------------------------------------------------------------------
