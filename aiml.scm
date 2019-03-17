@@ -179,12 +179,8 @@
 (define (find-pair text tree)
   (let* ((categories (get-categories tree))
          (frame (find-category text categories)))
-    ;; `#[,(dom/find frame 'pattern)
-    ;;    ,(dom/find frame 'template)]
-    ;; `#[,(dom/textify (dom/find frame 'pattern))
-    ;;    ,(dom/textify (dom/find frame 'template))]
-    (list (dom/textify (dom/find frame 'pattern))
-          (dom/textify (dom/find frame 'template)))))
+    `#[,(dom/textify (dom/find frame 'pattern))
+       ,(dom/textify (dom/find frame 'template))]))
 
 ;;; Remove unnecessary characters, punctuations
 (define (normalize-pattern text) #f)
