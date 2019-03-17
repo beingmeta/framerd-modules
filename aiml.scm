@@ -18,10 +18,11 @@
 ;;; - [ ] handle <star/>
 ;;; - [ ] handle <srai>
 ;;; - [ ] perform resolution of references
-;;; - [ ] match a question with an answer
+;;; - [x] match a question with an answer
 ;;; - [ ] extract specific question and answer pairs
 ;;; - [ ] read-aiml-file: ensure that only one AIML instance appears per document
 ;;; - [ ] read-aiml-file: ensure correctness
+
 
 
 ;;;-------------------------------------------------------------------------------------------------
@@ -124,6 +125,13 @@
      <pattern> I LIKE * </pattern>
      <template>I like <star/>, too.</template>
    </category>
+   <category>
+     <pattern>_</pattern>
+     <that>NONE TO FORGET ALL</that>
+     <template>
+       Thank you. Type \"ZBERT\" to return to main menu.
+     </template>
+   </category>
 </aiml>")
 
 (define ptree1 (->aiml/first tree1))
@@ -157,27 +165,29 @@
     (dom/textify template)))
 
 ;;; Return a category object in which a pattern is found
-;;; (find-category "HELLO BOT!" (get-categories ptree1))
 (define (find-category text categories)
   (filter-choices (cat categories)
-    (let ((pattern (dom/find cat 'pattern)))
-      (textmatch `#((isspace+) ,text (isspace+))
+    (let* ((pattern (dom/find cat 'pattern))
+           (closure {#((isspace+) (ic text) (isspace+))
+                     #((isspace+) (ic text))
+                     #((ic text) (isspace+))
+                     #((ic text))}))
+      (textmatch (textclosure '#(closure))
                  (dom/textify pattern)))))
 
-;;; Return a 
-;;; (dom/textify (dom/find (find-category "HELLO BOT!" (get-categories ptree1)) 'pattern))
-(define (find-pattern-template-pair text categories)
-  (let ((frame (find-category text categories)))
+;;; Return a matching pattern+template pair from tree
+(define (find-pair text tree)
+  (let* ((categories (get-categories tree))
+         (frame (find-category text categories)))
     ;; `#[,(dom/find frame 'pattern)
     ;;    ,(dom/find frame 'template)]
-    `#[,(dom/textify (dom/find frame 'pattern))
-       ,(dom/textify (dom/find frame 'template))]))
+    ;; `#[,(dom/textify (dom/find frame 'pattern))
+    ;;    ,(dom/textify (dom/find frame 'template))]
+    (list (dom/textify (dom/find frame 'pattern))
+          (dom/textify (dom/find frame 'template)))))
 
-;;; Return <pattern> <template> pairs as choice of tables
-(define (get-pattern-template-pairs tree)
-  (for-choices (cat (get-categories tree))
-    `#[,(dom/textify (dom/find cat 'pattern))
-       ,(dom/textify (dom/find cat 'template))]))
+;;; Remove unnecessary characters, punctuations
+(define (normalize-pattern text) #f)
 
 ;;; Read an AIML file and return content as entries
 (define (read-aiml-file file)
