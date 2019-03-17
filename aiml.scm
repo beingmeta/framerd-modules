@@ -3,7 +3,7 @@
 (in-module 'read-aiml)
 
 (module-export! '{read-aiml
-                  read-aiml-file
+                  read-aiml/file
                   ->aiml
                   ->aiml/first
                   ->aiml/last
@@ -185,12 +185,25 @@
 ;;; Remove unnecessary characters, punctuations
 (define (normalize-pattern text) #f)
 
-;;; Read an AIML file and return content as entries
-(define (read-aiml-file file)
-  (->aiml (filestring file)))
+;;; Read an AIML file and return content as entry
+;;; Convert a file to an internal representation
+(define (read-aiml/file file)
+  (let ((val (remove-if-not table? (->aiml (filestring file)))))
+    (if (not (= (length val) 1))
+        (error "error")
+        (if (and (= (length val) 1)
+                 (dom/find (first val) 'aiml))
+            (first val)
+            #f))))
+
+;;; Read categories from disk file
+(define (get-categories/file file)
+  (get-categories (read-aiml/file file)))
 
 ;;; Return true if there is only one AIML document in file
 (define (single-document? file) #f)
 
 ;;; Return an AIML object as choices
 (define (aiml->choices object) #f)
+
+;;; choice-size
