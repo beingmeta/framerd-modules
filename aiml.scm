@@ -111,32 +111,6 @@
 (define (aiml-encoding object)
   (dom/get object 'encoding))
 
-;;; (->aiml/first "<aiml version=\"1.0.1\" encoding=\"UTF-8\"?></aiml>")
-
-;;; (->aiml/first "<aiml version=\"1.0.1\" encoding=\"UTF-8\"?><category><pattern>HELLO BOT!</pattern><template>Hello my new friend!</template></category></aiml>")
-
-(define tree1
-  "<aiml version=\"1.0.1\" encoding=\"UTF-8\"?>
-   <category>
-      <pattern> HELLO BOT! </pattern>
-      <template> Hello my new friend! </template>
-   </category>
-   <category>
-     <pattern> I LIKE * </pattern>
-     <template>I like <star/>, too.</template>
-   </category>
-   <category>
-     <pattern>_</pattern>
-     <that>NONE TO FORGET ALL</that>
-     <template>
-       Thank you. Type \"ZBERT\" to return to main menu.
-     </template>
-   </category>
-</aiml>")
-
-(define ptree1 (->aiml/first tree1))
-(define qtree1 (list->choice (->aiml tree1)))
-
 ;;; Return attributes of element
 (define (aiml-attributes object) #f)
 
@@ -200,10 +174,12 @@
 (define (get-categories/file file)
   (get-categories (read-aiml/file file)))
 
+;;; Return count of categories from file
+(define (count-categories/file file)
+  (choice-size (get-categories/file file)))
+
 ;;; Return true if there is only one AIML document in file
 (define (single-document? file) #f)
 
 ;;; Return an AIML object as choices
 (define (aiml->choices object) #f)
-
-;;; choice-size
