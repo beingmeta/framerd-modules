@@ -5,9 +5,16 @@
 (module-export! '{read-delimited
                   read-delimited-file})
 
-(load "strings.scm")
-
 (use-module 'texttools)
+
+
+;;;-------------------------------------------------------------------------------------------------
+;;; TODO
+;;;-------------------------------------------------------------------------------------------------
+
+;;; - [ ] detect and exclude header
+;;; - [ ] check for well-formedness
+
 
 (define (convert-cell val)
   (if (string? val)
@@ -21,12 +28,6 @@
       val))
 
 ;;; Return a list from FILE
-;; (define (file->list file)
-;;   (string-split (filestring file) #\newline))
-
-;; (define (file->list file)
-;;   (segment (filestring file) "\n"))
-
 (define (file->list file)
   (remove-if (lambda (line)
                (zero? (length line)))
@@ -56,8 +57,15 @@
 
 ;;; Return a list containing sublists of string items in CONTENT
 (define (split-content content (delimiter #\,))
-  (map (lambda (line) (string-split line delimiter))
+  (map (lambda (line)
+         (string-split line delimiter))
        content))
+
+(define (split-content content (delimiter #\,))
+  (let ((del (->string delimiter)))
+    (map (lambda (line)
+           (textslice line `#(,del) #f))
+         content)))
 
 ;;; Make pairs
 (define (*make-pairs x y acc)
