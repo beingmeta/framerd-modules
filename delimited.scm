@@ -21,8 +21,16 @@
       val))
 
 ;;; Return a list from FILE
+;; (define (file->list file)
+;;   (string-split (filestring file) #\newline))
+
+;; (define (file->list file)
+;;   (segment (filestring file) "\n"))
+
 (define (file->list file)
-  (string-split (filestring file) #\newline))
+  (remove-if (lambda (line)
+               (zero? (length line)))
+             (textslice (filestring file) #("\n") #f)))
 
 ;;; Remove comments from lines
 (define (uncomment lines (char #\#))
