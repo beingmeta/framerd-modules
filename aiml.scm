@@ -46,9 +46,6 @@
       #t
       #f))
 
-(define every andmap)
-(define some ormap)
-
 ;;; Return last object from XS
 (define (last xs)
   (first (reverse xs)))
@@ -97,7 +94,7 @@
 
 ;;; Return true if all objects in XS are AIML objects
 (define (aiml-objects? . objects)
-  (andmap aiml-object? objects))
+  (every? aiml-object? objects))
 
 ;;; Return AIML document version
 (define (aiml-version object)
