@@ -15,6 +15,8 @@
 ;;; - [ ] detect and exclude header
 ;;; - [ ] check for well-formedness
 
+(load "strings.scm")
+
 
 (define (convert-cell val)
   (if (string? val)
@@ -108,7 +110,7 @@
                  body)))
 
 ;;; Compose file
-(define (compose-file file (delimiter #\,))
+(define (compose-file file (delimiter #\,) (header #f))
   (compose-content (split-content (file->list/clean file) delimiter)))
 
 ;;; Top-level
