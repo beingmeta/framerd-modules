@@ -12,6 +12,7 @@
 ;;; TODO
 ;;;-------------------------------------------------------------------------------------------------
 
+;;; - [x] use partial matching
 ;;; - [x] return choices of questions and answers
 ;;; - [x] return list of questions and answers
 ;;; - [x] match a question with an answer
@@ -139,8 +140,8 @@
                      #((isspace+) (ic text))
                      #((ic text) (isspace+))
                      #((ic text))}))
-      (textmatch (textclosure '#(closure))
-                 (dom/textify pattern)))))
+      ;; (textmatch (textclosure '#(closure)) (dom/textify pattern))
+      (textsearch `(ignore-case ,text) (dom/textify pattern)))))
 
 ;;; Return a matching pattern+template pair from tree
 (define (find-pair text tree)
