@@ -12,6 +12,7 @@
 ;;; TODO
 ;;;-------------------------------------------------------------------------------------------------
 
+;;; - [x] write a basic finder based on key and value
 ;;; - [ ] detect and exclude header
 ;;; - [ ] check for well-formedness
 
@@ -116,3 +117,8 @@
 ;;; Top-level
 (define read-delimited compose-content)
 (define read-delimited-file compose-file)
+
+;;; Return an entry with matchng text
+(define (find-entry/file key val file)
+  (filter-choices (entry (compose-file file))
+    (equal? (get entry key) val)))
