@@ -150,6 +150,10 @@
     `#[,(dom/textify (dom/find frame 'pattern))
        ,(dom/textify (dom/find frame 'template))]))
 
+;;; Search a matching pattern+template pair from file
+(define (find-pair/file text file)
+  (find-pair text (read-aiml/file file)))
+
 ;;; Remove unnecessary characters, punctuations
 (define (normalize-pattern text) #f)
 
