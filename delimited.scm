@@ -3,12 +3,16 @@
 (in-module 'read-delimited)
 
 (module-export! '{read-delimited
-                  read-delimited-file})
+                  read-delimited-file
+                  find-entry/file
+                  random-entry/file
+                  get-headers/file})
 
 (use-module 'texttools)
 
 (load "strings.scm")
 
+;;; The default value delimiter
 (define *delimiter* #\,)
 
 (define (convert-cell val)
