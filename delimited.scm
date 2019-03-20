@@ -7,17 +7,9 @@
 
 (use-module 'texttools)
 
-
-;;;-------------------------------------------------------------------------------------------------
-;;; TODO
-;;;-------------------------------------------------------------------------------------------------
-
-;;; - [x] write a basic finder based on key and value
-;;; - [ ] detect and exclude header
-;;; - [ ] check for well-formedness
-
 (load "strings.scm")
 
+(define *delimiter* #\,)
 
 (define (convert-cell val)
   (if (string? val)
@@ -59,12 +51,7 @@
                 (file->list/clean file)))))
 
 ;;; Return a list containing sublists of string items in CONTENT
-(define (split-content content (delimiter #\,))
-  (map (lambda (line)
-         (string-split line delimiter))
-       content))
-
-(define (split-content content (delimiter #\,))
+(define (split-content content (delimiter *delimiter*))
   (let ((del (->string delimiter)))
     (map (lambda (line)
            (textslice line `#(,del) #f))
@@ -111,14 +98,33 @@
                  body)))
 
 ;;; Compose file
-(define (compose-file file (delimiter #\,) (header #f))
+(define (compose-file file (delimiter *delimiter*))
   (compose-content (split-content (file->list/clean file) delimiter)))
 
 ;;; Top-level
 (define read-delimited compose-content)
 (define read-delimited-file compose-file)
 
-;;; Return an entry with matchng text
-(define (find-entry/file key val file)
-  (filter-choices (entry (compose-file file))
-    (equal? (get entry key) val)))
+;;; Return an entry with matching KEY and VAL from FILE separated with DELIMITER
+(define (find-entry/file key val file (delimiter *delimiter*))
+  (filter-choices (entry (compose-file file delimiter))
+    (textsearch `(ignore-case ,(get entry key)) val)))
+
+;;; Return a random entry
+(define (random-entry/file file (delimiter *delimiter*))
+  (pick-one (compose-file file delimiter)))
+
+;;; Return value under given key, false if entry is not found
+(define (get-value entry key)
+  (let ((val (get entry key)))
+    (if (empty-string? val)
+        #f
+        val)))
+
+;;; Return headers from file
+(define (get-headers/file file (delimiter *delimiter*))
+  (getkeys (random-entry/file file delimiter)))
+
+;;; Return number of entries from file excluding the header
+(define (count-entries file (delimiter *delimiter*))
+  (choice-size (compose-file file delimiter)))
