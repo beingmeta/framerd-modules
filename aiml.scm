@@ -2,9 +2,8 @@
 
 (in-module 'read-aiml)
 
-(module-export! '{read-aiml/file
-                  ->aiml
-                  aiml->choices})
+(module-export! '{read-aiml
+                  read-aiml/file})
 
 (use-module '{texttools domutils fdweb})
 
@@ -39,39 +38,37 @@
 ;;;-------------------------------------------------------------------------------------------------
 
 ;;; Flatten string, removing newlines
-;;; TODO: fix this bottleneck
 (define (flatten-string str)
   (textsubst str "\n" ""))
-
-;;; Return a DOM object from argument
-(define (ensure-xml-object object)
-  (if (string? object)
-      (xmlparse (flatten-string object))
-      object))
 
 ;;; Return table values only from XS
 (define (tables-only xs)
   (remove-if-not table? xs))
 
-;;; Return an AIML object from object
-(define (->aiml object)
+;;; Return a DOM object from argument
+(define (xml-objects object)
   (if (string? object)
-      (let ((parse (ensure-xml-object object)))
-        (if (and (list? parse)
-                 (not (zero? (length parse))))
-            (tables-only parse)))))     ; Is this another bottleneck?
+      (tables-only (xmlparse (flatten-string object)))
+      object))
 
-;;; Return first AIML object from XS
-(define (->aiml/first xs)
-  (first (->aiml xs)))
+;;; Return multiple AIML objects as choices
+(define (read-aiml/choices object)
+  (and (string? object)
+       (list->choice (xml-objects object))))
 
-;;; Return last AIML object from XS
-(define (->aiml/last xs)
-  (last (->aiml xs)))
+;;; Return a single AIML object from choices
+(define (read-aiml/one object)
+  (let ((val (read-aiml/choices object)))
+    (if (> (choice-size val) 1)
+        (error "Too many parses")
+        (pick-one val))))
+
+;;; Return an AIML object from object
+(define read-aiml read-aiml/one)
 
 ;;; Return true if object is indeed an AIML object
 (define (aiml-object? object)
-  (let ((parses (ensure-xml-object object)))
+  (let ((parses (xml-objects object)))
     (if (> (length parses) 1)
         (error "Too many parses")
         (let ((object (first parses)))
@@ -149,14 +146,8 @@
 
 ;;; Read an AIML file and return content as entry
 (define (read-aiml/file file)
-  (let ((val (->aiml (filestring file))))
-    (if (not (= (length val) 1))
-        (error "error")
-        (if (and (= (length val) 1)
-                 ;; (dom/find (first val) 'aiml)
-                 (get (first val) 'aiml))
-            (first val)
-            #f))))
+  (let ((val (read-aiml (filestring file))))
+    (dom/find val 'aiml)))
 
 ;;; Read categories from disk file
 (define (get-categories/file file)
@@ -165,6 +156,3 @@
 ;;; Return count of categories from file
 (define (count-categories/file file)
   (choice-size (get-categories/file file)))
-
-;;; Return an AIML object as choices
-(define (aiml->choices object) #f)
