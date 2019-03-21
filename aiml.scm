@@ -11,8 +11,6 @@
 ;;; TODO
 ;;;-------------------------------------------------------------------------------------------------
 
-;;; - [x] fix read bottlenecks
-;;; - [ ] fix DOM read errors
 ;;; - [ ] handle <star/>
 ;;; - [ ] handle <srai>
 
@@ -41,14 +39,37 @@
 (define (flatten-string str)
   (textsubst str "\n" ""))
 
+;;; Return %xmltag value of object
+(define (xmltag object)
+  (get object '%xmltag))
+
+;;; Return %qname value of object
+(define (qname object)
+  (get object '%qname))
+
+;;; Return true if tag is a comment
+(define (comment-object? object)
+  (eqv? (xmltag object) '%comment))
+
+;;; Return true if tag is AIML
+(define (aiml-object? object)
+  (and (eqv? (xmltag object) 'aiml)
+       (eqv? (qname object) 'aiml)))
+
 ;;; Return table values only from XS
 (define (tables-only xs)
   (remove-if-not table? xs))
 
+;;; Remove comment objects from objects
+(define (remove-comments xs)
+  (remove-if comment-object? xs))
+
 ;;; Return a DOM object from argument
 (define (xml-objects object)
   (if (string? object)
-      (tables-only (xmlparse (flatten-string object)))
+      (let ((val (xmlparse (flatten-string object))))
+        (remove-comments (tables-only val)))
+      ;; (tables-only (xmlparse (flatten-string object)))
       object))
 
 ;;; Return multiple AIML objects as choices
@@ -69,13 +90,10 @@
 ;;; Return true if object is indeed an AIML object
 (define (aiml-object? object)
   (let ((parses (xml-objects object)))
-    (if (> (length parses) 1)
-        (error "Too many parses")
-        (let ((object (first parses)))
-          (if (and (eqv? (get object '%xmltag) 'aiml)
-                   (eqv? (get object '%qname) 'aiml))
-              #t
-              #f)))))
+    (if (and (eqv? (get object '%xmltag) 'aiml)
+             (eqv? (get object '%qname) 'aiml))
+        #t
+        #f)))
 
 ;;; Return true if all objects in XS are AIML objects
 (define (aiml-objects? . objects)
@@ -137,12 +155,6 @@
 ;;; Search a matching pattern+template pair from file
 (define (find-pair/file text file)
   (find-pair text (read-aiml/file file)))
-
-;;; Remove unnecessary characters, punctuations
-(define (normalize-pattern text) #f)
-
-;;; Return true if there is only one AIML document in file
-(define (single-document? file) #f)
 
 ;;; Read an AIML file and return content as entry
 (define (read-aiml/file file)
