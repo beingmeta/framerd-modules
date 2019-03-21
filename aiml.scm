@@ -12,12 +12,8 @@
 ;;; TODO
 ;;;-------------------------------------------------------------------------------------------------
 
-;;; - [x] use partial matching
-;;; - [x] return choices of questions and answers
-;;; - [x] return list of questions and answers
-;;; - [x] match a question with an answer
-;;; - [x] extract specific question and answer pairs
-;;; - [x] read-aiml-file: ensure that only one AIML instance appears per document
+;;; - [x] fix read bottlenecks
+;;; - [ ] fix DOM read errors
 ;;; - [ ] handle <star/>
 ;;; - [ ] handle <srai>
 
@@ -33,20 +29,6 @@
 (define (list->choice xs)
   (map->choice identity xs))
 
-;;; TODO: write nondeterministic versions
-
-;;; Return true if PROC returns true for all XS
-(define (andmap proc xs)
-  (if (memq #f (map proc xs))
-      #f
-      #t))
-
-;;; Return true if PROC returns at least one true for all XS
-(define (ormap proc xs)
-  (if (memq #t (map proc xs))
-      #t
-      #f))
-
 ;;; Return last object from XS
 (define (last xs)
   (first (reverse xs)))
@@ -57,8 +39,9 @@
 ;;;-------------------------------------------------------------------------------------------------
 
 ;;; Flatten string, removing newlines
+;;; TODO: fix this bottleneck
 (define (flatten-string str)
-  (remove #\newline str))
+  (textsubst str "\n" ""))
 
 ;;; Return a DOM object from argument
 (define (ensure-xml-object object)
@@ -66,13 +49,17 @@
       (xmlparse (flatten-string object))
       object))
 
+;;; Return table values only from XS
+(define (tables-only xs)
+  (remove-if-not table? xs))
+
 ;;; Return an AIML object from object
 (define (->aiml object)
   (if (string? object)
       (let ((parse (ensure-xml-object object)))
         (if (and (list? parse)
                  (not (zero? (length parse))))
-            parse))))
+            (tables-only parse)))))     ; Is this another bottleneck?
 
 ;;; Return first AIML object from XS
 (define (->aiml/first xs)
@@ -157,14 +144,17 @@
 ;;; Remove unnecessary characters, punctuations
 (define (normalize-pattern text) #f)
 
+;;; Return true if there is only one AIML document in file
+(define (single-document? file) #f)
+
 ;;; Read an AIML file and return content as entry
-;;; Convert a file to an internal representation
 (define (read-aiml/file file)
-  (let ((val (remove-if-not table? (->aiml (filestring file)))))
+  (let ((val (->aiml (filestring file))))
     (if (not (= (length val) 1))
         (error "error")
         (if (and (= (length val) 1)
-                 (dom/find (first val) 'aiml))
+                 ;; (dom/find (first val) 'aiml)
+                 (get (first val) 'aiml))
             (first val)
             #f))))
 
@@ -175,9 +165,6 @@
 ;;; Return count of categories from file
 (define (count-categories/file file)
   (choice-size (get-categories/file file)))
-
-;;; Return true if there is only one AIML document in file
-(define (single-document? file) #f)
 
 ;;; Return an AIML object as choices
 (define (aiml->choices object) #f)
