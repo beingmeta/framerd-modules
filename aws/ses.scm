@@ -48,7 +48,8 @@
 	 (handle (curlopen 'header (cons "Date" datestring)
 			   'header (cons "X-Amzn-Authorization" authstring)
 			   'header (cons "Expect" "")
-			   'header (getopt opts 'aws:token aws:token)
+			   'header (cons "x-amz-security-token"
+					 (getopt opts 'aws:token aws:token))
 			   'method 'POST
 			   'verbose (getopt opts 'verbose #f))))
     (store! query "Action" (try (get args 'action) "SendEmail"))
@@ -85,8 +86,15 @@
 		   (subseq (scripturl+ "" query) 1)
 		   "application/x-www-form-urlencoded"
 		   handle)))
-      (debug%watch "SES/RESPONSE" response)
-      response)))
+      (debug%watch "SES/RESPONSE" 
+	"\nRESPONSE" response
+	"\nQUERY" query
+	"\nOPTS" opts)
+      (if (and (getopt opts 'ses/harderr (getopt opts 'aws/harderr #f))
+	       (not (response/ok? response)))
+	  (irritant (cons* response query opts) |SESFailed|
+	    SES/CALL  (scripturl+ "" query))
+	  response))))
 
 (define (ses/sendmail to text)
   (if (string? to)
