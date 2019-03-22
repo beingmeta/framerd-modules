@@ -11,6 +11,7 @@
 ;;; TODO
 ;;;-------------------------------------------------------------------------------------------------
 
+;;; - [x] handle <random>
 ;;; - [ ] handle <star/>
 ;;; - [ ] handle <srai>
 
@@ -145,12 +146,66 @@
       ;; (textmatch (textclosure '#(closure)) (dom/textify pattern))
       (textsearch `(ignore-case ,text) (dom/textify pattern)))))
 
+;;; Return a random pair of pattern and template from file
+(define (random-pair/file file)
+  (pick-one (get-pairs/file file)))
+
+;;; Test
+;; (define entry (find-category "four cultures" (get-categories (read-aiml/file "~/Downloads/dat/aiml/aiml/aiml/botdata/alice/stories.aiml"))))
+
+;;; Return the random element if it exists under entry
+(define (get-random entry)
+  (let ((val (dom/find (dom/find entry 'template) 'random)))
+    (if (zero? (choice-size val))
+        #f
+        val)))
+
+;;; Return true if a category has a random element under its pattern
+(define (has-random? entry)
+  (if (get-random entry)
+      #t
+      #f))
+
+;;; Return list entries of a random element
+(define (random-entries entry)
+  (tables-only (dom/get (get-random entry) '%content)))
+
+;;; Return a random entry
+(define (random-entry entries)
+  (let* ((len (length entries))
+         (rand (random len)))
+    (elt entries rand)))
+
+;;; Return text from random entry
+(define (random-entry/text entry)
+  (textsubst (dom/textify (random-entry (random-entries entry)))
+             "\n" ""))
+
+;;; Dispatch an operation based on the type of template
+(define (dispatch-entry entry)
+  #f)
+
+;;; Return a simple text value from entry
+(define (entry/text entry type)
+  (dom/textify (dom/find entry type)))
+
+;;; Return a frame of pattern and template from entry
+;;; Conditionally dispatch values based on type
+(define (entry-texts entry)
+  `#[,(dom/textify (dom/find entry 'pattern))
+     ,(dom/textify (dom/find entry 'template))])
+
+(define (entry-texts entry)
+  (let ((key (dom/textify (dom/find entry 'pattern)))
+        (val (cond ((has-random? entry) (random-entry/text entry))
+                   (else (entry/text entry 'template)))))
+    `#[,key ,val]))
+
 ;;; Return a matching pattern+template pair from tree
 (define (find-pair text tree)
   (let* ((categories (get-categories tree))
          (frame (find-category text categories)))
-    `#[,(dom/textify (dom/find frame 'pattern))
-       ,(dom/textify (dom/find frame 'template))]))
+    (entry-texts frame)))
 
 ;;; Search a matching pattern+template pair from file
 (define (find-pair/file text file)
@@ -161,10 +216,19 @@
   (let ((val (read-aiml (filestring file))))
     (dom/find val 'aiml)))
 
-;;; Read categories from disk file
+;;; Read categories from file
 (define (get-categories/file file)
   (get-categories (read-aiml/file file)))
+
+;;; Return a random category from file
+(define (random-category/file file) #f)
 
 ;;; Return count of categories from file
 (define (count-categories/file file)
   (choice-size (get-categories/file file)))
+
+;;; Return all pairs of pattern and templates from file
+(define (get-pairs/file file)
+  (let ((categories (get-categories/file file)))
+    (for-choices (entry categories)
+      (entry-texts entry))))
