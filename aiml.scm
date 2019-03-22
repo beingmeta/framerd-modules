@@ -150,9 +150,6 @@
 (define (random-pair/file file)
   (pick-one (get-pairs/file file)))
 
-;;; Test
-;; (define entry (find-category "four cultures" (get-categories (read-aiml/file "~/Downloads/dat/aiml/aiml/aiml/botdata/alice/stories.aiml"))))
-
 ;;; Return the random element if it exists under entry
 (define (get-random entry)
   (let ((val (dom/find (dom/find entry 'template) 'random)))
@@ -180,10 +177,6 @@
 (define (random-entry/text entry)
   (textsubst (dom/textify (random-entry (random-entries entry)))
              "\n" ""))
-
-;;; Dispatch an operation based on the type of template
-(define (dispatch-entry entry)
-  #f)
 
 ;;; Return a simple text value from entry
 (define (entry/text entry type)
