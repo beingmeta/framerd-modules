@@ -7,14 +7,6 @@
 
 (use-module '{texttools domutils fdweb})
 
-;;;-------------------------------------------------------------------------------------------------
-;;; TODO
-;;;-------------------------------------------------------------------------------------------------
-
-;;; - [x] handle <random>
-;;; - [ ] handle <star/>
-;;; - [ ] handle <srai>
-
 
 ;;;-------------------------------------------------------------------------------------------------
 ;;; List, map, and friends
@@ -182,16 +174,15 @@
 (define (entry/text entry type)
   (dom/textify (dom/find entry type)))
 
-;;; Return a frame of pattern and template from entry
-;;; Conditionally dispatch values based on type
-(define (entry-texts entry)
-  `#[,(dom/textify (dom/find entry 'pattern))
-     ,(dom/textify (dom/find entry 'template))])
+;;; Conditionally dispatch values based on type and return the appropriate value
+(define (dispatch-value entry)
+  (cond ((has-random? entry) (random-entry/text entry))
+        (else (entry/text entry 'template))))
 
+;;; Return a frame of pattern and template from entry
 (define (entry-texts entry)
   (let ((key (dom/textify (dom/find entry 'pattern)))
-        (val (cond ((has-random? entry) (random-entry/text entry))
-                   (else (entry/text entry 'template)))))
+        (val (dispatch-value entry)))
     `#[,key ,val]))
 
 ;;; Return a matching pattern+template pair from tree
