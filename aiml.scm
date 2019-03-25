@@ -9,13 +9,6 @@
 
 
 ;;;-------------------------------------------------------------------------------------------------
-;;; TODO
-;;;-------------------------------------------------------------------------------------------------
-
-;;; - [ ] enable star searching
-
-
-;;;-------------------------------------------------------------------------------------------------
 ;;; List, map, and friends
 ;;;-------------------------------------------------------------------------------------------------
 
@@ -77,12 +70,29 @@
   (and (string? object)
        (list->choice (xml-objects object))))
 
-;;; Return a single AIML object from choices
-(define (read-aiml/one object)
+;;; Return true if element exists under tag
+(define (element-exists? entry element)
+  (not (zero? (choice-size (dom/find entry element)))))
+
+;;; Return true if both a <template> and <pattern> elements exist in entry
+(define (contains-pair? entry)
+  (and (element-exists? entry 'template)
+       (element-exists? entry 'pattern)))
+
+;;; Return true if the structure of an AIML stream is valid
+(define (valid-aiml? object)
   (let ((val (read-aiml/choices object)))
-    (if (> (choice-size val) 1)
-        (error "Too many parses")
-        (pick-one val))))
+    (if (and (= (choice-size val) 1)
+             (>= (choice-size (get-categories val)) 1)
+             (every? contains-pair? (choice->list (get-categories val))))
+        val
+        #f)))
+
+;;; Return a single AIML object from choices
+;;; NOTE: At the moment, this is basically a very thin wrapper around valid-aiml?
+(define (read-aiml/one object)
+  (let ((val (valid-aiml? object)))
+    (if val val #f)))
 
 ;;; Return an AIML object from object
 (define read-aiml read-aiml/one)
@@ -186,7 +196,7 @@
 (define (random-entries/text entry)
   (merge-items (map (lambda (item)
                       (textsubst item "\n" ""))
-                    (map dom/textify (random-entries entry))) ";"))
+                    (map dom/textify (random-entries entry))) "|"))
 
 ;;; Return a simple text value from entry
 (define (entry/text entry type)
@@ -220,7 +230,10 @@
 ;;; Read an AIML file and return content as entry
 (define (read-aiml/file file)
   (let ((val (read-aiml (filestring file))))
-    (dom/find val 'aiml)))
+    ;; (dom/find val 'aiml)
+    (if val
+        (dom/find val 'aiml)
+        (error "Invalid file"))))
 
 ;;; Read categories from file
 (define (get-categories/file file)
@@ -238,10 +251,6 @@
   (let ((categories (get-categories/file file)))
     (for-choices (entry categories)
       (entry-texts entry))))
-
-;;; Return true if the structure of an AIML stream is valid
-;;; Must at least have <aiml>, <category>, <template>, <pattern>
-(define (valid-aiml? x) #f)
 
 ;;; If star is detected, then use the other element for referencing search for *
 
@@ -263,9 +272,5 @@
       #t
       #f))
 
-;;; NOTE: Should searching for items with star resolve the star reference?
-
 ;;; Glossary
 ;;; entry: a <category> element
-
-;;; TODO: get all possible <random> results
