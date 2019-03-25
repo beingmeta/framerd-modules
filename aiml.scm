@@ -9,6 +9,13 @@
 
 
 ;;;-------------------------------------------------------------------------------------------------
+;;; TODO
+;;;-------------------------------------------------------------------------------------------------
+
+;;; - [ ] enable star searching
+
+
+;;;-------------------------------------------------------------------------------------------------
 ;;; List, map, and friends
 ;;;-------------------------------------------------------------------------------------------------
 
@@ -170,6 +177,17 @@
   (textsubst (dom/textify (random-entry (random-entries entry)))
              "\n" ""))
 
+;;; Merge strings in xs with a delimiter
+(define (merge-items xs delimiter (acc ""))
+  (cond ((= (length xs) 1) (string-append acc (last xs)))
+        (else (merge-items (cdr xs) delimiter (string-append acc (first xs) delimiter)))))
+
+;;; Return all entries within a random entry
+(define (random-entries/text entry)
+  (merge-items (map (lambda (item)
+                      (textsubst item "\n" ""))
+                    (map dom/textify (random-entries entry))) ";"))
+
 ;;; Return a simple text value from entry
 (define (entry/text entry type)
   (dom/textify (dom/find entry type)))
@@ -177,6 +195,10 @@
 ;;; Conditionally dispatch values based on type and return the appropriate value
 (define (dispatch-value entry)
   (cond ((has-random? entry) (random-entry/text entry))
+        (else (entry/text entry 'template))))
+
+(define (dispatch-value entry)
+  (cond ((has-random? entry) (random-entries/text entry))
         (else (entry/text entry 'template))))
 
 ;;; Return a frame of pattern and template from entry
@@ -216,3 +238,34 @@
   (let ((categories (get-categories/file file)))
     (for-choices (entry categories)
       (entry-texts entry))))
+
+;;; Return true if the structure of an AIML stream is valid
+;;; Must at least have <aiml>, <category>, <template>, <pattern>
+(define (valid-aiml? x) #f)
+
+;;; If star is detected, then use the other element for referencing search for *
+
+;;; Write equivalence functions <star/> is equivalent to <star index="1"/>
+
+;;; Create frame structures for <star/> and <star index="1"/>
+(define base-star (append (xmlparse "<star/>") (xmlparse "<star index=\"1\"/>")))
+
+;;; Return the star element if it exists under entry
+(define (get-star entry)
+  (let ((val (dom/find (dom/find entry 'template)) 'star))
+    (if (zero? (choice-size val))
+        #f
+        val)))
+
+;;; Return true if a category has a star element under its pattern
+(define (has-star? entry)
+  (if (get-star entry)
+      #t
+      #f))
+
+;;; NOTE: Should searching for items with star resolve the star reference?
+
+;;; Glossary
+;;; entry: a <category> element
+
+;;; TODO: get all possible <random> results
