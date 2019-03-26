@@ -72,7 +72,7 @@
 
 ;;; Return true if element exists under tag
 (define (element-exists? entry element)
-  (not (zero? (choice-size (dom/find entry element)))))
+  (not (empty? (dom/find entry element))))
 
 ;;; Return true if both a <template> and <pattern> elements exist in entry
 (define (contains-pair? entry)
@@ -162,7 +162,7 @@
 ;;; Return the random element if it exists under entry
 (define (get-random entry)
   (let ((val (dom/find (dom/find entry 'template) 'random)))
-    (if (zero? (choice-size val))
+    (if (empty? val)
         #f
         val)))
 
@@ -261,8 +261,8 @@
 
 ;;; Return the star element if it exists under entry
 (define (get-star entry)
-  (let ((val (dom/find (dom/find entry 'template)) 'star))
-    (if (zero? (choice-size val))
+  (let ((val (dom/find (dom/find entry 'template) 'star)))
+    (if (empty? val)
         #f
         val)))
 
@@ -274,3 +274,33 @@
 
 ;;; Glossary
 ;;; entry: a <category> element
+
+;;; TODO: parse <star> for <srai>
+;;; TODO: have a parameter to resolve *
+;;; TODO: write a procedure to search for *
+
+;;; Return true if an element is a star
+(define (star? object)
+  (and (eqv? (dom/get object '%xmltag) 'star)
+       (eqv? (dom/get object '%qname) 'star)))
+
+;;; Parse XML and return first object
+(define (xmlparse/one object)
+  (let ((val (xmlparse object)))
+    (if (null? val)
+        #f
+        (first val))))
+
+;;; Return the index of a star
+(define (star-index object)
+  (let ((val (xmlparse/one object)))
+    (if (and val (star? val))
+        (let ((index (dom/get val 'index)))
+          (if (empty? index)
+              1
+              index))
+        #f)))
+
+;;; Expand a category entry to have the matching star expansions
+(define (expand-star entry value)
+  #f)
