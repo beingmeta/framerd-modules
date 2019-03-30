@@ -9,7 +9,7 @@
 
 (in-module 'slotindex)
 
-(use-module '{logger varconfig storage/flex})
+(use-module '{logger varconfig flexdb})
 
 (module-export! '{slotindex/make slotindex/setup 
 		  slotindex/init slotindex/add!
