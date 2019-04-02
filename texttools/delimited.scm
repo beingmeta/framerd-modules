@@ -1,6 +1,6 @@
 ;;;; -*- mode: scheme; coding: utf-8 -*-
 
-(in-module 'read-delimited)
+(in-module 'texttools/delimited)
 
 (module-export! '{read-delimited
                   read-delimited-file

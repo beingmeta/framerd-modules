@@ -1,4 +1,4 @@
-(in-module 'strings)
+(in-module 'compat/strings)
 
 (module-export! '{string-length
                   substring
@@ -14,26 +14,16 @@
                   unescape-string})
 
 ;;; Bind some function aliases
-(define string-length length)
-(define substring subseq)
-(define string-null? empty-string?)
-(define add1 1+)
-(define sub1 1-)
-
-;;; Return a list from STRING
-(define (string->list string)
-  (->list string))
+(define-if-needed string-length length)
+(define-if-needed substring subseq)
+(define-if-needed string-null? empty-string?)
+(define-if-needed add1 1+)
+(define-if-needed sub1 1-)
+(define-if-needed string->list ->list)
 
 ;;; Return element from XS indexed by COUNT
-(define (list-ref xs count)
-  (cond ((null? xs) #f)
-        ((zero? count) (car xs))
-        (else (list-ref (cdr xs) (sub1 count)))))
-
-;;; Return element from STRING indexd by REF
-(define (string-ref string ref)
-  (let ((xs (string->list string)))
-    (list-ref xs ref)))
+(define-if-needed list-ref elt)
+(define-if-needed string-ref elt)
 
 ;;; Return a list by splitting STRING by CHAR
 (define (split string char len a b)
