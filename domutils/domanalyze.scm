@@ -20,7 +20,7 @@
 	 table)))
 
 (defambda (dom/analyze doc (options #[]) (nodes) (index))
-  (default! index (choice (get doc 'index) (getopt options 'index {})))
+  (default! index (choice (get doc '__domindex) (getopt options 'index {})))
   (let* ((words (choice (get doc 'indexroots)
 			(getopt options 'indexwords {})))
 	 (stops (choice (get doc 'stopwords) (getopt options 'stopwords {})))

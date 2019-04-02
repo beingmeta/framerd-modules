@@ -179,7 +179,7 @@
        (subseq s (1+ (position #\: s)))))
 
 (define (dom/set-tag! node name (index))
-  (default! index (try (get (get node '%doc) 'index) #f))
+  (default! index (try (get (get node '%doc) '__domindex) #f))
   (when index
     (drop! index (cons '{%xmltag %qname} (get node '{%xmltag %qname}))
 	   node)
@@ -728,8 +728,8 @@
       (if (null? args) (dom/select under sel)
 	  (if (and (pair? args) (identical? (car args) #f))
 	      (dom/select under sel #f)
-	      (if (test under 'index)
-		  (apply find-frames (get under 'index) (cons sel args))
+	      (if (test under '__domindex)
+		  (apply find-frames (get under '__domindex) (cons sel args))
 		  (begin (logwarn "No index for " under)
 		    (fail)))))))
 
@@ -743,10 +743,10 @@
 	 (for-choices under (dom/select under sel)))
 	((pair? under)
 	 (for-choices (elt (elts under)) (dom/select elt sel findall)))
-	((exists? (get under 'index))
-	 (for-choices (index (get under 'index)) (dom-index-find index sel)))
-	((exists? (get (get under '%doc) 'index))
-	 (let ((index (try (get under 'index) (get (get under '%doc) 'index))))
+	((exists? (get under '__domindex))
+	 (for-choices (index (get under '__domindex)) (dom-index-find index sel)))
+	((exists? (get (get under '%doc) '__domindex))
+	 (let ((index (try (get under '__domindex) (get (get under '%doc) '__domindex))))
 	   (for-choices index (dom-index-find index sel under))))
 	((and (table? under) (dom/match under sel))
 	 (choice under (tryif findall

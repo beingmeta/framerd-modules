@@ -432,7 +432,7 @@
 
 (define (css/analyze dom (pat local-css-path) (source))
   (default! source (get-sourceroot dom))
-  (let* ((index (get dom 'index))
+  (let* ((index (get dom '__domindex))
 	 (rules (get-local-css dom pat source))
 	 (allclasses (rule->classes rules))
 	 (base `#[allclasses ,allclasses

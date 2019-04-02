@@ -614,7 +614,7 @@
 ;;;; Dropping image dimensions
 
 (define (dom/cleanup/drop-imagesizes! dom)
-  (let* ((index (get dom 'index))
+  (let* ((index (get dom '__domindex))
 	 (images (pick (find-frames index '%xmltag 'img) '{width height})))
     (when (exists? images)
       (logdebug PUBTOOL/READEPUB "Dropping explicit dimensions from "
