@@ -91,15 +91,16 @@
   (first (get-preferred-languages)))
 
 (define (get-languages (var 'languages))
-  (try (req/get var) (elts (get-preferred-languages))))
+  (try (req/val var) (elts (get-preferred-languages))))
 (define getlanguages get-languages)
-(define (get-language (var 'language))
-  (if (req/test (intern (stringout "X_" var)))
-      (let ((lang (req/get (intern (stringout "X_" var)))))
-	(message "Switching language to " lang)
-	(req/set! var lang)
-	lang)
-      (try (req/get var)
+(define (get-language (var 'language) (xlang))
+  (default! xlang (req/val (intern (stringout "X_" var))))
+  (if (exists? xlang)
+      (begin
+	(logwarn |LangaugeChange| "Switching language to " xlang)
+	(req/set! var xlang)
+	xlang)
+      (try (req/val var)
 	   (first (get-preferred-languages)))))
 (define getlanguage get-language)
 
@@ -157,7 +158,7 @@
 	 name (onchange #f) (action #f) (selectbox #t) (multiple #t))
   (let* ((var (if (string? name) (string->symbol name) name))
 	 (preferred (get-preferred-languages))
-	 (languages (try (req/get var) (car preferred))))
+	 (languages (try (req/val var) (car preferred))))
     (if (and (fail? (req/get var)) (= (length preferred) 1) (not selectbox))
 	(xmlout)
       (span (class (if (> (choice-size languages) 3) "langbox" "langbox_rigid"))
@@ -189,7 +190,7 @@
 			(if (sequence? languagesarg) languagesarg
 			    (sorted languagesarg get-language-name))
 			(get-preferred-languages)))
-	 (language (try (req/get var) (first languages))))
+	 (language (try (req/val var) (first languages))))
     ;; (xmlout "larg=" languagesarg "; languages=" languages "; language=" language)
     (xmlblock SELECT ((name "LANGUAGE")
 		      (class "langbox")
@@ -222,7 +223,7 @@
 			(if (sequence? languagesarg) languagesarg
 			    (sorted languagesarg))
 		      (get-preferred-languages)))
-	 (language (try (req/get var) (car languages))))
+	 (language (try (req/val var) (car languages))))
     (xmlblock SELECT ((name id) (size 5)
 		      (class "langbox")
 		      (onchange (if onchange onchange))
@@ -718,9 +719,3 @@
       (prefetch-keys! (for-choices (language (get-languages))
 			(cons language (get concepts language))))
       (xmlout))))
-
-
-
-
-
-
