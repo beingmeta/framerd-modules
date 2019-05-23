@@ -100,9 +100,12 @@
     (add! kno/slotnames name (get langnames name)))
   (set! knodule-slots-initialized #t))
 
+(define-init tryget (lambda (tbl key) (try (get tbl key) tbl)))
+
 (define kno/slotid
   (macro expr
-    `(if (overlaps? ,(get-arg expr 1) kno/slotids) ,(get-arg expr 1)
+    `(if (overlaps? ,(get-arg expr 1) kno/slotids) 
+	 ,(get-arg expr 1)
 	 (tryget kno/slotnames ,(get-arg expr 1)))))
 
 ;;; The KNODULE structure itself
